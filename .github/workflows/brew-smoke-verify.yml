@@ -1,86 +1,75 @@
 # TEMPORARY — verification harness for the brew-smoke (ubuntu-latest) fix.
 #
-# Reproduces the release.yml brew-smoke ubuntu step in isolation so the env
-# change can be A/B'd on a real runner without cutting a release. Delete once
+# Reproduces the release.yml brew-smoke ubuntu step in isolation so candidate
+# fixes can be A/B'd on a real runner without cutting a release. Delete once
 # the fix is folded into release.yml. (Same pattern as the harness used for
 # the "Broken pipe" fix in b62bb42d, which was likewise removed on landing.)
 #
-#   control   — today's release.yml env, incl. HOMEBREW_NO_INSTALL_FROM_API.
-#               EXPECTED RED: forces a fresh homebrew/core clone at master
-#               HEAD against the image's frozen brew library.
-#   candidate — same, minus HOMEBREW_NO_INSTALL_FROM_API. EXPECTED GREEN, and
-#               must never print "Tapping homebrew/core".
+# Round 1 (run 30743919399) established:
+#   control  (today's env, incl. HOMEBREW_NO_INSTALL_FROM_API) -> RED.
+#            Clones homebrew/core at master HEAD (1.4GB, 5.5min) against the
+#            image's frozen brew 6.0.11 -> mass InstallSteps::DSL import
+#            failures -> exit 1 on an unrelated core formula.
+#   api      (same, minus NO_INSTALL_FROM_API) -> 4/5 green in ~30s, core
+#            never tapped; 1/5 died "Broken pipe" during the JSON API fetch.
+#
+# Round 2 compares the two ways of beating BOTH failure modes:
+#   api_retry  — JSON API on, bounded retry around the network phase.
+#   api_update — NO_INSTALL_FROM_API kept, but `brew update --force` first so
+#                the library matches the freshly cloned core (no skew).
 #
 # Note: Homebrew's HOMEBREW_NO_* switches are presence-checked, not value-
-# checked — setting one to "0" still counts as set. So the candidate must not
-# define the variable at all, which is why this is two jobs rather than one
-# job with a computed env value.
+# checked — setting one to "0" still counts as set. So a job that wants the
+# API on must not define the variable at all.
 name: brew-smoke-verify
 
 on:
   workflow_dispatch:
-    inputs:
-      reps:
-        description: 'How many candidate repetitions (flake check)'
-        required: false
-        type: string
-        default: '5'
 
 permissions:
   contents: read
 
 jobs:
-  control:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    # Expected to fail; do not let it mask the candidate's verdict.
-    continue-on-error: true
-    env:
-      HOMEBREW_NO_AUTO_UPDATE: "1"
-      HOMEBREW_NO_ANALYTICS: "1"
-      HOMEBREW_NO_ENV_HINTS: "1"
-      HOMEBREW_NO_INSTALL_FROM_API: "1"
-    steps:
-      - name: Install via Homebrew tap (control)
-        run: |
-          set -euxo pipefail
-          if [ -x /home/linuxbrew/.linuxbrew/bin/brew ]; then
-            eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
-          fi
-          brew --version
-          brew tap kfet/ai
-          brew install kfet/ai/fir
-
-  candidate:
+  # Candidate A: JSON API enabled, bounded retry around tap+install.
+  api_retry:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        rep: [1, 2, 3, 4, 5]
+        rep: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     env:
       HOMEBREW_NO_AUTO_UPDATE: "1"
       HOMEBREW_NO_ANALYTICS: "1"
       HOMEBREW_NO_ENV_HINTS: "1"
+      HOMEBREW_CURL_RETRIES: "5"
     steps:
-      - name: Install via Homebrew tap (candidate)
+      - name: Install via Homebrew tap (api_retry)
         run: |
           set -euxo pipefail
           if [ -x /home/linuxbrew/.linuxbrew/bin/brew ]; then
             eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
           fi
           brew --version
-          brew tap kfet/ai
-          brew install kfet/ai/fir
+
+          # Linuxbrew intermittently dies with "Broken pipe" during Homebrew's
+          # JSON API fetch. That is a transient network/pipe fault, not a
+          # formula fault: a genuinely broken formula fails all attempts.
+          ok=0
+          for attempt in 1 2 3; do
+            echo "--- attempt $attempt"
+            if brew tap | grep -qx 'kfet/ai' || brew tap kfet/ai; then
+              if brew install kfet/ai/fir; then ok=1; break; fi
+            fi
+            echo "attempt $attempt failed; retrying"
+            sleep 10
+          done
+          [ "$ok" = "1" ] || { echo "::error::brew install failed after 3 attempts"; exit 1; }
 
       - name: Assert homebrew/core was never tapped
         run: |
           set -euxo pipefail
-          if [ -x /home/linuxbrew/.linuxbrew/bin/brew ]; then
-            eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
-          fi
-          # The whole point of the fix: with the JSON API enabled, a zero-dep
-          # tap formula must never drag in the 1.4GB homebrew/core git tap.
+          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
           core="$(brew --repository)/Library/Taps/homebrew/homebrew-core"
           if [ -d "$core" ]; then
             echo "::error::homebrew/core was tapped — the fix did not take"
@@ -91,9 +80,44 @@ jobs:
       - name: Exercise the installed binary
         run: |
           set -euxo pipefail
+          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+          which fir
+          fir --version
+          fir completion bash > /dev/null
+          fir completion zsh  > /dev/null
+          brew test kfet/ai/fir
+
+  # Candidate B: keep NO_INSTALL_FROM_API, cure the skew by updating brew
+  # itself so the library matches the core checkout it clones.
+  api_update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        rep: [1, 2, 3]
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_ANALYTICS: "1"
+      HOMEBREW_NO_ENV_HINTS: "1"
+      HOMEBREW_NO_INSTALL_FROM_API: "1"
+    steps:
+      - name: Install via Homebrew tap (api_update)
+        run: |
+          set -euxo pipefail
           if [ -x /home/linuxbrew/.linuxbrew/bin/brew ]; then
             eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
           fi
+          brew --version
+          brew update --force
+          brew --version
+          brew tap kfet/ai
+          brew install kfet/ai/fir
+
+      - name: Exercise the installed binary
+        run: |
+          set -euxo pipefail
+          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
           which fir
           fir --version
           fir completion bash > /dev/null
