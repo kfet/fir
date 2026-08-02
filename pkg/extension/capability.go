@@ -251,14 +251,25 @@ type ProviderModelSpec struct {
 //     registered in ai.DefaultRegistry (every built-in provider
 //     self-registers its Api at init).
 type ProviderSpec struct {
-	ID                 string              `json:"id"`
-	Api                string              `json:"api,omitempty"`
-	DisplayName        string              `json:"display_name,omitempty"`
-	ShortName          string              `json:"short_name,omitempty"`
-	Priority           int                 `json:"priority,omitempty"`
-	DefaultModelID     string              `json:"default_model_id,omitempty"`
-	KeyLink            string              `json:"key_link,omitempty"`
-	EnvKeys            EnvKeysSpec         `json:"env_keys,omitempty"`
+	ID             string      `json:"id"`
+	Api            string      `json:"api,omitempty"`
+	DisplayName    string      `json:"display_name,omitempty"`
+	ShortName      string      `json:"short_name,omitempty"`
+	Priority       int         `json:"priority,omitempty"`
+	DefaultModelID string      `json:"default_model_id,omitempty"`
+	KeyLink        string      `json:"key_link,omitempty"`
+	EnvKeys        EnvKeysSpec `json:"env_keys,omitempty"`
+	// ApiKey is a LITERAL API key the extension ships for this provider —
+	// the value itself, not the name of an environment variable (that is
+	// EnvKeys.Primary). It exists for providers that are keyless in
+	// practice but not in protocol (a local llama.cpp server accepts any
+	// token; the pi-mono ecosystem conventionally sends "no-key") and for
+	// extensions that mint a key from their own configuration.
+	//
+	// It is resolved LAST, after a stored credential, the environment
+	// variable and any models.json stanza, so a user can always override
+	// what the extension ships. See models.RegisterProviderAPIKey.
+	ApiKey             string              `json:"api_key,omitempty"`
 	OAuthProviderID    string              `json:"oauth_provider_id,omitempty"`
 	ClaimsModelIDGlobs []string            `json:"claims_model_id_globs,omitempty"`
 	RefuseFuzzyMatch   bool                `json:"refuse_fuzzy_match,omitempty"`

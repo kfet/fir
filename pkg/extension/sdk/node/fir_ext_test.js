@@ -36,6 +36,16 @@ piApi.registerProvider("llama-cpp", {
   ],
 });
 
+// 1b. A pi-mono provider passing a LITERAL apiKey (pi's own semantic — this
+// is what pi-llama does with its "no-key" default for a local server).
+piApi.registerProvider("llama-local", {
+  name: "llama.cpp (local)",
+  api: "openai-completions",
+  apiKey: "no-key",
+  baseUrl: "http://127.0.0.1:8080/v1",
+  models: [{ id: "local-model" }],
+});
+
 // 2. A live-list provider exercised via provider/listModels.
 fir.registerProvider({ id: "live-prov", api: "openai-completions", supportsLiveList: true });
 fir.providerListModels("live-prov", (params) => {
@@ -96,7 +106,10 @@ async function main() {
   assert.ok(llama, "llama-cpp registered via compat shim");
   assert.strictEqual(llama.api, "openai-completions");
   assert.strictEqual(llama.display_name, "llama.cpp");
+  // An apiKey shaped like an env-var name is registered BOTH ways: the env
+  // var wins at resolution time if set, otherwise the string is the key.
   assert.deepStrictEqual(llama.env_keys, { primary: "LLAMA_API_KEY" });
+  assert.strictEqual(llama.api_key, "LLAMA_API_KEY");
   assert.strictEqual(llama.models.length, 1);
   const m = llama.models[0];
   assert.strictEqual(m.id, "qwen3-coder");
@@ -106,6 +119,12 @@ async function main() {
   assert.deepStrictEqual(m.input, ["text", "image"]);
   assert.ok(!("reasoning" in m), "falsy reasoning omitted from wire");
   assert.ok(!("cost_input" in m), "zero cost omitted from wire");
+
+  // A literal apiKey is passed as api_key only — never as an env-var name.
+  const local = provs.find((p) => p.id === "llama-local");
+  assert.ok(local, "llama-local registered via compat shim");
+  assert.strictEqual(local.api_key, "no-key");
+  assert.ok(!("env_keys" in local), "literal apiKey must not become an env-var name");
 
   const live = provs.find((p) => p.id === "live-prov");
   assert.strictEqual(live.supports_live_list, true);
@@ -138,6 +157,47 @@ async function main() {
   send({ jsonrpc: "2.0", id: 5, method: "provider/stream/start", params: { provider_id: "stream-prov" } });
   await wait(20);
   assert.ok(byId(5).error, "missing stream_id yields an error");
+
+  // auth/resolve_endpoint: a provider with no resolver answers null rather
+  // than -32601, so fir doesn't log the miss as a failed hook call.
+  send({
+    jsonrpc: "2.0",
+    id: 6,
+    method: "auth/resolve_endpoint",
+    params: { provider_id: "live-prov", model_id: "model-a" },
+  });
+  await wait(20);
+  assert.ok(!byId(6).error, "absent resolve_endpoint handler must not error");
+  assert.strictEqual(byId(6).result, null, "absent handler → null (no correction)");
+
+  // pi_compat installs a resolver for any provider with a baseUrl.
+  send({
+    jsonrpc: "2.0",
+    id: 7,
+    method: "auth/resolve_endpoint",
+    params: { provider_id: "llama-local", model_id: "local-model" },
+  });
+  await wait(20);
+  assert.deepStrictEqual(
+    byId(7).result,
+    { base_url: "http://127.0.0.1:8080/v1" },
+    "pi provider answers resolve_endpoint from its baseUrl"
+  );
+
+  // An endpoint fir already resolved is left alone.
+  send({
+    jsonrpc: "2.0",
+    id: 8,
+    method: "auth/resolve_endpoint",
+    params: { provider_id: "llama-local", model_id: "local-model", base_url: "http://other/v1" },
+  });
+  await wait(20);
+  assert.strictEqual(byId(8).result, null, "already-resolved endpoint is not overridden");
+
+  // An unknown auth method is still a hard error.
+  send({ jsonrpc: "2.0", id: 9, method: "auth/nonsense", params: { provider_id: "live-prov" } });
+  await wait(20);
+  assert.ok(byId(9).error, "unknown auth method still errors");
 
   // post-init registerProvider is ignored and warns on stderr
   let warned = "";

@@ -286,6 +286,37 @@ done
 
 For anything non-trivial, using the Python SDK (or writing your own SDK in your language) is strongly recommended over manual protocol handling.
 
+### Provider API keys
+
+An extension that registers a hosted provider can supply credentials two
+different ways, and the difference matters:
+
+- `envKeys.primary` — the **name** of an environment variable fir reads in
+  its own process (`"OPENAI_API_KEY"`).
+- `apiKey` — the **key itself**, shipped by the extension. Use it for
+  providers that are keyless in practice but not in protocol: a local
+  llama.cpp server accepts any bearer token, and the pi-mono ecosystem
+  conventionally sends `"no-key"`.
+
+Both may be set. fir resolves a provider's key in this order, first hit wins:
+runtime `--api-key` → `auth.json` credential → environment variable →
+`models.json` custom-provider `apiKey` → the extension's literal `apiKey`.
+
+The literal is therefore always overridable and never masks user
+configuration. It is held in memory only — fir does not write it to
+`auth.json` or any other file.
+
+```javascript
+// Node SDK
+fir_ext.registerProvider({
+  id: "llama-cpp",
+  api: "openai-completions",
+  apiKey: "no-key",                     // literal
+  envKeys: { primary: "LLAMA_API_KEY" },// name of an env var; wins if set
+  models: [{ id: "qwen3-coder", baseUrl: "http://127.0.0.1:8080/v1" }],
+});
+```
+
 ## Security
 
 ### Project-Local Trust

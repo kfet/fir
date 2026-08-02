@@ -30,6 +30,25 @@ _Updated 2025-03-24 after initial implementation and end-to-end testing_
   `main → run.sh` symlink left dangling by an SDK-cache change is **self-healed** to
   the current SDK's `run.sh` at discovery time, so the extension keeps loading across
   fir upgrades.
+- **Literal `apiKey` on a pi provider** — pi's `config.apiKey` is a literal key
+  value, and it now authenticates. `pi_compat` passes it to fir as the provider's
+  `api_key` (a new `ProviderSpec` field), which fir resolves **last** — after a
+  stored credential, the environment variable and any `models.json` stanza — so a
+  keyless-in-practice server (llama.cpp's conventional `"no-key"`) works out of
+  the box while remaining overridable. fir previously read `apiKey` as the NAME
+  of an environment variable; that reading is preserved by *also* setting
+  `env_keys.primary` when the value matches `^[A-Z][A-Z0-9_]+$`. Precedence then
+  decides without guessing: an env var of that name wins if set, otherwise the
+  string itself is the key. No author is broken either way.
+- **`auth/resolve_endpoint` in the Node SDK** — fir asks every extension to
+  confirm or correct a selected model's endpoint. The Node SDK had no handler at
+  all, so every pi-registered provider produced
+  `WARN hook call failed … auth/resolve_endpoint: Unknown auth method`. There is
+  now a `fir_ext.authResolveEndpoint(providerId, handler)` registration (mirroring
+  the Python SDK's `auth_resolve_endpoint`); an extension with no handler answers
+  `null` ("no correction") instead of erroring, and `pi_compat` installs a
+  resolver reporting the provider's configured `baseUrl` for any provider that
+  has one.
 - **SDK extraction** — `run.sh`, `pi_compat.js`, `fir_ext.js` all extracted to `~/.cache/fir/sdks/<hash>/node/`
 - **Discovery** — extensionless `main`/binary entries and frontmatter-bearing
   `.py`/`.sh` scripts both flow through `ScanPackageResources` →
@@ -108,10 +127,11 @@ _Updated 2025-03-24 after initial implementation and end-to-end testing_
 9. **`pi.registerProvider()` / `pi.unregisterProvider()`** — ✅ **Done.**
    `registerProvider` is mapped to fir's hosted-provider handshake (see
    `docs/pi-mono-compat-layer.md` § Hosted provider registration). Works for the
-   `api`-passthrough case (e.g. pi-llama via `openai-completions`). Not covered:
-   `oauth`, `streamSimple`, `headers`, literal `apiKey`, baseUrl-only overrides,
-   and live `unregisterProvider()` — all warn + degrade since providers are
-   fixed at the init handshake.
+   `api`-passthrough case (e.g. pi-llama via `openai-completions`), including a
+   **literal `apiKey`** (see below). Not covered: `oauth`, `streamSimple`,
+   `headers`, baseUrl-only overrides (a `baseUrl` *with* models is applied per
+   model), and live `unregisterProvider()` — all warn + degrade since providers
+   are fixed at the init handshake.
 
 10. **`pi.registerShortcut()` / `pi.registerFlag()`**
     Keyboard shortcuts and CLI flags. Currently no-ops. TUI-only features.

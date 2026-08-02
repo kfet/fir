@@ -1394,6 +1394,7 @@ Providers are declared in the `init` response under the optional
         "fallbacks": [],
         "authenticated": false
       },
+      "api_key": "",
       "oauth_provider_id": "",
       "claims_model_id_globs": [],
       "refuse_fuzzy_match": false,
@@ -1423,6 +1424,30 @@ Provider IDs must match `[a-z][a-z0-9-]*` and may not collide with any
 built-in provider unless the extension is shipped under fir's `builtin`
 scope. Validation happens during the init handshake — invalid IDs
 abort startup.
+
+#### `api_key` — a literal key vs. `env_keys.primary` — a name
+
+`env_keys.primary` is the NAME of an environment variable fir reads in
+its own process. `api_key` is the key ITSELF, shipped by the extension.
+The two are independent and a spec may set both.
+
+`api_key` exists for providers that are keyless in practice but not in
+protocol — a local llama.cpp server accepts any bearer token, and the
+pi-mono ecosystem conventionally sends `"no-key"` — and for extensions
+that mint a key from their own configuration.
+
+fir resolves a provider's key in this order, first hit wins:
+
+1. Runtime override (`--api-key`)
+2. Stored credential in `auth.json` (API key, OAuth, AWS IAM)
+3. Environment variable named by `env_keys.primary` / `fallbacks`
+4. A `models.json` custom-provider `apiKey`
+5. `api_key` from the init handshake
+
+The extension's literal is therefore always overridable — by an env
+var, by `models.json`, or by `fir auth login` — and never masks user
+configuration. It is held in fir's memory only; it is not written to
+`auth.json` or any other file.
 
 ### Streaming dispatch modes
 

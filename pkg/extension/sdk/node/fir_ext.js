@@ -66,6 +66,9 @@ const _authApiKeyHandlers = new Map();
 const _authListModelsHandlers = new Map();
 /** @type {Map<string, Function>} */
 const _authModifyModelsHandlers = new Map();
+/** @type {Map<string, Function>} */
+const _authResolveEndpointHandlers = new Map();
+
 
 // Hosted-provider registries — populated by registerProvider() and the
 // provider* handler registrations, reported at the init handshake and
@@ -459,6 +462,27 @@ function authModifyModels(providerId, handler) {
   _authModifyModelsHandlers.set(providerId, handler);
 }
 
+/**
+ * Register an endpoint resolver for a provider.
+ *
+ * Called once when one of the provider's models is selected for inference,
+ * with `{provider_id, model_id, base_url, api, api_key}`. Return a falsy
+ * value to leave the endpoint alone, or `{baseUrl?, api?, callable?}` to
+ * correct it — `callable: false` makes fir refuse the selection with a
+ * clean error instead of failing mid-stream. Any probing or memoisation is
+ * the extension's business.
+ *
+ * The hook is optional: fir asks every extension, and one with no handler
+ * answers `null` (no correction) rather than erroring.
+ *
+ * @param {string} providerId
+ * @param {Function} handler
+ */
+function authResolveEndpoint(providerId, handler) {
+  _authResolveEndpointHandlers.set(providerId, handler);
+}
+
+
 // ---------------------------------------------------------------------------
 // Hosted-provider registration
 // ---------------------------------------------------------------------------
@@ -485,6 +509,11 @@ function _providerToWire(p) {
   if (envKeys.fallbacks && envKeys.fallbacks.length) ek.fallbacks = [...envKeys.fallbacks];
   if (envKeys.authenticated) ek.authenticated = true;
   if (Object.keys(ek).length) out.env_keys = ek;
+
+  // Literal API key (the value, not an env-var name). Resolved by fir only
+  // after auth.json, the environment variable and models.json all come up
+  // empty, so user configuration always wins over what an extension ships.
+  if (p.apiKey) out.api_key = p.apiKey;
 
   if (p.oauthProviderId) out.oauth_provider_id = p.oauthProviderId;
   if (p.claimsModelIdGlobs && p.claimsModelIdGlobs.length) {
@@ -846,6 +875,27 @@ async function handleAuth(method, id, params, authCtx, out) {
       let result = await handler(params, authCtx);
       if (Array.isArray(result)) result = { models: result };
       writeMessage(makeResponse(id, result), out);
+    } else if (method === "auth/resolve_endpoint") {
+      const handler = _authResolveEndpointHandlers.get(providerId);
+      if (!handler) {
+        // Optional hook — an extension with no resolver answers "no
+        // correction" instead of erroring. fir asks every extension, so
+        // a -32601 here would be logged as a spurious hook failure.
+        writeMessage(makeResponse(id, null), out);
+        return;
+      }
+      let result = await handler(params, authCtx);
+      if (result && typeof result === "object") {
+        const c = {};
+        const baseUrl = result.baseUrl || result.base_url;
+        if (baseUrl) c.base_url = baseUrl;
+        if (result.api) c.api = result.api;
+        if (typeof result.callable === "boolean") c.callable = result.callable;
+        result = Object.keys(c).length ? c : null;
+      } else {
+        result = null;
+      }
+      writeMessage(makeResponse(id, result), out);
     } else {
       writeMessage(makeError(id, -32601, `Unknown auth method: ${method}`), out);
     }
@@ -984,6 +1034,7 @@ module.exports = {
   authApiKey,
   authListModels,
   authModifyModels,
+  authResolveEndpoint,
   registerProvider,
   providerStream,
   providerListModels,

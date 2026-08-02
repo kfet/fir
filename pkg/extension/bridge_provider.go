@@ -192,6 +192,12 @@ func (b *Bridge) RegisterProviders() {
 			models.RegisterModelLister(ps.ID, &extModelLister{bridge: b, providerID: ps.ID})
 		}
 
+		// Optional literal API key shipped with the provider. Resolved
+		// only after auth.json / env / models.json have all come up empty.
+		if ps.ApiKey != "" {
+			models.RegisterProviderAPIKey(ps.ID, ps.ApiKey)
+		}
+
 		b.providers = append(b.providers, &extProviderRegistration{
 			spec: ps, api: api, synthetic: synthetic,
 		})
@@ -216,6 +222,9 @@ func (b *Bridge) UnregisterProviders() {
 		ai.UnregisterProviderModels(ai.Provider(r.spec.ID))
 		if r.spec.SupportsLiveList {
 			models.UnregisterModelLister(r.spec.ID)
+		}
+		if r.spec.ApiKey != "" {
+			models.UnregisterProviderAPIKey(r.spec.ID)
 		}
 	}
 	b.providers = nil

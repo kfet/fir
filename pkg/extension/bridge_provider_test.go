@@ -173,3 +173,50 @@ func TestRegisterProvidersApiPassthrough(t *testing.T) {
 		t.Error("model should be cleared after Unregister")
 	}
 }
+
+// TestRegisterProvidersLiteralApiKey covers ProviderSpec.ApiKey: a literal
+// key an extension ships for its hosted provider (the pi-mono `apiKey`
+// semantic) is published to the models registry at handshake and withdrawn
+// on unregister, so a keyless-in-practice provider (a local llama.cpp
+// server taking "no-key") authenticates with no env var and no models.json.
+func TestRegisterProvidersLiteralApiKey(t *testing.T) {
+	caps := &InitResult{
+		Name: "ext-litkey",
+		Providers: []ProviderSpec{{
+			ID:     "test-literal",
+			ApiKey: "no-key",
+			Models: []ProviderModelSpec{{ID: "lm-1"}},
+		}, {
+			ID:     "test-nokey",
+			Models: []ProviderModelSpec{{ID: "nm-1"}},
+		}},
+	}
+	bridge := NewBridge(nil, caps)
+
+	if got := models.GetProviderAPIKey("test-literal"); got != "" {
+		t.Fatalf("key present before registration: %q", got)
+	}
+
+	bridge.RegisterProviders()
+	t.Cleanup(bridge.UnregisterProviders)
+
+	if got := models.GetProviderAPIKey("test-literal"); got != "no-key" {
+		t.Errorf("GetProviderAPIKey = %q, want %q", got, "no-key")
+	}
+	// A spec without ApiKey must not publish one.
+	if got := models.GetProviderAPIKey("test-nokey"); got != "" {
+		t.Errorf("provider without ApiKey published %q", got)
+	}
+	// A literal key is NOT an env-key declaration.
+	if rec := ai.GetProviderRecord("test-literal"); rec == nil {
+		t.Fatal("provider record missing")
+	} else if rec.EnvKeys.Primary != "" {
+		t.Errorf("EnvKeys.Primary = %q, want empty", rec.EnvKeys.Primary)
+	}
+
+	bridge.UnregisterProviders()
+
+	if got := models.GetProviderAPIKey("test-literal"); got != "" {
+		t.Errorf("key survived Unregister: %q", got)
+	}
+}

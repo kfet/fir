@@ -498,15 +498,21 @@ func NewModelRegistry(authStorage *auth.AuthStorage, modelsJsonPath string) *Mod
 		liveModels:            make(map[string]*liveModelState),
 	}
 
-	// Set up fallback resolver for custom provider API keys
+	// Set up fallback resolver for custom provider API keys. models.json
+	// wins over an extension-contributed literal key: explicit user
+	// configuration must always be able to override what an extension ships.
 	authStorage.SetFallbackResolver(func(provider string) string {
 		r.mu.RLock()
-		defer r.mu.RUnlock()
 		keyConfig, ok := r.customProviderApiKeys[provider]
-		if !ok {
-			return ""
+		r.mu.RUnlock()
+		if ok {
+			if key := configpkg.ResolveConfigValue(keyConfig); key != "" {
+				return key
+			}
 		}
-		return configpkg.ResolveConfigValue(keyConfig)
+		// Literal key registered by an extension for a hosted provider it
+		// contributed at the init handshake (ProviderSpec.api_key).
+		return GetProviderAPIKey(provider)
 	})
 
 	// Load models

@@ -376,13 +376,19 @@ function createExtensionAPI() {
  * factory before `fir.run()`, factory-time registration — including after async
  * model discovery, as pi-llama does — is captured.
  *
- * `apiKey` is passed as fir's `env_keys.primary`, i.e. the NAME of an
- * environment variable fir reads in its own process. Unlike pi-mono it is not
- * a literal-key fallback: fir's provider wire cannot carry a literal secret,
- * and the extension runs in a separate process so it cannot inject one into
- * fir's environment. Authors should pass an env-var name (the recommended
- * pi-mono pattern); a literal key won't authenticate. Local unauthenticated
- * servers (e.g. llama.cpp) need no key.
+ * `apiKey` follows pi-mono semantics: the value IS the credential. It is
+ * passed to fir as the provider's literal `apiKey`, which fir resolves only
+ * after a stored credential, the environment and models.json have all come
+ * up empty — so user configuration always wins over what the extension ships.
+ * This is what makes a keyless-but-not-key-free local server (llama.cpp and
+ * friends, which conventionally take "no-key") authenticate out of the box.
+ *
+ * Because fir's older behaviour read `apiKey` as the NAME of an environment
+ * variable, that reading is preserved too: when the value looks like an
+ * env-var name (`^[A-Z][A-Z0-9_]+$`) it is ALSO passed as `envKeys.primary`.
+ * Precedence then resolves it without guessing — if an environment variable
+ * of that name is set, fir uses its value; otherwise the string itself is
+ * used as the key. No author is broken either way.
  *
  * Not supported (warned, then dropped): `oauth` (use fir's auth-provider API),
  * `streamSimple` (custom JS streaming isn't bridged; use `api` passthrough),
@@ -425,13 +431,30 @@ function mapAndRegisterProvider(name, config) {
     return;
   }
 
+  // pi's `apiKey` is a literal key. Older fir releases read it as an
+  // env-var NAME, so when it looks like one we register both readings and
+  // let fir's own precedence (env var before extension literal) decide.
+  const apiKey = config.apiKey || "";
+  const looksLikeEnvName = /^[A-Z][A-Z0-9_]+$/.test(apiKey);
+
   fir.registerProvider({
     id: name,
     api: config.api,
     displayName: config.name,
-    envKeys: config.apiKey ? { primary: config.apiKey } : undefined,
+    apiKey: apiKey || undefined,
+    envKeys: looksLikeEnvName ? { primary: apiKey } : undefined,
     models,
   });
+
+  // A provider with a baseUrl can answer fir's endpoint-resolution hook
+  // instead of leaving it unanswered: report the configured URL as-is.
+  const baseUrl = config.baseUrl || "";
+  if (baseUrl) {
+    fir.authResolveEndpoint(name, (params) => {
+      if (params && params.base_url) return null; // already resolved
+      return { baseUrl };
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------
