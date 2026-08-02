@@ -333,6 +333,48 @@ class TestSpinnerDetectsUserRename(unittest.TestCase):
                 s.stop()
                 self.assertEqual(s._original_name, "user-renamed")
 
+    def test_own_concurrent_rename_is_not_a_user_rename(self):
+        """A rename issued by another thread of ours must not clobber the original.
+
+        The ticker snapshots ``_last_set``, then reads the window name. If one of
+        our own renames (``start()``'s initial paint, ``set_session_name``) lands
+        in that gap, the read returns a name we set — but one that no longer
+        matches the stale snapshot. Treating that as a user rename bakes the
+        session/spinner suffix into ``_original_name``, and shutdown then
+        "restores" the window to a name the user never chose.
+        """
+        s = tmuxspinner.Spinner()
+        s._pane_id = "%1"
+        s._original_name = "zsh"
+        s._session_name = "mysess"
+
+        tick_after_read = threading.Event()
+        raced = threading.Event()
+
+        def fake_rename(_target, _name):
+            if raced.is_set():
+                tick_after_read.set()
+
+        def fake_read(_target):
+            # Simulate one of our own repaints landing between the ticker's
+            # snapshot of _last_set and this read: the window now shows a name
+            # we set, which differs from the snapshot.
+            if not raced.is_set():
+                raced.set()
+                s._rename_to_current_title(advance_frame=True)
+            return s._last_set
+
+        with (
+            mock.patch.object(tmuxspinner, "TICK_INTERVAL", 0.01),
+            mock.patch.object(tmuxspinner, "_rename_window", side_effect=fake_rename),
+            mock.patch.object(tmuxspinner, "_read_window_name", side_effect=fake_read),
+        ):
+            s.start()
+            self.assertTrue(tick_after_read.wait(timeout=10.0))
+            s.stop()
+
+        self.assertEqual(s._original_name, "zsh")
+
 
 class TestModuleLevelGuard(unittest.TestCase):
     """Verify that handlers are only registered when inside tmux with a tty."""

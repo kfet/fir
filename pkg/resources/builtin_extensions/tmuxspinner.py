@@ -285,9 +285,17 @@ class Spinner:
             # update the original name (stripping any status suffix we may have added).
             if target and last_set:
                 current = _read_window_name(target)
-                if current and current != last_set:
+                if current:
                     with self._lock:
-                        self._original_name = _strip_spinner_suffix(current)
+                        # Only trust the reading if none of our own renames landed
+                        # while we were reading. start()'s initial paint and
+                        # set_session_name() rename from the caller's thread; such a
+                        # rename makes the window show a name we set that no longer
+                        # matches our stale snapshot, and mistaking it for a user
+                        # rename would bake the session/spinner suffix into
+                        # _original_name permanently.
+                        if self._last_set == last_set and current != last_set:
+                            self._original_name = _strip_spinner_suffix(current)
 
             # If shutdown/stop signalled us while we were mid-tick, do not
             # emit another rename — otherwise it can land AFTER the restore
