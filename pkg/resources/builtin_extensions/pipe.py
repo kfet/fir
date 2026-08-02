@@ -18,10 +18,12 @@ markdown block, one section per step.
 
 from __future__ import annotations
 
+import atexit
 import contextlib
 import json
 import os
 import re
+import secrets
 import shlex
 import tempfile
 import time
@@ -360,6 +362,24 @@ def _coerce_num(params: Mapping[str, Any], key: str, default: float, minimum: fl
     return v if v >= minimum else minimum
 
 
+def _opt_num(params: Mapping[str, Any], key: str, minimum: float) -> float | None:
+    """Like _coerce_num but returns None when the key is absent (or unusable),
+    so a caller can distinguish "not passed" from "passed a default"."""
+    if params.get(key) is None:
+        return None
+    try:
+        v = float(params[key])
+    except (TypeError, ValueError):
+        return None
+    return v if v >= minimum else minimum
+
+
+def _opt_int(params: Mapping[str, Any], key: str, minimum: float) -> int | None:
+    """Integer flavour of _opt_num."""
+    v = _opt_num(params, key, minimum)
+    return None if v is None else int(v)
+
+
 def _inject_env(params: Any, poll: int, state_path: str) -> Any:
     """Expose WAIT_POLL / WAIT_STATE to a probe step.
 
@@ -453,7 +473,113 @@ def _strip_sentinel(text: str) -> str:
     return "\n".join(lines)
 
 
-def _wait_terminal(outcome: str, polls: int, elapsed: float, message: str, diag: str) -> dict:
+# ---------------------------------------------------------------------------
+# Resumable timeout checkpoints
+# ---------------------------------------------------------------------------
+
+# A wait that hits its timeout/max_polls cap is a checkpoint, not a failure:
+# the probe chain, the poll counter and — crucially — the $WAIT_STATE scratch
+# file the probe accumulated settle/delta data in are all still valid. We stash
+# them under a short handle so the model can re-enter the loop with a fresh
+# budget instead of re-authoring `steps` and losing that state.
+#
+# Session-scoped (this extension process only) and bounded by a TTL sweep so a
+# checkpoint the model never resumes cannot leak its tempfile forever.
+_WAIT_RESUME_TTL = 2 * 60 * 60.0
+
+# handle -> record. See _stash_resume for the shape. Extension tool calls are
+# dispatched one at a time, so plain module globals need no locking here.
+_wait_resumes: dict[str, dict[str, Any]] = {}
+
+# Scratch files of loops currently running. Tracked so the atexit sweep also
+# reclaims them if the process goes down mid-poll.
+_wait_active: set[str] = set()
+
+
+def _drop_resume(handle: str) -> None:
+    """Forget a checkpoint and remove its scratch file."""
+    rec = _wait_resumes.pop(handle, None)
+    if rec:
+        with contextlib.suppress(OSError):
+            os.unlink(rec["state_path"])
+
+
+def _expire_resumes() -> None:
+    """Best-effort sweep of checkpoints older than the TTL."""
+    cutoff = time.time() - _WAIT_RESUME_TTL
+    for handle in [h for h, r in _wait_resumes.items() if r["stashed_at"] < cutoff]:
+        _drop_resume(handle)
+
+
+def _cleanup_resumes() -> None:
+    """Unlink every scratch file — stashed checkpoints and in-flight loops
+    alike. Registered via atexit so a normal process shutdown does not leave
+    wait-state-* tempfiles behind."""
+    for handle in list(_wait_resumes):
+        _drop_resume(handle)
+    for path in list(_wait_active):
+        _wait_active.discard(path)
+        with contextlib.suppress(OSError):
+            os.unlink(path)
+
+
+atexit.register(_cleanup_resumes)
+
+
+def _stash_resume(
+    steps: list[dict],
+    state_path: str,
+    polls: int,
+    elapsed: float,
+    strikes: int,
+    last_verdict: str,
+    label: str,
+    interval: float,
+    timeout: float,
+    max_polls: int,
+) -> str:
+    """Record a timed-out loop's state and return its resume handle."""
+    _expire_resumes()
+    handle = "w_" + secrets.token_hex(3)
+    while handle in _wait_resumes:
+        handle = "w_" + secrets.token_hex(3)
+    _wait_resumes[handle] = {
+        "steps": steps,
+        "state_path": state_path,
+        "polls": polls,
+        "elapsed": elapsed,
+        "strikes": strikes,
+        "last_verdict": last_verdict,
+        "label": label,
+        "interval": interval,
+        "timeout": timeout,
+        "max_polls": max_polls,
+        "stashed_at": time.time(),
+    }
+    return handle
+
+
+def _resume_error(handle: str) -> dict:
+    """Explain an unknown/expired handle rather than silently starting over."""
+    _expire_resumes()
+    valid = ", ".join(sorted(_wait_resumes)) or "<none>"
+    return _error(
+        f"wait: unknown or expired resume handle {handle!r}. Handles are "
+        f"session-scoped and expire after {int(_WAIT_RESUME_TTL // 3600)}h, and "
+        "are dropped once their loop finishes (success or error). Valid "
+        f"handles: {valid}. To start a new wait, call it with `steps` and no "
+        "`resume`."
+    )
+
+
+def _wait_terminal(
+    outcome: str,
+    polls: int,
+    elapsed: float,
+    message: str,
+    diag: str,
+    resume: str = "",
+) -> dict:
     """Build the single terminal payload returned to the model."""
     # A timeout is a PARTIAL RESULT, not a failure: the probe loop ran clean
     # and simply has not settled yet. Flagging it is_error poisons tool
@@ -464,8 +590,10 @@ def _wait_terminal(outcome: str, polls: int, elapsed: float, message: str, diag:
         f"wait: {outcome}",
         f"polls: {polls}",
         f"elapsed: {elapsed:.1f}s",
-        f"message: {message}",
     ]
+    if resume:
+        body.append(f"resume: {resume}")
+    body.append(f"message: {message}")
     cleaned = _strip_sentinel(diag).rstrip()
     text = "\n".join(body)
     if cleaned:
@@ -480,25 +608,49 @@ def _run_wait(
     max_polls: int,
     label: str,
     ctx: fir_ext.Context,
+    rec: dict[str, Any] | None = None,
 ) -> dict:
+    """Run the poll loop until it settles or hits a cap.
+
+    *rec* is a checkpoint record from a previous timed-out run (see
+    _stash_resume). When present the loop continues that run: same scratch
+    file, same cumulative poll/elapsed counters, same strike/verdict state.
+    The caps always apply to THIS segment only — a resume gets a fresh
+    budget from the point it re-enters."""
     err = _validate_steps(steps, ctx, "wait")
     if err:
         return _error(err)
 
-    # A stable per-wait scratch file the probe can read/write across polls
-    # (via $WAIT_STATE). Created once, cleaned up at the end.
-    fd, state_path = tempfile.mkstemp(prefix="wait-state-")
-    os.close(fd)
+    if rec is None:
+        # A stable per-wait scratch file the probe can read/write across polls
+        # (via $WAIT_STATE). Created once; kept alive across a resume and
+        # removed on any non-timeout outcome.
+        fd, state_path = tempfile.mkstemp(prefix="wait-state-")
+        os.close(fd)
+        prior_polls = 0
+        prior_elapsed = 0.0
+        strikes = 0
+        last_verdict = "?"
+    else:
+        state_path = rec["state_path"]
+        prior_polls = rec["polls"]
+        prior_elapsed = rec["elapsed"]
+        strikes = rec["strikes"]
+        last_verdict = rec["last_verdict"]
 
+    _wait_active.add(state_path)
     start = _now()
+    # `polls` counts this segment (what the caps bound); `total` is what the
+    # model sees, continuing across resumes.
     polls = 0
-    strikes = 0
-    last_verdict = "?"
+    total = prior_polls
     try:
         while True:
             polls += 1
-            reached, vtext, vis_error = _run_probe(steps, label, polls, state_path, ctx)
-            elapsed = _now() - start
+            total += 1
+            reached, vtext, vis_error = _run_probe(steps, label, total, state_path, ctx)
+            segment = _now() - start
+            elapsed = prior_elapsed + segment
 
             if not reached or vis_error:
                 # Verdict step (or the step that aborted before it) errored.
@@ -507,7 +659,7 @@ def _run_wait(
                 if strikes >= 3:
                     return _wait_terminal(
                         "error",
-                        polls,
+                        total,
                         elapsed,
                         "wait: verdict step failed 3 polls in a row",
                         vtext,
@@ -522,7 +674,7 @@ def _run_wait(
                     )
                     return _wait_terminal(
                         "error",
-                        polls,
+                        total,
                         elapsed,
                         "wait: verdict step emitted no WAIT: sentinel — its "
                         f"final non-empty stdout line was {tail.strip()!r}, "
@@ -535,7 +687,7 @@ def _run_wait(
                 if verdict == "done":
                     return _wait_terminal(
                         "success",
-                        polls,
+                        total,
                         elapsed,
                         message or "verdict: done",
                         vtext,
@@ -543,34 +695,102 @@ def _run_wait(
                 if verdict == "fail":
                     return _wait_terminal(
                         "error",
-                        polls,
+                        total,
                         elapsed,
                         "wait: " + (message or "verdict reported fail"),
                         vtext,
                     )
                 # verdict == "continue": fall through.
 
-            if elapsed >= timeout or polls >= max_polls:
+            if segment >= timeout or polls >= max_polls:
                 cap = "max_polls" if polls >= max_polls else "timeout"
+                handle = _stash_resume(
+                    steps,
+                    state_path,
+                    total,
+                    elapsed,
+                    strikes,
+                    last_verdict,
+                    label,
+                    interval,
+                    timeout,
+                    max_polls,
+                )
                 return _wait_terminal(
                     "timeout",
-                    polls,
+                    total,
                     elapsed,
                     f"wait: {cap} cap reached (polls={polls}/{max_polls}, "
-                    f"elapsed={elapsed:.1f}s/{timeout:.0f}s) — NOT a failure, the "
+                    f"elapsed={segment:.1f}s/{timeout:.0f}s) — NOT a failure, the "
                     f"probe never reported WAIT:fail. If the job is still "
-                    f"legitimately running, re-issue wait with a larger "
-                    f"{cap}.",
+                    f"legitimately running, re-enter this same loop with "
+                    f"resume={handle} (optionally with a larger {cap}) — the "
+                    f"probe steps, poll counter and $WAIT_STATE contents are "
+                    f"all preserved.",
                     vtext,
+                    resume=handle,
                 )
 
             ctx.report_progress(
-                f"wait: poll {polls}/{max_polls}, {int(elapsed)}s, last={last_verdict}"
+                f"wait: poll {total} ({polls}/{max_polls} this run), "
+                f"{int(elapsed)}s, last={last_verdict}"
             )
             _sleep_sliced(interval)
     finally:
-        with contextlib.suppress(OSError):
-            os.unlink(state_path)
+        # A timeout hands ownership of the scratch file to its checkpoint;
+        # every other exit path (settled, cancelled, exception) drops it.
+        _wait_active.discard(state_path)
+        if not _handle_for(state_path):
+            with contextlib.suppress(OSError):
+                os.unlink(state_path)
+
+
+def _handle_for(state_path: str) -> str:
+    """Return the checkpoint handle owning *state_path*, or "" if none."""
+    for handle, rec in _wait_resumes.items():
+        if rec["state_path"] == state_path:
+            return handle
+    return ""
+
+
+def _run_wait_resume(
+    handle: str,
+    steps: list[dict],
+    interval: float | None,
+    timeout: float | None,
+    max_polls: int | None,
+    label: str,
+    ctx: fir_ext.Context,
+) -> dict:
+    """Re-enter a timed-out loop by handle.
+
+    Caps passed explicitly override the stored ones (a fresh budget from the
+    resume point); omitted ones fall back to what the original call used.
+    ``steps`` is optional — the stored chain is reused unless a new one is
+    given."""
+    _expire_resumes()
+    rec = _wait_resumes.get(handle)
+    if rec is None:
+        return _resume_error(handle)
+    steps = steps or rec["steps"]
+    # Validate BEFORE consuming the record: a bad probe chain passed alongside
+    # a good handle must not destroy the checkpoint (or orphan its scratch
+    # file) — the model should be able to retry the same handle.
+    err = _validate_steps(steps, ctx, "wait")
+    if err:
+        return _error(err)
+    # Take ownership: the record is consumed by this run and re-stashed only
+    # if we time out again.
+    del _wait_resumes[handle]
+    return _run_wait(
+        steps,
+        rec["interval"] if interval is None else interval,
+        rec["timeout"] if timeout is None else timeout,
+        rec["max_polls"] if max_polls is None else max_polls,
+        label or rec["label"],
+        ctx,
+        rec=rec,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -699,8 +919,14 @@ _WAIT_DESCRIPTION = (
     "the caps for the REAL job: a CI/release workflow or a disk check wants "
     "`timeout` 1800-3600 with `interval` 30-60, not the default. "
     "outcome=timeout is NOT an error — it means the probe never said fail and "
-    "the job may still be running; re-issue wait with a larger cap to keep "
-    "waiting. The terminal "
+    "the job may still be running; it is a RESUMABLE CHECKPOINT. A timeout "
+    "payload carries `resume: <handle>`; call wait again with "
+    "`resume: <handle>` (steps optional, omit them) to re-enter the SAME loop "
+    "— same $WAIT_STATE scratch file and contents, poll counter continuing "
+    "where it stopped — with a fresh budget. `interval`/`timeout`/`max_polls` "
+    "passed alongside `resume` override the originals; omitted ones are "
+    "reused. Handles are session-scoped, expire after 2h, and are dropped "
+    "once the loop finishes. The terminal "
     "payload reports outcome/polls/elapsed/message plus the last probe output "
     "(the bare WAIT: line is stripped). Returns once — progress is UI-only.\n\n"
     "[SYS_EXT] Reach for wait (not pipe) when you must BLOCK until something "
@@ -723,7 +949,8 @@ _WAIT_PARAMETERS: dict[str, Any] = {
             "description": (
                 "Probe chain re-run each poll. Same shape and substitution as "
                 "pipe. The last step is the verdict step: its final non-empty "
-                "stdout line must be WAIT:done, WAIT:continue, or WAIT:fail."
+                "stdout line must be WAIT:done, WAIT:continue, or WAIT:fail. "
+                "Required unless `resume` is given."
             ),
             "items": {
                 "type": "object",
@@ -774,8 +1001,17 @@ _WAIT_PARAMETERS: dict[str, Any] = {
             "type": "integer",
             "description": "Mandatory circuit-breaker: max poll cycles. Default 60.",
         },
+        "resume": {
+            "type": "string",
+            "description": (
+                "Handle from a previous outcome=timeout payload (e.g. "
+                "w_8f3a21). Re-enters that loop: same probe steps, same "
+                "$WAIT_STATE file and contents, poll counter continuing from "
+                "where it stopped, with a fresh cap budget. Omit `steps` when "
+                "resuming (pass them only to change the probe chain)."
+            ),
+        },
     },
-    "required": ["steps"],
 }
 
 
@@ -794,6 +1030,19 @@ _WAIT_PARAMETERS: dict[str, Any] = {
 def wait(params: dict, ctx: fir_ext.Context):
     steps = params.get("steps") or []
     label = params.get("label", "") or ""
+    resume = (params.get("resume") or "").strip()
+    if resume:
+        # On resume, only caps the model passed explicitly override the
+        # stored ones — absent keys fall back to the original call's values.
+        return _run_wait_resume(
+            resume,
+            steps,
+            _opt_num(params, "interval", 0.0),
+            _opt_num(params, "timeout", 0.0),
+            _opt_int(params, "max_polls", 1.0),
+            label,
+            ctx,
+        )
     interval = _coerce_num(params, "interval", 5.0, 0.0)
     timeout = _coerce_num(params, "timeout", 900.0, 0.0)
     max_polls = int(_coerce_num(params, "max_polls", 60.0, 1.0))

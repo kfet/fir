@@ -755,6 +755,279 @@ class TestWaitSubstitutionAndEnv(unittest.TestCase):
         self.assertFalse(os.path.exists(seen["path"]))
 
 
+class TestWaitResume(unittest.TestCase):
+    def setUp(self):
+        self.mod = _load_pipe()
+        self.addCleanup(self.mod._cleanup_resumes)
+        self.steps = [{"tool": "Bash", "params": {"command": "probe"}}]
+
+    def _timeout_run(self, polls=3, captured=None):
+        """Drive a wait to a max_polls timeout; return (text, handle)."""
+
+        def probe(name, params):
+            if captured is not None:
+                captured.append(params["command"])
+            return _text_result("WAIT:continue")
+
+        ctx = _wait_ctx(self, self.mod, [probe] * (polls + 2))
+        out = self.mod._run_wait(self.steps, 5, 300, polls, "", ctx)
+        text = out["content"][0]["text"]
+        self.assertIn("wait: timeout", text)
+        handle = self._handle(text)
+        return out, handle
+
+    @staticmethod
+    def _handle(text):
+        for line in text.splitlines():
+            if line.startswith("resume: "):
+                return line[len("resume: ") :].strip()
+        raise AssertionError(f"no resume handle in payload:\n{text}")
+
+    @staticmethod
+    def _state_path(cmd):
+        for line in cmd.splitlines():
+            if line.startswith("export WAIT_STATE="):
+                return line.split("=", 1)[1].strip("'")
+        raise AssertionError("no WAIT_STATE export in probe command")
+
+    def test_timeout_returns_resume_handle(self):
+        out, handle = self._timeout_run()
+        self.assertFalse(out["is_error"])
+        self.assertTrue(handle.startswith("w_"), handle)
+        self.assertIn(handle, self.mod._wait_resumes)
+        # The scratch file survives the checkpoint.
+        self.assertTrue(os.path.exists(self.mod._wait_resumes[handle]["state_path"]))
+        self.assertIn(f"resume={handle}", out["content"][0]["text"])
+
+    def test_resume_continues_poll_counter(self):
+        _, handle = self._timeout_run(polls=3)
+        seen = []
+
+        def probe(name, params):
+            seen.append(params["command"])
+            return _text_result("WAIT:done")
+
+        ctx = _wait_ctx(self, self.mod, [probe])
+        out = self.mod._run_wait_resume(handle, [], None, None, None, "", ctx)
+        text = out["content"][0]["text"]
+        self.assertFalse(out["is_error"], text)
+        self.assertIn("wait: success", text)
+        # Poll 4, not poll 1 — both in the payload and in $WAIT_POLL.
+        self.assertIn("polls: 4", text)
+        self.assertIn("export WAIT_POLL=4", seen[0])
+
+    def test_resume_reuses_state_file_and_contents(self):
+        first = []
+        _, handle = self._timeout_run(polls=2, captured=first)
+        path = self._state_path(first[0])
+        with open(path, "w") as fh:
+            fh.write("settle-data")
+
+        seen = []
+
+        def probe(name, params):
+            seen.append(params["command"])
+            # Read the scratch file from inside the resumed poll — it is
+            # unlinked once this run settles.
+            with open(self._state_path(params["command"])) as fh:
+                seen.append(fh.read())
+            return _text_result("WAIT:done")
+
+        ctx = _wait_ctx(self, self.mod, [probe])
+        self.mod._run_wait_resume(handle, [], None, None, None, "", ctx)
+        self.assertEqual(self._state_path(seen[0]), path)
+        # Contents accumulated across the first segment are intact.
+        self.assertEqual(seen[1], "settle-data")
+
+    def test_resume_uses_stored_steps_when_omitted(self):
+        seen = []
+        _, handle = self._timeout_run(polls=2)
+
+        def probe(name, params):
+            seen.append(params["command"])
+            return _text_result("WAIT:done")
+
+        ctx = _wait_ctx(self, self.mod, [probe])
+        out = self.mod._run_wait_resume(handle, [], None, None, None, "", ctx)
+        self.assertFalse(out["is_error"])
+        self.assertIn("probe", seen[0])
+
+    def test_resume_caps_override_and_fall_back(self):
+        _, handle = self._timeout_run(polls=3)
+        stored = dict(self.mod._wait_resumes[handle])
+        # _run_wait is stubbed below, so nothing else reclaims the scratch file.
+        self.addCleanup(os.unlink, stored["state_path"])
+        ctx = _wait_ctx(self, self.mod, [_text_result("WAIT:continue")] * 10)
+        # max_polls overridden to 2 (fresh budget); interval/timeout reused.
+        with mock.patch.object(self.mod, "_run_wait", return_value=_text_result("x")) as run:
+            self.mod._run_wait_resume(handle, [], None, None, 2, "", ctx)
+        args = run.call_args.args
+        self.assertEqual(args[1], stored["interval"])
+        self.assertEqual(args[2], stored["timeout"])
+        self.assertEqual(args[3], 2)
+
+    def test_resume_gets_fresh_budget_not_cumulative(self):
+        # First segment burned all 2 polls; the resume must still run polls.
+        _, handle = self._timeout_run(polls=2)
+        seen = []
+
+        def probe(name, params):
+            seen.append(params["command"])
+            return _text_result("WAIT:done")
+
+        ctx = _wait_ctx(self, self.mod, [probe])
+        out = self.mod._run_wait_resume(handle, [], None, None, None, "", ctx)
+        self.assertIn("wait: success", out["content"][0]["text"])
+        self.assertEqual(len(seen), 1)
+
+    def test_second_timeout_yields_a_new_handle(self):
+        _, handle = self._timeout_run(polls=2)
+        path = self.mod._wait_resumes[handle]["state_path"]
+        ctx = _wait_ctx(self, self.mod, [_text_result("WAIT:continue")] * 5)
+        out = self.mod._run_wait_resume(handle, [], None, None, 2, "", ctx)
+        text = out["content"][0]["text"]
+        self.assertIn("wait: timeout", text)
+        self.assertIn("polls: 4", text)
+        new = self._handle(text)
+        self.assertNotIn(handle, self.mod._wait_resumes)
+        self.assertIn(new, self.mod._wait_resumes)
+        # Same scratch file carried through.
+        self.assertEqual(self.mod._wait_resumes[new]["state_path"], path)
+
+    def test_bad_steps_on_resume_preserves_checkpoint(self):
+        # A bad probe chain passed alongside a good handle must not consume
+        # the checkpoint or orphan its scratch file.
+        _, handle = self._timeout_run(polls=2)
+        path = self.mod._wait_resumes[handle]["state_path"]
+        out = self.mod._run_wait_resume(
+            handle, [{"tool": "Nope"}], None, None, None, "", _make_ctx([])
+        )
+        self.assertTrue(out["is_error"])
+        self.assertIn("wait validation failed", out["content"][0]["text"])
+        self.assertIn(handle, self.mod._wait_resumes)
+        self.assertTrue(os.path.exists(path))
+
+    def test_resume_accepts_replacement_steps(self):
+        _, handle = self._timeout_run(polls=2)
+        seen = []
+
+        def probe(name, params):
+            seen.append(params["command"])
+            return _text_result("WAIT:done")
+
+        ctx = _wait_ctx(self, self.mod, [probe])
+        out = self.mod._run_wait_resume(
+            handle, [{"tool": "Bash", "params": {"command": "newprobe"}}], None, None, None, "", ctx
+        )
+        self.assertFalse(out["is_error"])
+        self.assertIn("newprobe", seen[0])
+
+    def test_unknown_handle_errors(self):
+        ctx = _make_ctx([])
+        out = self.mod._run_wait_resume("w_deadbe", [], None, None, None, "", ctx)
+        self.assertTrue(out["is_error"])
+        text = out["content"][0]["text"]
+        self.assertIn("w_deadbe", text)
+        self.assertIn("unknown or expired", text)
+        # Did not silently start a fresh wait.
+        self.assertEqual(ctx.call_tool.call_count, 0)
+
+    def test_unknown_handle_lists_valid_handles(self):
+        _, handle = self._timeout_run(polls=2)
+        out = self.mod._run_wait_resume("w_nope00", [], None, None, None, "", _make_ctx([]))
+        self.assertTrue(out["is_error"])
+        self.assertIn(handle, out["content"][0]["text"])
+
+    def test_success_leaves_no_record_or_tempfile(self):
+        seen = []
+
+        def probe(name, params):
+            seen.append(params["command"])
+            return _text_result("WAIT:done")
+
+        ctx = _wait_ctx(self, self.mod, [probe])
+        out = self.mod._run_wait(self.steps, 5, 300, 60, "", ctx)
+        self.assertFalse(out["is_error"])
+        self.assertNotIn("resume:", out["content"][0]["text"])
+        self.assertEqual(self.mod._wait_resumes, {})
+        self.assertFalse(os.path.exists(self._state_path(seen[0])))
+
+    def test_error_outcome_leaves_no_record_or_tempfile(self):
+        seen = []
+
+        def probe(name, params):
+            seen.append(params["command"])
+            return _text_result("WAIT:fail nope")
+
+        ctx = _wait_ctx(self, self.mod, [probe])
+        out = self.mod._run_wait(self.steps, 5, 300, 60, "", ctx)
+        self.assertTrue(out["is_error"])
+        self.assertEqual(self.mod._wait_resumes, {})
+        self.assertFalse(os.path.exists(self._state_path(seen[0])))
+
+    def test_resume_that_settles_cleans_up_checkpoint(self):
+        first = []
+        _, handle = self._timeout_run(polls=2, captured=first)
+        path = self._state_path(first[0])
+        ctx = _wait_ctx(self, self.mod, [_text_result("WAIT:done")])
+        self.mod._run_wait_resume(handle, [], None, None, None, "", ctx)
+        self.assertEqual(self.mod._wait_resumes, {})
+        self.assertFalse(os.path.exists(path))
+
+    def test_expired_record_is_swept(self):
+        _, handle = self._timeout_run(polls=2)
+        path = self.mod._wait_resumes[handle]["state_path"]
+        self.mod._wait_resumes[handle]["stashed_at"] -= self.mod._WAIT_RESUME_TTL + 1
+        out = self.mod._run_wait_resume(handle, [], None, None, None, "", _make_ctx([]))
+        self.assertTrue(out["is_error"])
+        self.assertNotIn(handle, self.mod._wait_resumes)
+        self.assertFalse(os.path.exists(path))
+
+    def test_cleanup_resumes_unlinks_everything(self):
+        _, handle = self._timeout_run(polls=2)
+        path = self.mod._wait_resumes[handle]["state_path"]
+        self.mod._cleanup_resumes()
+        self.assertEqual(self.mod._wait_resumes, {})
+        self.assertFalse(os.path.exists(path))
+
+    def test_cleanup_resumes_reclaims_inflight_state_file(self):
+        # Process goes down mid-poll: the in-flight scratch file is tracked and
+        # swept by the atexit hook too.
+        captured = {}
+
+        def probe(name, params):
+            captured["path"] = self._state_path(params["command"])
+            captured["active"] = set(self.mod._wait_active)
+            return _text_result("WAIT:done")
+
+        ctx = _wait_ctx(self, self.mod, [probe])
+        self.mod._run_wait(self.steps, 5, 300, 60, "", ctx)
+        self.assertIn(captured["path"], captured["active"])
+        # Settled cleanly -> no longer tracked, file gone.
+        self.assertEqual(self.mod._wait_active, set())
+        self.assertFalse(os.path.exists(captured["path"]))
+
+    def test_wait_tool_routes_resume_param(self):
+        with mock.patch.object(self.mod, "_run_wait_resume", return_value={}) as res:
+            self.mod.wait({"resume": "w_abc123", "max_polls": 9}, mock.MagicMock())
+        args = res.call_args.args
+        self.assertEqual(args[0], "w_abc123")
+        self.assertEqual(args[1], [])
+        self.assertIsNone(args[2])  # interval not passed -> stored value
+        self.assertIsNone(args[3])  # timeout not passed -> stored value
+        self.assertEqual(args[4], 9)
+
+    def test_wait_tool_without_resume_is_unchanged(self):
+        with mock.patch.object(self.mod, "_run_wait", return_value={}) as run:
+            self.mod.wait({"steps": self.steps}, mock.MagicMock())
+        self.assertEqual(run.call_args.args[1:4], (5.0, 900.0, 60))
+
+    def test_description_documents_resume(self):
+        self.assertIn("resume", self.mod._WAIT_DESCRIPTION)
+        self.assertIn("CHECKPOINT", self.mod._WAIT_DESCRIPTION)
+        self.assertIn("resume", self.mod._WAIT_PARAMETERS["properties"])
+
+
 class TestWaitSleepSlicing(unittest.TestCase):
     def setUp(self):
         self.mod = _load_pipe()
