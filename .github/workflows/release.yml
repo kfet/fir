@@ -234,11 +234,11 @@ jobs:
     # HEAD (1.4GB, 5.5min) while HOMEBREW_NO_AUTO_UPDATE kept the image's brew
     # library frozen at 6.0.11. Weeks-newer core formulae then failed to
     # import en masse with "undefined method 'run'/'on_macos'/'if_path_exists'
-    # for an instance of Homebrew::InstallSteps::DSL", and `brew install` exit
-    # 1 on an unrelated core formula even though kfet/ai/fir itself resolved
-    # fine. That reddened the Linux leg on every release from v0.90.2 on. The
-    # macOS legs only escaped because their images happen to ship a core
-    # checkout from the same era as their library.
+    # for an instance of Homebrew::InstallSteps::DSL", and `brew install`
+    # exited 1 on an unrelated core formula even though kfet/ai/fir itself
+    # resolved fine. That reddened the Linux leg on every release from v0.90.2
+    # on. The macOS legs only escaped because their images happen to ship a
+    # core checkout from the same era as their library.
     #
     # With the JSON API enabled our zero-dependency formula never needs core
     # at all: the leg now finishes in ~66s instead of 6.5min, and it exercises
