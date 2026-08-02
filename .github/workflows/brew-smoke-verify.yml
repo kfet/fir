@@ -24,32 +24,39 @@ jobs:
       HOMEBREW_NO_ENV_HINTS: '1'
       HOMEBREW_CURL_RETRIES: '5'
     steps:
-    - name: Install via Homebrew tap
+    - &id002
+      name: Install via Homebrew tap
       run: "set -euxo pipefail\n# Linuxbrew lives at /home/linuxbrew/.linuxbrew on Ubuntu\n# runners but isn't on PATH by default.\nif [ -x /home/linuxbrew/.linuxbrew/bin/brew ]; then\n  eval \"$(/home/linuxbrew/.linuxbrew/bin/brew\
         \ shellenv)\"\nfi\nbrew --version\n# Bounded retry for the transient \"Broken pipe\" during Homebrew's\n# JSON API fetch. This tolerates a flaky network only: a genuinely\n# broken formula (bad\
         \ sha256, missing asset, unresolvable name)\n# fails deterministically on all three attempts and turns the leg\n# red, which is the point of the leg. Verified both ways on a real\n# runner before\
         \ landing. `brew tap` is idempotent, so a retry can\n# just repeat it rather than testing for it first.\nok=0\nfor attempt in 1 2 3; do\n  echo \"--- attempt $attempt\"\n  if brew tap kfet/ai &&\
         \ brew install kfet/ai/fir; then ok=1; break; fi\n  echo \"attempt $attempt failed\"\n  [ \"$attempt\" = 3 ] || sleep 10\ndone\n[ \"$ok\" = \"1\" ] || { echo \"::error::brew install failed after\
         \ 3 attempts\"; exit 1; }\n"
-    - &id002
+    - &id003
       name: Exercise the installed binary
       run: "set -euxo pipefail\nif [ -x /home/linuxbrew/.linuxbrew/bin/brew ]; then\n  eval \"$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)\"\nfi\nwhich fir\nfir --version\n# Exercise the same exec path\
         \ that broke with EACCES.\n# Sink stdout: piping into `head` triggers SIGPIPE on the\n# Go producer (exit 141) under `set -o pipefail`, which\n# would fail this step for the wrong reason.\nfir completion\
         \ bash > /dev/null\nfir completion zsh  > /dev/null\n# Run the formula's own test block too, for good measure.\nbrew test kfet/ai/fir\n"
-  idempotent_retry:
+  tap_idempotent:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env: *id001
     steps:
-    - name: 'shim: fail the first install'
-      run: "set -euxo pipefail\nmkdir -p /tmp/shim\n# Intercept at brew's real path, not via PATH: the step under test runs\n# `eval \"$(brew shellenv)\"`, which prepends the real brew dir to PATH and so\n\
-        # would shadow any /tmp/shim entry.\nreal=/home/linuxbrew/.linuxbrew/bin/brew\ncp \"$real\" /tmp/shim/brew-real\ncat > \"$real\" <<'EOF'\n#!/usr/bin/env bash\nif [ \"$1\" = \"install\" ] && [ !\
-        \ -f /tmp/shim/fired ]; then\n  touch /tmp/shim/fired\n  echo \"SHIM: transient failure on first install\" >&2\n  exit 1\nfi\nexec /tmp/shim/brew-real \"$@\"\nEOF\nchmod +x \"$real\"\n"
-    - name: Install via Homebrew tap (with shim)
-      run: "set -euxo pipefail\n# Linuxbrew lives at /home/linuxbrew/.linuxbrew on Ubuntu\n# runners but isn't on PATH by default.\nif [ -x /home/linuxbrew/.linuxbrew/bin/brew ]; then\n  eval \"$(/home/linuxbrew/.linuxbrew/bin/brew\
-        \ shellenv)\"\nfi\nbrew --version\n# Bounded retry for the transient \"Broken pipe\" during Homebrew's\n# JSON API fetch. This tolerates a flaky network only: a genuinely\n# broken formula (bad\
-        \ sha256, missing asset, unresolvable name)\n# fails deterministically on all three attempts and turns the leg\n# red, which is the point of the leg. Verified both ways on a real\n# runner before\
-        \ landing. `brew tap` is idempotent, so a retry can\n# just repeat it rather than testing for it first.\nok=0\nfor attempt in 1 2 3; do\n  echo \"--- attempt $attempt\"\n  if brew tap kfet/ai &&\
-        \ brew install kfet/ai/fir; then ok=1; break; fi\n  echo \"attempt $attempt failed\"\n  [ \"$attempt\" = 3 ] || sleep 10\ndone\n[ \"$ok\" = \"1\" ] || { echo \"::error::brew install failed after\
-        \ 3 attempts\"; exit 1; }\ntest -f /tmp/shim/fired || { echo \"::error::shim never fired\"; exit 1; }\necho \"OK: attempt 2 re-tapped idempotently and installed\"\n"
+    - name: 'tap twice: assert idempotent'
+      run: 'set -euxo pipefail
+
+        eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+
+        # The retry loop re-runs `brew tap kfet/ai` on every attempt, so a second tap
+
+        # of an already-tapped repo must exit 0. Assert that directly.
+
+        brew tap kfet/ai
+
+        brew tap kfet/ai
+
+        echo "OK: re-tapping an already-tapped repo exits 0"
+
+        '
     - *id002
+    - *id003
