@@ -1,26 +1,27 @@
 # TEMPORARY — verification harness for the brew-smoke (ubuntu-latest) fix.
+# Delete once the fix is folded into release.yml.
 #
-# Reproduces the release.yml brew-smoke ubuntu step in isolation so candidate
-# fixes can be A/B'd on a real runner without cutting a release. Delete once
-# the fix is folded into release.yml. (Same pattern as the harness used for
-# the "Broken pipe" fix in b62bb42d, which was likewise removed on landing.)
+# Round 1 (run 30743919399):
+#   control (today's env, incl. HOMEBREW_NO_INSTALL_FROM_API) -> RED. Clones
+#     homebrew/core at master HEAD (1.4GB, 5.5min) against the image's frozen
+#     brew 6.0.11 -> mass InstallSteps::DSL import failures -> exit 1 on an
+#     unrelated core formula.
+#   api (same, minus NO_INSTALL_FROM_API) -> 4/5 green in ~30s, core never
+#     tapped; 1/5 died "Broken pipe" during the JSON API fetch.
 #
-# Round 1 (run 30743919399) established:
-#   control  (today's env, incl. HOMEBREW_NO_INSTALL_FROM_API) -> RED.
-#            Clones homebrew/core at master HEAD (1.4GB, 5.5min) against the
-#            image's frozen brew 6.0.11 -> mass InstallSteps::DSL import
-#            failures -> exit 1 on an unrelated core formula.
-#   api      (same, minus NO_INSTALL_FROM_API) -> 4/5 green in ~30s, core
-#            never tapped; 1/5 died "Broken pipe" during the JSON API fetch.
+# Round 2 (run 30744185213):
+#   api_retry  (API on + bounded retry + HOMEBREW_CURL_RETRIES) -> 10/10 green, ~66s.
+#   api_update (NO_INSTALL_FROM_API + `brew update --force`)    -> 3/3 green, ~408s.
+#   api_retry chosen: 6x faster and matches what a real Linux user runs.
+#   But all 10 passed on attempt 1, so the retry branch went untested ->
 #
-# Round 2 compares the two ways of beating BOTH failure modes:
-#   api_retry  — JSON API on, bounded retry around the network phase.
-#   api_update — NO_INSTALL_FROM_API kept, but `brew update --force` first so
-#                the library matches the freshly cloned core (no skew).
-#
-# Note: Homebrew's HOMEBREW_NO_* switches are presence-checked, not value-
-# checked — setting one to "0" still counts as set. So a job that wants the
-# API on must not define the variable at all.
+# Round 3 (this one) tests the retry loop's two important behaviours directly:
+#   retry_recovers    — a shim makes the first `brew install` fail; the loop
+#                       must recover on attempt 2 and the job must go GREEN.
+#   broken_formula_red— a genuinely unresolvable formula must exhaust all 3
+#                       attempts and turn the step RED. This is the guard that
+#                       keeps the leg meaningful: retry must not mask a real
+#                       problem with our formula.
 name: brew-smoke-verify
 
 on:
@@ -30,31 +31,39 @@ permissions:
   contents: read
 
 jobs:
-  # Candidate A: JSON API enabled, bounded retry around tap+install.
-  api_retry:
+  retry_recovers:
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        rep: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     env:
       HOMEBREW_NO_AUTO_UPDATE: "1"
       HOMEBREW_NO_ANALYTICS: "1"
       HOMEBREW_NO_ENV_HINTS: "1"
       HOMEBREW_CURL_RETRIES: "5"
     steps:
-      - name: Install via Homebrew tap (api_retry)
+      - name: Install a shim that fails the first `brew install`
+        run: |
+          set -euxo pipefail
+          mkdir -p /tmp/shim
+          cat > /tmp/shim/brew <<'EOF'
+          #!/usr/bin/env bash
+          real=/home/linuxbrew/.linuxbrew/bin/brew
+          if [ "$1" = "install" ] && [ ! -f /tmp/shim/fired ]; then
+            touch /tmp/shim/fired
+            echo "SHIM: simulating transient Broken pipe on first install" >&2
+            exit 1
+          fi
+          exec "$real" "$@"
+          EOF
+          chmod +x /tmp/shim/brew
+
+      - name: Install via Homebrew tap (retry must recover)
         run: |
           set -euxo pipefail
           if [ -x /home/linuxbrew/.linuxbrew/bin/brew ]; then
             eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
           fi
+          export PATH="/tmp/shim:$PATH"
           brew --version
-
-          # Linuxbrew intermittently dies with "Broken pipe" during Homebrew's
-          # JSON API fetch. That is a transient network/pipe fault, not a
-          # formula fault: a genuinely broken formula fails all attempts.
           ok=0
           for attempt in 1 2 3; do
             echo "--- attempt $attempt"
@@ -65,17 +74,9 @@ jobs:
             sleep 10
           done
           [ "$ok" = "1" ] || { echo "::error::brew install failed after 3 attempts"; exit 1; }
-
-      - name: Assert homebrew/core was never tapped
-        run: |
-          set -euxo pipefail
-          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
-          core="$(brew --repository)/Library/Taps/homebrew/homebrew-core"
-          if [ -d "$core" ]; then
-            echo "::error::homebrew/core was tapped — the fix did not take"
-            exit 1
-          fi
-          echo "homebrew/core not tapped, as intended"
+          # Prove the shim actually fired, i.e. we really did exercise retry.
+          test -f /tmp/shim/fired || { echo "::error::shim never fired"; exit 1; }
+          echo "retry recovered after an injected attempt-1 failure"
 
       - name: Exercise the installed binary
         run: |
@@ -83,43 +84,44 @@ jobs:
           eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
           which fir
           fir --version
-          fir completion bash > /dev/null
-          fir completion zsh  > /dev/null
           brew test kfet/ai/fir
 
-  # Candidate B: keep NO_INSTALL_FROM_API, cure the skew by updating brew
-  # itself so the library matches the core checkout it clones.
-  api_update:
+  broken_formula_red:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        rep: [1, 2, 3]
+    timeout-minutes: 20
     env:
       HOMEBREW_NO_AUTO_UPDATE: "1"
       HOMEBREW_NO_ANALYTICS: "1"
       HOMEBREW_NO_ENV_HINTS: "1"
-      HOMEBREW_NO_INSTALL_FROM_API: "1"
+      HOMEBREW_CURL_RETRIES: "5"
     steps:
-      - name: Install via Homebrew tap (api_update)
+      - name: A broken formula must still fail the step
         run: |
           set -euxo pipefail
           if [ -x /home/linuxbrew/.linuxbrew/bin/brew ]; then
             eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
           fi
-          brew --version
-          brew update --force
-          brew --version
-          brew tap kfet/ai
-          brew install kfet/ai/fir
-
-      - name: Exercise the installed binary
-        run: |
-          set -euxo pipefail
-          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
-          which fir
-          fir --version
-          fir completion bash > /dev/null
-          fir completion zsh  > /dev/null
-          brew test kfet/ai/fir
+          # Run the real loop against a formula that cannot resolve, and
+          # assert it reports failure rather than being swallowed by retry.
+          set +e
+          (
+            set -euxo pipefail
+            ok=0
+            for attempt in 1 2 3; do
+              echo "--- attempt $attempt"
+              if brew tap | grep -qx 'kfet/ai' || brew tap kfet/ai; then
+                if brew install kfet/ai/no-such-formula-xyz; then ok=1; break; fi
+              fi
+              echo "attempt $attempt failed; retrying"
+              sleep 5
+            done
+            [ "$ok" = "1" ] || { echo "::error::brew install failed after 3 attempts"; exit 1; }
+          )
+          rc=$?
+          set -e
+          echo "loop exit code: $rc"
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::a broken formula did NOT fail the step — leg is not meaningful"
+            exit 1
+          fi
+          echo "OK: broken formula correctly produced a non-zero exit"
