@@ -266,15 +266,14 @@ jobs:
           # broken formula (bad sha256, missing asset, unresolvable name)
           # fails deterministically on all three attempts and turns the leg
           # red, which is the point of the leg. Verified both ways on a real
-          # runner before landing.
+          # runner before landing. `brew tap` is idempotent, so a retry can
+          # just repeat it rather than testing for it first.
           ok=0
           for attempt in 1 2 3; do
             echo "--- attempt $attempt"
-            if brew tap | grep -qx 'kfet/ai' || brew tap kfet/ai; then
-              if brew install kfet/ai/fir; then ok=1; break; fi
-            fi
-            echo "attempt $attempt failed; retrying"
-            sleep 10
+            if brew tap kfet/ai && brew install kfet/ai/fir; then ok=1; break; fi
+            echo "attempt $attempt failed"
+            [ "$attempt" = 3 ] || sleep 10
           done
           [ "$ok" = "1" ] || { echo "::error::brew install failed after 3 attempts"; exit 1; }
 
