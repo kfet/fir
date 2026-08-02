@@ -2275,8 +2275,11 @@ func TestAgentSession_GetSessionStats_WithMessages(t *testing.T) {
 	if stats.ToolCalls != 1 {
 		t.Errorf("expected 1 tool call, got %d", stats.ToolCalls)
 	}
-	if stats.TotalMessages != 2 {
-		t.Errorf("expected 2 total messages, got %d", stats.TotalMessages)
+	if stats.TotalMessages != 3 {
+		// 3, not 2: the fixture's tool call has no result, so loading the
+		// session synthesizes an interrupted-tool-call result for it (see
+		// store.SynthesizeInterruptedToolResults).
+		t.Errorf("expected 3 total messages, got %d", stats.TotalMessages)
 	}
 	if stats.Tokens.Input != 100 {
 		t.Errorf("expected 100 input tokens, got %d", stats.Tokens.Input)

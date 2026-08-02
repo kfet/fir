@@ -312,6 +312,13 @@ func (ss *SessionStore) setSessionFile(filePath string) bool {
 	firlog.Debug("loading session file", "path", absPath)
 
 	if _, err := os.Stat(absPath); err == nil {
+		// Only ever repair while we hold the flock: the repair writes at a
+		// captured offset, so running it alongside another process's O_APPEND
+		// could inject a newline inside an entry that process is mid-write.
+		// On the degraded no-lock paths we leave the file alone.
+		if ss.lock != nil {
+			repairTrailingNewline(absPath)
+		}
 		header, entries := loadEntriesFromFile(absPath)
 
 		if header == nil {
@@ -1295,7 +1302,7 @@ func BuildSessionContextFromEntries(entries []*SessionEntry, leafID string, byID
 	}
 
 	return SessionContext{
-		Messages:      messages,
+		Messages:      SynthesizeInterruptedToolResults(messages),
 		ThinkingLevel: thinkingLevel,
 		Model:         model,
 		PlanEntries:   planEntries,
@@ -1305,6 +1312,42 @@ func BuildSessionContextFromEntries(entries []*SessionEntry, leafID string, byID
 }
 
 // --- File operations ---
+
+// repairTrailingNewline appends a newline to a session file that does not end
+// with one. A SIGKILL can land between the entry Write and the newline Write in
+// persistEntry, leaving a partial (or newline-less) final line. persistEntry's
+// append path would then glue the next entry onto that line, corrupting a
+// second record. Loading already tolerates an unparseable line — this makes the
+// damage stop at one line.
+//
+// Called at open, only while the session flock is held (single writer), before
+// any entry is read or appended. Purely additive: no existing byte is altered or removed. The
+// partial line stays on disk as inert garbage that loadEntriesFromFile skips,
+// rather than being truncated away — the bytes may be forensically useful and
+// destroying them buys nothing.
+func repairTrailingNewline(filePath string) {
+	f, err := os.OpenFile(filePath, os.O_RDWR, 0600)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	stat, err := f.Stat()
+	if err != nil || stat.Size() == 0 {
+		return
+	}
+	last := make([]byte, 1)
+	if _, err := f.ReadAt(last, stat.Size()-1); err != nil {
+		return
+	}
+	if last[0] == '\n' {
+		return
+	}
+	if _, err := f.WriteAt([]byte("\n"), stat.Size()); err != nil {
+		firlog.Warn("session: could not repair truncated final line", "path", filePath, "err", err)
+		return
+	}
+	firlog.Info("session: repaired truncated final line", "path", filePath)
+}
 
 func loadEntriesFromFile(filePath string) (*SessionHeader, []*SessionEntry) {
 	data, err := os.ReadFile(filePath)
