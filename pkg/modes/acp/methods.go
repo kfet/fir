@@ -658,6 +658,23 @@ func fileExists(path string) bool {
 	return err == nil
 }
 
+// resolveToolHint looks up a tool's display hint by name from the session's
+// registered tool set. Returns nil when the session, tool set, or tool is
+// unavailable (e.g. a tool that no longer exists on replay).
+func resolveToolHint(entry *firSession, toolName string) *agent.ToolDisplayHint {
+	if entry == nil || entry.session == nil || entry.session.Agent == nil {
+		return nil
+	}
+	ts := entry.session.Agent.State().Tools
+	if ts == nil {
+		return nil
+	}
+	if tool, ok := ts.Get(toolName); ok {
+		return tool.DisplayHint
+	}
+	return nil
+}
+
 // replaySessionHistory pushes the historical messages from a resumed session
 // to the ACP client as session update notifications. This allows the client
 // to display the full conversation history from previous turns.
@@ -700,9 +717,14 @@ func (pa *firAgent) replaySessionHistory(sessionID string, entry *firSession) {
 					tc := c.ToolCall
 					pendingTools[tc.ID] = pendingTool{name: tc.Name, args: tc.Arguments}
 
+					// The replayed message carries no display hint; resolve it
+					// by tool name from the session's registered tools so
+					// extension tool calls render as richly as on the live path.
+					hint := resolveToolHint(entry, tc.Name)
+
 					var startOpts []acpsdk.ToolCallStartOpt
 					startOpts = append(startOpts,
-						acpsdk.WithStartKind(MapToolKind(tc.Name)),
+						acpsdk.WithStartKind(MapToolKindForCall(tc.Name, tc.Arguments, hint)),
 						acpsdk.WithStartStatus("completed"),
 						acpsdk.WithStartRawInput(tc.Arguments),
 					)
@@ -710,7 +732,7 @@ func (pa *firAgent) replaySessionHistory(sessionID string, entry *firSession) {
 					if len(locs) > 0 {
 						startOpts = append(startOpts, acpsdk.WithStartLocations(locs))
 					}
-					_ = pa.conn.SessionUpdate(context.Background(), entry.notification(sid, acpsdk.StartToolCall(acpsdk.ToolCallId(tc.ID), BuildToolTitle(tc.Name, tc.Arguments), startOpts...)))
+					_ = pa.conn.SessionUpdate(context.Background(), entry.notification(sid, acpsdk.StartToolCall(acpsdk.ToolCallId(tc.ID), BuildToolTitleWithHint(tc.Name, tc.Arguments, hint), startOpts...)))
 				}
 			}
 
@@ -842,7 +864,7 @@ func (pa *firAgent) handleEvent(sessionID string, entry *firSession, event sessi
 
 		var startOpts []acpsdk.ToolCallStartOpt
 		startOpts = append(startOpts,
-			acpsdk.WithStartKind(MapToolKind(ev.ToolName)),
+			acpsdk.WithStartKind(MapToolKindForCall(ev.ToolName, argsMap, ev.DisplayHint)),
 			acpsdk.WithStartStatus("in_progress"),
 			acpsdk.WithStartRawInput(argsMap),
 		)
@@ -851,12 +873,12 @@ func (pa *firAgent) handleEvent(sessionID string, entry *firSession, event sessi
 		if len(locs) > 0 {
 			startOpts = append(startOpts, acpsdk.WithStartLocations(locs))
 		}
-		initContent := BuildToolInitialContent(ev.ToolName, argsMap)
+		initContent := BuildToolInitialContentWithHint(ev.ToolName, argsMap, ev.DisplayHint)
 		if len(initContent) > 0 {
 			startOpts = append(startOpts, acpsdk.WithStartContent(initContent))
 		}
 
-		_ = pa.conn.SessionUpdate(context.Background(), entry.notification(acpsdk.SessionId(sessionID), acpsdk.StartToolCall(acpsdk.ToolCallId(ev.ToolCallID), BuildToolTitle(ev.ToolName, argsMap), startOpts...)))
+		_ = pa.conn.SessionUpdate(context.Background(), entry.notification(acpsdk.SessionId(sessionID), acpsdk.StartToolCall(acpsdk.ToolCallId(ev.ToolCallID), BuildToolTitleWithHint(ev.ToolName, argsMap, ev.DisplayHint), startOpts...)))
 
 		// Keep the tool call visibly alive while it runs (see heartbeat.go).
 		pa.startToolHeartbeat(sessionID, entry, ev.ToolCallID)
