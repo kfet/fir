@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- **`brew-smoke (ubuntu-latest)` release leg is green again.** It had failed on every release since v0.90.2. `HOMEBREW_NO_INSTALL_FROM_API=1` — added to suppress a "Broken pipe" flake — forces brew to resolve through a local `homebrew/core` git checkout. The `ubuntu-latest` image ships none, so `brew tap` cloned core at master HEAD (1.4GB, 5.5min) while `HOMEBREW_NO_AUTO_UPDATE` held the image's library frozen at 6.0.11; weeks-newer core formulae then failed to import en masse (`undefined method 'run'/'on_macos'/'if_path_exists' for an instance of Homebrew::InstallSteps::DSL`) and `brew install` exited 1 on an unrelated core formula, even though `kfet/ai/fir` itself resolved. The macOS legs escaped only because their images ship an era-matched core checkout. Dropped that variable so the JSON API is used — our zero-dependency formula never needs core at all — and replaced the env hardening with a bounded 3-attempt retry plus `HOMEBREW_CURL_RETRIES`, which tolerates the transient pipe fault while a genuinely broken formula still fails all attempts and turns the leg red. The Linux leg now takes ~66s instead of 6.5min.
+
 ## [0.92.0] - 2026-08-02
 
 ### Fixed

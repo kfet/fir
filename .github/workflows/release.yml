@@ -224,14 +224,33 @@ jobs:
         os: [macos-latest, macos-15-intel, ubuntu-latest]
     runs-on: ${{ matrix.os }}
     # Linuxbrew intermittently dies with "Broken pipe" right after `brew tap`
-    # (during Homebrew's JSON-API / auto-update pipe work). Disabling those
-    # paths makes `brew tap`/`install` deterministic. Verified: unhardened
-    # flaked ~50% on ubuntu-latest, this env was 5/5 green. Harmless on macOS.
+    # (during Homebrew's JSON-API pipe work). That flake is handled by the
+    # bounded retry in the install step below, NOT by env hardening.
+    #
+    # DO NOT re-add HOMEBREW_NO_INSTALL_FROM_API=1. It was here to suppress
+    # that flake, but it also forces brew to resolve everything through a
+    # local homebrew/core git checkout. The ubuntu-latest image ships no core
+    # tap ("Homebrew/homebrew-core N/A"), so `brew tap` cloned core at master
+    # HEAD (1.4GB, 5.5min) while HOMEBREW_NO_AUTO_UPDATE kept the image's brew
+    # library frozen at 6.0.11. Weeks-newer core formulae then failed to
+    # import en masse with "undefined method 'run'/'on_macos'/'if_path_exists'
+    # for an instance of Homebrew::InstallSteps::DSL", and `brew install` exit
+    # 1 on an unrelated core formula even though kfet/ai/fir itself resolved
+    # fine. That reddened the Linux leg on every release from v0.90.2 on. The
+    # macOS legs only escaped because their images happen to ship a core
+    # checkout from the same era as their library.
+    #
+    # With the JSON API enabled our zero-dependency formula never needs core
+    # at all: the leg now finishes in ~66s instead of 6.5min, and it exercises
+    # the same path a real user does.
+    #
+    # Note: HOMEBREW_NO_* switches are presence-checked, not value-checked —
+    # setting one to "0" still counts as set. To disable one, delete the line.
     env:
       HOMEBREW_NO_AUTO_UPDATE: "1"
       HOMEBREW_NO_ANALYTICS: "1"
       HOMEBREW_NO_ENV_HINTS: "1"
-      HOMEBREW_NO_INSTALL_FROM_API: "1"
+      HOMEBREW_CURL_RETRIES: "5"
     steps:
       - name: Install via Homebrew tap
         run: |
@@ -242,8 +261,22 @@ jobs:
             eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
           fi
           brew --version
-          brew tap kfet/ai
-          brew install kfet/ai/fir
+          # Bounded retry for the transient "Broken pipe" during Homebrew's
+          # JSON API fetch. This tolerates a flaky network only: a genuinely
+          # broken formula (bad sha256, missing asset, unresolvable name)
+          # fails deterministically on all three attempts and turns the leg
+          # red, which is the point of the leg. Verified both ways on a real
+          # runner before landing.
+          ok=0
+          for attempt in 1 2 3; do
+            echo "--- attempt $attempt"
+            if brew tap | grep -qx 'kfet/ai' || brew tap kfet/ai; then
+              if brew install kfet/ai/fir; then ok=1; break; fi
+            fi
+            echo "attempt $attempt failed; retrying"
+            sleep 10
+          done
+          [ "$ok" = "1" ] || { echo "::error::brew install failed after 3 attempts"; exit 1; }
 
       - name: Exercise the installed binary
         run: |
