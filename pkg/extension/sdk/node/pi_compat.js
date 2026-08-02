@@ -543,6 +543,26 @@ function isToolCallEventType(toolName, event) {
 // ---------------------------------------------------------------------------
 
 /**
+ * Derive the handshake name for an extension entry point.
+ *
+ * fir discovers a package extension by its DIRECTORY name (the `main`
+ * convention), so a generic entry filename must not override it — otherwise
+ * every pi package would hand back `index` at the handshake and fir would
+ * log, name and address it as `index` rather than `pi-llama`. Only a
+ * specific filename is used as-is.
+ *
+ * @param {string} extensionPath
+ * @returns {string}
+ */
+function deriveExtensionName(extensionPath) {
+  const path = require("path");
+  const stem = path.basename(extensionPath, path.extname(extensionPath));
+  if (stem !== "index" && stem !== "main") return stem;
+  const dir = path.basename(path.dirname(path.resolve(extensionPath)));
+  return dir || stem;
+}
+
+/**
  * Load a pi-mono extension module and run it on fir.
  *
  * @param {string} extensionPath — path to the extension .ts/.js file
@@ -550,7 +570,7 @@ function isToolCallEventType(toolName, event) {
  * @param {string} [opts.name] — extension name for init handshake
  */
 async function loadAndRun(extensionPath, opts) {
-  const name = (opts && opts.name) || require("path").basename(extensionPath, require("path").extname(extensionPath));
+  const name = (opts && opts.name) || deriveExtensionName(extensionPath);
 
   // Create the pi-mono API facade
   const piApi = createExtensionAPI();
@@ -600,6 +620,7 @@ if (require.main === module) {
 // ---------------------------------------------------------------------------
 
 module.exports = {
+  deriveExtensionName,
   createExtensionAPI,
   wrapContext,
   loadAndRun,

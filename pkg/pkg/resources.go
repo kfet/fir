@@ -202,32 +202,46 @@ func autoDiscover(dir string) (*PackageResources, error) {
 // collected as individual files and must declare frontmatter.
 //
 // os.Stat follows symlinks, so a `main → run.sh` symlink whose target is an
-// executable regular file qualifies. A dangling `main → …/run.sh` symlink
-// (whose SDK-cache target was pruned) is self-healed to the current SDK's
-// run.sh so the extension keeps loading across SDK upgrades.
+// executable regular file qualifies. A `main → …/run.sh` symlink left behind
+// by an older SDK — dangling (cache dir pruned) or merely stale (cache dir
+// survives, so it silently keeps running the previous SDK) — is re-pointed at
+// the current SDK's run.sh, so the extension both keeps loading and stays in
+// step with the SDK across fir upgrades.
 func dirEntryPoint(dir string) string {
 	for _, cand := range []string{"main", filepath.Base(dir)} {
 		if filepath.Ext(cand) != "" {
 			continue // only extensionless entry points
 		}
 		p := filepath.Join(dir, cand)
-		info, err := os.Stat(p)
-		if err == nil && info.Mode().IsRegular() && info.Mode()&0111 != 0 {
+		// Re-point a stale runtime-wrapper symlink first: an entry that
+		// still resolves to a PREVIOUS SDK cache dir would otherwise keep
+		// running that SDK's run.sh (and its fir_ext.js) forever.
+		if healRunShSymlink(p) {
 			return p
 		}
-		// Self-heal a dangling runtime-wrapper symlink, then re-check.
-		if healRunShSymlink(p) {
+		info, err := os.Stat(p)
+		if err == nil && info.Mode().IsRegular() && info.Mode()&0111 != 0 {
 			return p
 		}
 	}
 	return ""
 }
 
-// healRunShSymlink repairs a dangling symlink at p that points at a `run.sh`
-// in a now-missing SDK cache directory, re-pointing it to the current SDK's
-// run.sh. Returns true only when p ends up a valid `run.sh` symlink. It is a
-// no-op (false) for non-symlinks, already-valid symlinks, and symlinks that do
-// not target a `run.sh` (so it never touches unrelated user symlinks).
+// healRunShSymlink brings a runtime-wrapper symlink at p up to date with the
+// current SDK, covering both ways it can go stale across a fir upgrade:
+//
+//   - DANGLING — the SDK cache dir it pointed at was pruned, so the extension
+//     stops loading entirely.
+//   - STALE — the old cache dir survives, so the symlink still resolves and
+//     the extension silently keeps running the PREVIOUS SDK's run.sh (and
+//     therefore the previous fir_ext.js/pi_compat.js). This is the nastier of
+//     the two: everything looks healthy while the extension is answering with
+//     an SDK several releases behind.
+//
+// Returns true only when p ends up a valid `run.sh` symlink. It is a no-op
+// (false) for non-symlinks and for symlinks that do not target a `run.sh`
+// inside an SDK cache directory, so a hand-made symlink to a user's own
+// run.sh is never touched.
 func healRunShSymlink(p string) bool {
 	target, err := os.Readlink(p)
 	if err != nil {
@@ -236,18 +250,40 @@ func healRunShSymlink(p string) bool {
 	if filepath.Base(target) != "run.sh" {
 		return false // not one of our runtime-wrapper symlinks
 	}
-	if _, err := os.Stat(p); err == nil {
-		return true // already resolves — nothing to heal
+	_, statErr := os.Stat(p)
+	resolves := statErr == nil
+	// Only ever rewrite a link into fir's SDK cache. A resolving link that
+	// points somewhere else is the user's, and is left exactly as-is.
+	if resolves && !isSDKCachePath(target) {
+		return true
 	}
 	runSh, err := jsRunShPath()
 	if err != nil || runSh == "" {
-		return false
+		return resolves
+	}
+	if resolves && target == runSh {
+		return true // already current — nothing to do
 	}
 	if err := os.Remove(p); err != nil {
-		return false
+		return resolves
 	}
 	if err := os.Symlink(runSh, p); err != nil {
 		return false
 	}
 	return true
+}
+
+// isSDKCachePath reports whether target lives inside fir's extracted-SDK
+// cache (…/sdks/<hash>/…), which is the only place healRunShSymlink is
+// allowed to re-point a symlink away from.
+func isSDKCachePath(target string) bool {
+	for dir := filepath.Dir(target); ; dir = filepath.Dir(dir) {
+		if filepath.Base(dir) == "sdks" {
+			return true
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return false
+		}
+	}
 }

@@ -309,8 +309,33 @@ async function testEventAck() {
   assert.strictEqual(lines.length, before, "notification produced no response");
 }
 
+// --- pi_compat.deriveExtensionName -----------------------------------------
+//
+// fir discovers a package extension by its DIRECTORY name (the `main`
+// convention). A generic entry filename must therefore not win, or every pi
+// package would hand back "index" at the handshake and fir would log and
+// address it as `index` instead of `pi-llama`.
+function testDeriveExtensionName() {
+  assert.strictEqual(
+    piCompat.deriveExtensionName("/pkgs/pi-llama/index.ts"),
+    "pi-llama",
+    "index.ts → directory name"
+  );
+  assert.strictEqual(
+    piCompat.deriveExtensionName("/pkgs/pi-llama/main.js"),
+    "pi-llama",
+    "main.js → directory name"
+  );
+  assert.strictEqual(
+    piCompat.deriveExtensionName("/pkgs/pi-llama/todos.ts"),
+    "todos",
+    "a specific filename is used as-is"
+  );
+}
+
 main()
   .then(testWrapContextUi)
+  .then(testDeriveExtensionName)
   .then(testMapHookResultToolCall)
   .catch((err) => {
     console.error(err);

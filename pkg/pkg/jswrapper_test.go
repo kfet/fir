@@ -276,3 +276,71 @@ func TestDanglingMainSymlinkSelfHeals(t *testing.T) {
 		t.Errorf("healed target = %q, want a run.sh", target)
 	}
 }
+
+// TestStaleMainSymlinkRepointed covers the quieter half of SDK drift: the old
+// SDK cache dir still EXISTS, so a `main → <old>/sdks/<hash>/node/run.sh`
+// symlink keeps resolving and the extension silently runs a superseded
+// fir_ext.js/pi_compat.js — everything looks healthy while the extension is
+// several releases behind. Discovery must re-point it at the current SDK.
+func TestStaleMainSymlinkRepointed(t *testing.T) {
+	pkgDir := filepath.Join(t.TempDir(), "pi-llama")
+	writePkgFile(t, filepath.Join(pkgDir, "index.ts"), "export default function(pi){}\n", 0o644)
+
+	// A previous SDK cache dir that still exists, with a runnable run.sh.
+	oldSDK := filepath.Join(t.TempDir(), "sdks", "0ldc0de", "node")
+	oldRunSh := filepath.Join(oldSDK, "run.sh")
+	writePkgFile(t, oldRunSh, "#!/bin/sh\nexit 0\n", 0o755)
+
+	main := filepath.Join(pkgDir, "main")
+	if err := os.Symlink(oldRunSh, main); err != nil {
+		t.Fatal(err)
+	}
+	// Precondition: it resolves fine — nothing looks broken.
+	if _, err := os.Stat(main); err != nil {
+		t.Fatalf("precondition: stale main should still resolve: %v", err)
+	}
+
+	if _, err := ScanPackageResources(pkgDir); err != nil {
+		t.Fatalf("ScanPackageResources: %v", err)
+	}
+
+	current, err := jsRunShPath()
+	if err != nil {
+		t.Fatalf("jsRunShPath: %v", err)
+	}
+	target, err := os.Readlink(main)
+	if err != nil {
+		t.Fatalf("readlink: %v", err)
+	}
+	if target != current {
+		t.Errorf("stale main not re-pointed: target=%q, want %q", target, current)
+	}
+}
+
+// TestForeignRunShSymlinkUntouched guards the blast radius of the re-pointing
+// above: a symlink to a run.sh that is NOT inside fir's SDK cache belongs to
+// the user and must survive discovery unchanged.
+func TestForeignRunShSymlinkUntouched(t *testing.T) {
+	pkgDir := filepath.Join(t.TempDir(), "custom-ext")
+	writePkgFile(t, filepath.Join(pkgDir, "index.ts"), "export default function(pi){}\n", 0o644)
+
+	mine := filepath.Join(t.TempDir(), "my-runtime", "run.sh")
+	writePkgFile(t, mine, "#!/bin/sh\nexit 0\n", 0o755)
+
+	main := filepath.Join(pkgDir, "main")
+	if err := os.Symlink(mine, main); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := ScanPackageResources(pkgDir); err != nil {
+		t.Fatalf("ScanPackageResources: %v", err)
+	}
+
+	target, err := os.Readlink(main)
+	if err != nil {
+		t.Fatalf("readlink: %v", err)
+	}
+	if target != mine {
+		t.Errorf("user symlink was rewritten: target=%q, want %q", target, mine)
+	}
+}
