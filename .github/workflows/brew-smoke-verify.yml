@@ -42,14 +42,14 @@ jobs:
     env: *id001
     steps:
     - name: 'shim: fail the first install'
-      run: "set -euxo pipefail\nmkdir -p /tmp/shim\ncat > /tmp/shim/brew <<'EOF'\n#!/usr/bin/env bash\nreal=/home/linuxbrew/.linuxbrew/bin/brew\nif [ \"$1\" = \"install\" ] && [ ! -f /tmp/shim/fired ];\
-        \ then\n  touch /tmp/shim/fired\n  echo \"SHIM: transient failure on first install\" >&2\n  exit 1\nfi\nexec \"$real\" \"$@\"\nEOF\nchmod +x /tmp/shim/brew\n"
+      run: "set -euxo pipefail\nmkdir -p /tmp/shim\n# Intercept at brew's real path, not via PATH: the step under test runs\n# `eval \"$(brew shellenv)\"`, which prepends the real brew dir to PATH and so\n\
+        # would shadow any /tmp/shim entry.\nreal=/home/linuxbrew/.linuxbrew/bin/brew\ncp \"$real\" /tmp/shim/brew-real\ncat > \"$real\" <<'EOF'\n#!/usr/bin/env bash\nif [ \"$1\" = \"install\" ] && [ !\
+        \ -f /tmp/shim/fired ]; then\n  touch /tmp/shim/fired\n  echo \"SHIM: transient failure on first install\" >&2\n  exit 1\nfi\nexec /tmp/shim/brew-real \"$@\"\nEOF\nchmod +x \"$real\"\n"
     - name: Install via Homebrew tap (with shim)
-      run: "export PATH=\"/tmp/shim:$PATH\"\nset -euxo pipefail\n# Linuxbrew lives at /home/linuxbrew/.linuxbrew on Ubuntu\n# runners but isn't on PATH by default.\nif [ -x /home/linuxbrew/.linuxbrew/bin/brew\
-        \ ]; then\n  eval \"$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)\"\nfi\nbrew --version\n# Bounded retry for the transient \"Broken pipe\" during Homebrew's\n# JSON API fetch. This tolerates a\
-        \ flaky network only: a genuinely\n# broken formula (bad sha256, missing asset, unresolvable name)\n# fails deterministically on all three attempts and turns the leg\n# red, which is the point of\
-        \ the leg. Verified both ways on a real\n# runner before landing. `brew tap` is idempotent, so a retry can\n# just repeat it rather than testing for it first.\nok=0\nfor attempt in 1 2 3; do\n \
-        \ echo \"--- attempt $attempt\"\n  if brew tap kfet/ai && brew install kfet/ai/fir; then ok=1; break; fi\n  echo \"attempt $attempt failed\"\n  [ \"$attempt\" = 3 ] || sleep 10\ndone\n[ \"$ok\"\
-        \ = \"1\" ] || { echo \"::error::brew install failed after 3 attempts\"; exit 1; }\ntest -f /tmp/shim/fired || { echo \"::error::shim never fired\"; exit 1; }\necho \"OK: attempt 2 re-tapped idempotently\
-        \ and installed\"\n"
+      run: "set -euxo pipefail\n# Linuxbrew lives at /home/linuxbrew/.linuxbrew on Ubuntu\n# runners but isn't on PATH by default.\nif [ -x /home/linuxbrew/.linuxbrew/bin/brew ]; then\n  eval \"$(/home/linuxbrew/.linuxbrew/bin/brew\
+        \ shellenv)\"\nfi\nbrew --version\n# Bounded retry for the transient \"Broken pipe\" during Homebrew's\n# JSON API fetch. This tolerates a flaky network only: a genuinely\n# broken formula (bad\
+        \ sha256, missing asset, unresolvable name)\n# fails deterministically on all three attempts and turns the leg\n# red, which is the point of the leg. Verified both ways on a real\n# runner before\
+        \ landing. `brew tap` is idempotent, so a retry can\n# just repeat it rather than testing for it first.\nok=0\nfor attempt in 1 2 3; do\n  echo \"--- attempt $attempt\"\n  if brew tap kfet/ai &&\
+        \ brew install kfet/ai/fir; then ok=1; break; fi\n  echo \"attempt $attempt failed\"\n  [ \"$attempt\" = 3 ] || sleep 10\ndone\n[ \"$ok\" = \"1\" ] || { echo \"::error::brew install failed after\
+        \ 3 attempts\"; exit 1; }\ntest -f /tmp/shim/fired || { echo \"::error::shim never fired\"; exit 1; }\necho \"OK: attempt 2 re-tapped idempotently and installed\"\n"
     - *id002
