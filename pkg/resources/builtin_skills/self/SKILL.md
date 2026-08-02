@@ -416,6 +416,20 @@ This lets you establish a convention (e.g. "every project keeps skills in `./ski
 
 For project-specific settings (`.fir/settings.json`), relative paths also resolve against cwd (the project root), which is the natural expectation.
 
+## Remote hosts (`remote` extension)
+
+The builtin `remote` extension gives the agent five tools for working over ssh, so remote work never needs hand-written ssh one-liners inside `Bash`:
+
+- **`rexec(host, command, timeout_s, cwd, detach)`** — run a shell script on a remote host. The script is shipped on **ssh stdin** to `bash -l -s`, never as `ssh host "bash -lc '...'"`, so nothing is re-split by an intermediate shell and no escaping is needed. `detach=True` runs it under `systemd-run --user --collect` (fallback: double-forked `setsid`) on the remote box and returns a job id.
+- **`rjob(host, id, action)`** — `status` / `log` / `tail` / `kill` for a detached job. State lives entirely in `~/.cache/fir/rjobs/<id>.{log,rc,pid}` **on the remote host** — there is no local registry to drift.
+- **`rput` / `rget`** — scp file transfer sharing the same flags and result envelope.
+- **`rtmux(host, action, ...)`** — `ls | new | send | cap | kill`. tmux on the remote host **is** the PTY; every action is a stateless short exec (no held `ssh -tt`). `cap` returns `unchanged: true` when the pane is byte-identical to the last capture, so polling is cheap.
+- **`rhosts(probe)`** — list `Host` stanzas from `~/.ssh/config` (Includes followed), optionally with a parallel reachability sweep.
+
+All connection flags (`BatchMode`, `ConnectTimeout`, `ServerAliveInterval`, and a `ControlMaster` mux at `~/.ssh/fir-cm-%C` with `ControlPersist=120`) are owned by the extension. Hosts come from `~/.ssh/config`; there is no fir-side host registry. Every tool returns a discriminated envelope — `outcome` is one of `ok | nonzero_exit | timeout | unreachable | auth_failed | no_tmux | no_target`, with `stdout_bytes` always explicit. Only transport/target failures are tool errors; a remote command exiting nonzero is ordinary signal.
+
+These tools make teleoperation cheap, which is a trap: for substantial work on another host, `rput` a brief and `rtmux new` an agent over there rather than driving the job one call at a time.
+
 ## Key Concepts
 
 - **Sessions** — conversations are persisted and can be continued (`-c`) or resumed (`-r`). Sessions form a tree; double-Escape or `/tree` navigates branches. `/session` (or `Ctrl+S`) toggles a sticky, collapsible session-info overlay above the editor (version, IDs, message/token stats, enabled extensions); toggle it again, or `Ctrl+L`, to dismiss it without leaving anything in the transcript. Use `/new [prompt]` to start a fresh session, optionally with an initial prompt that is submitted immediately.

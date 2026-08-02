@@ -33,10 +33,11 @@ import (
 //	autoresearch:   2 tools (run_experiment, log_experiment)
 //	handoff:        3 tools (self_handoff, bookmark, pin)
 //	forge:          1 tool  (forge_tool)
+//	remote:         6 tools (rexec, rjob, rput, rget, rtmux, rhosts)
 //
 // The exact composition is tested elsewhere; this constant pins the total
 // for shape-checking tests in this file.
-const builtinToolCount = 21
+const builtinToolCount = 27
 
 // Write a test extension script that responds to the init handshake
 // and then stays alive reading from stdin.
