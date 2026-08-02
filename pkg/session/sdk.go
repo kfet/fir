@@ -66,6 +66,11 @@ type CreateAgentSessionOptions struct {
 	// OnRetry, if set, is forwarded to the agent so that retryable pre-stream
 	// errors can be surfaced to the user.
 	OnRetry func(attempt int, delaySeconds float64, errMsg string)
+
+	// MCPConfigured records whether MCP servers are configured for this
+	// session. Forwarded to AgentSession so the default MCP tool-call timeout
+	// is advertised in the system prompt.
+	MCPConfigured bool
 }
 
 // CreateAgentSessionResult is returned by CreateAgentSession.
@@ -317,6 +322,7 @@ func CreateAgentSession(ctx context.Context, opts CreateAgentSessionOptions) (*C
 		UsageTracker:     opts.UsageTracker,
 		Cwd:              cwd,
 		ExtReady:         opts.ExtReady,
+		MCPConfigured:    opts.MCPConfigured,
 	})
 
 	// Register session-aware tools (plan tool needs a session reference).

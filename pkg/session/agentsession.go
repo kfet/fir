@@ -200,6 +200,12 @@ type AgentSessionOptions struct {
 	// upgrade — when extension startup is slow because the embedded SDK is
 	// re-extracted — sees fully-initialised credentials and headers.
 	ExtReady <-chan struct{}
+
+	// MCPConfigured records whether any MCP servers are configured for this
+	// session. Used to advertise the default MCP tool-call timeout in the
+	// system prompt (MCP tools arrive asynchronously, so this build-time
+	// signal is race-free where a live tool-set scan is not).
+	MCPConfigured bool
 }
 
 // ============================================================================
@@ -256,6 +262,10 @@ type AgentSession struct {
 	// waits on it before starting a turn so the first LLM call after an
 	// upgrade sees fully-initialised auth-provider OAuth registrations.
 	extReady <-chan struct{}
+
+	// mcpConfigured records whether MCP servers are configured for this
+	// session (see AgentSessionOptions.MCPConfigured).
+	mcpConfigured bool
 }
 
 // NewAgentSession creates a new AgentSession.
@@ -272,6 +282,7 @@ func NewAgentSession(opts AgentSessionOptions) *AgentSession {
 		usageTracker:     opts.UsageTracker,
 		sessionDate:      time.Now().Format("2006-01-02"),
 		extReady:         opts.ExtReady,
+		mcpConfigured:    opts.MCPConfigured,
 	}
 
 	// Subscribe to agent events for internal handling
@@ -709,11 +720,12 @@ func (s *AgentSession) buildSystemPrompt() {
 	}
 
 	prompt := resources.BuildSystemPrompt(resources.BuildSystemPromptOptions{
-		CustomPrompt: s.resourceLoader.GetSystemPrompt(), // "" = use default prompt
-		Skills:       skills,
-		ContextFiles: contextFiles,
-		Cwd:          s.cwd,
-		Date:         s.sessionDate,
+		CustomPrompt:   s.resourceLoader.GetSystemPrompt(), // "" = use default prompt
+		Skills:         skills,
+		ContextFiles:   contextFiles,
+		Cwd:            s.cwd,
+		Date:           s.sessionDate,
+		MCPToolTimeout: s.mcpPromptTimeout(),
 	})
 
 	// Append additional instructions
@@ -1843,6 +1855,46 @@ func (s *AgentSession) RegisterSessionTools() {
 // GetTools returns the current tool set.
 func (s *AgentSession) GetTools() *agent.ToolSet {
 	return s.Agent.State().Tools
+}
+
+// mcpToolTimeout resolves the wall-clock bound for a single model-dispatched
+// MCP tool call from settings (falling back to the default when no settings
+// manager is present, e.g. in tests).
+func (s *AgentSession) mcpToolTimeout() time.Duration {
+	if s.SettingsManager == nil {
+		return config.DefaultMCPToolTimeout
+	}
+	return s.SettingsManager.GetMCPToolTimeout()
+}
+
+// mcpPromptTimeout returns the MCP tool-call timeout to advertise in the
+// system prompt, or 0 to advertise nothing. It advertises only when MCP is
+// present (configured at build time, or an mcp__ tool is live in the tool set)
+// AND the bound is enabled (> 0).
+func (s *AgentSession) mcpPromptTimeout() time.Duration {
+	timeout := s.mcpToolTimeout()
+	if timeout <= 0 {
+		return 0
+	}
+	if s.mcpConfigured || s.hasMCPTools() {
+		return timeout
+	}
+	return 0
+}
+
+// hasMCPTools reports whether any MCP-adapted tool (mcp__ prefix) is currently
+// registered in the agent's tool set.
+func (s *AgentSession) hasMCPTools() bool {
+	tools := s.GetTools()
+	if tools == nil {
+		return false
+	}
+	for _, name := range tools.Names() {
+		if strings.HasPrefix(name, "mcp__") {
+			return true
+		}
+	}
+	return false
 }
 
 // Introspection is a snapshot of the current session's runtime state,

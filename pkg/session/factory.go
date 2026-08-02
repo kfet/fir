@@ -183,6 +183,7 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 		UsageTracker:     opts.UsageTracker,
 		ExtReady:         opts.ExtReady,
 		OnRetry:          opts.OnRetry,
+		MCPConfigured:    len(opts.MCPConfigs) > 0,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create session: %w", err)
@@ -258,6 +259,14 @@ func StartMCPManager(ctx context.Context, sess *AgentSession, configs map[string
 
 	var prevMCPNames []string
 	mgr.SetOnToolsChanged(func(mcpTools []agent.AgentTool) {
+		// Bound each model-dispatched MCP tool call with the default timeout,
+		// innermost — on the RAW Execute, before hook wrapping — so N covers
+		// only the MCP round-trip and never a blocking OnToolCall hook.
+		timeout := sess.mcpToolTimeout()
+		for i := range mcpTools {
+			mcpTools[i] = wrapMCPToolTimeout(mcpTools[i], timeout)
+		}
+
 		if hooks := sess.Hooks(); hooks != nil && (hooks.OnToolCall != nil || hooks.OnToolResult != nil) {
 			mcpTools = sess.WrapToolsWithHooks(mcpTools)
 		}

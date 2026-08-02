@@ -248,6 +248,12 @@ func (b *SessionBridge) CallTool(ctx context.Context, name string, params map[st
 		params = make(map[string]any)
 	}
 
+	// Mark this as an internal, re-entrant tool call so the default MCP
+	// tool-call timeout is NOT applied here: the caller (pipe/wait/aside or
+	// another extension) governs the deadline itself, and a step declaring
+	// timeout=-1 must be able to run an MCP tool arbitrarily long.
+	ctx = session.WithInternalToolCall(ctx)
+
 	result, err := tool.Execute(ctx, fmt.Sprintf("ext-call-%s", name), params, nil)
 	if err != nil {
 		return ToolResult{}, err

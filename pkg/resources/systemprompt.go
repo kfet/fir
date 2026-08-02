@@ -28,6 +28,10 @@ type BuildSystemPromptOptions struct {
 	// If empty, defaults to time.Now() formatted as YYYY-MM-DD.
 	// Set this once per session to avoid cache-breaking date changes at midnight.
 	Date string
+	// MCPToolTimeout, when > 0, advertises the default per-call timeout applied
+	// to MCP tools. Set only when MCP tools are present so the block is omitted
+	// otherwise. Zero means "no MCP tools / bound disabled" — emit nothing.
+	MCPToolTimeout time.Duration
 }
 
 // BuildSystemPrompt constructs the system prompt with tools, guidelines, and context.
@@ -98,6 +102,9 @@ func buildDefaultPrompt(opts BuildSystemPromptOptions, promptCwd, date, appendSe
 	guidelines = append(guidelines, "Show file paths clearly when working with files")
 	if toolSet["plan"] {
 		guidelines = append(guidelines, "For non-trivial tasks, use the plan tool to break work into steps and track progress")
+	}
+	if opts.MCPToolTimeout > 0 {
+		guidelines = append(guidelines, fmt.Sprintf("MCP (mcp__*) tool calls have a default timeout of %s; a call that exceeds it returns a timeout error you can act on (retry, try another approach, or ask the user to raise mcp.toolTimeoutSeconds). This bounds wall-clock time, not silence.", opts.MCPToolTimeout))
 	}
 
 	var guidelineLines []string

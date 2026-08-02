@@ -251,6 +251,37 @@ the LLM sees the same documentation the tool server provides.
 
 ---
 
+## Tool-call timeout
+
+Every MCP tool call the model dispatches is bounded by a default wall-clock timeout so an
+unresponsive server cannot hang the whole turn. When the deadline is hit the underlying
+`tools/call` is genuinely cancelled (the context is a child of the turn context, so the
+cancellation propagates into the MCP client and unwinds the round-trip) and the model receives a
+clean, actionable result — `MCP tool "mcp__srv__x" timed out after 2m0s …` — rather than a raw
+context error.
+
+- **Default:** 120 seconds. (The MCP ecosystem norm is 60s; fir is deliberately more generous so
+  legitimately slow tools — browser automation, large fetches/queries — are not clipped.)
+- **Configure** via `settings.json` (global or project):
+
+  ```json
+  { "mcp": { "toolTimeoutSeconds": 120 } }
+  ```
+
+  or the `FIR_MCP_TOOL_TIMEOUT` environment variable (seconds), which takes precedence. A value
+  `<= 0` disables the bound entirely (a call then runs until it finishes or the turn is cancelled).
+- **Scope:** only tool calls the model dispatches directly are bounded. Calls issued *through* a
+  built-in or extension — `pipe`, `wait`, `aside`, or any extension calling a tool — are governed
+  by that caller's own timeout, so a `pipe`/`wait` step declaring `timeout=-1` can still run a slow
+  MCP tool arbitrarily long.
+- The bound is on wall-clock time, not silence: a tool that streams progress notifications is still
+  cut off at the deadline.
+
+When MCP tools are present, the system prompt tells the model the default exists so it can react to
+a timeout (retry, take another approach, or ask the user to raise the setting).
+
+---
+
 ## ACP injection — passing `mcpServers` in `session/new`
 
 When fir is running in ACP mode (e.g., inside a VS Code extension), an ACP client can supply

@@ -6,8 +6,20 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
+	"time"
 )
+
+// DefaultMCPToolTimeout is the wall-clock timeout applied to a single MCP
+// tool call dispatched by the model when no explicit override is configured.
+// It bounds an unresponsive MCP server so a hung tools/call cannot hang the
+// whole turn. The ecosystem norm (MCP TypeScript SDK) is 60s; fir uses a more
+// conservative 120s so legitimately slow tools (browser automation, large
+// fetches/queries) are not clipped. Overridable via settings.json
+// (mcp.toolTimeoutSeconds) or the FIR_MCP_TOOL_TIMEOUT env var (seconds);
+// a value <= 0 disables the bound entirely.
+const DefaultMCPToolTimeout = 120 * time.Second
 
 // CompactionSettings controls context compaction behavior.
 type CompactionSettings struct {
@@ -27,6 +39,16 @@ type ServerCompactionSettings struct {
 // BranchSummarySettings controls branch summary behavior.
 type BranchSummarySettings struct {
 	ReserveTokens *int `json:"reserveTokens,omitempty"`
+}
+
+// MCPSettings controls behaviour of MCP (Model Context Protocol) servers.
+type MCPSettings struct {
+	// ToolTimeoutSeconds bounds a single model-dispatched MCP tool call.
+	//   nil / absent : use DefaultMCPToolTimeout (or FIR_MCP_TOOL_TIMEOUT).
+	//   > 0          : that many seconds.
+	//   <= 0         : disable the bound (call runs until it finishes or the
+	//                  turn is cancelled).
+	ToolTimeoutSeconds *int `json:"toolTimeoutSeconds,omitempty"`
 }
 
 // RetrySettings controls retry behavior.
@@ -104,6 +126,7 @@ type Settings struct {
 	ServerTools            []string                  `json:"serverTools,omitempty"`
 	ServerCompaction       *ServerCompactionSettings `json:"serverCompaction,omitempty"`
 	DebugLog               *DebugLogSettings         `json:"debugLog,omitempty"`
+	MCP                    *MCPSettings              `json:"mcp,omitempty"`
 }
 
 // deepMergeSettings merges overrides into base, with nested objects merged recursively.
@@ -251,6 +274,16 @@ func deepMergeSettings(base, overrides Settings) Settings {
 			mergeInt(&dl.CheckEveryWrites, overrides.DebugLog.CheckEveryWrites)
 			mergeInt(&dl.CheckEverySeconds, overrides.DebugLog.CheckEverySeconds)
 			r.DebugLog = &dl
+		}
+	}
+
+	if overrides.MCP != nil {
+		if r.MCP == nil {
+			r.MCP = overrides.MCP
+		} else {
+			m := *r.MCP
+			mergeInt(&m.ToolTimeoutSeconds, overrides.MCP.ToolTimeoutSeconds)
+			r.MCP = &m
 		}
 	}
 
@@ -906,6 +939,32 @@ func (sm *SettingsManager) GetCollapseChangelog() bool {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 	return boolDefault(sm.settings.CollapseChangelog, false)
+}
+
+// GetMCPToolTimeout returns the wall-clock bound for a single model-dispatched
+// MCP tool call. Precedence: FIR_MCP_TOOL_TIMEOUT env (seconds) > settings.json
+// mcp.toolTimeoutSeconds > DefaultMCPToolTimeout. A configured value <= 0
+// disables the bound and returns 0 (call runs until it finishes or the turn is
+// cancelled).
+func (sm *SettingsManager) GetMCPToolTimeout() time.Duration {
+	if v := os.Getenv("FIR_MCP_TOOL_TIMEOUT"); v != "" {
+		if secs, err := strconv.ParseFloat(v, 64); err == nil {
+			if secs <= 0 {
+				return 0
+			}
+			return time.Duration(secs * float64(time.Second))
+		}
+	}
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	if sm.settings.MCP != nil && sm.settings.MCP.ToolTimeoutSeconds != nil {
+		secs := *sm.settings.MCP.ToolTimeoutSeconds
+		if secs <= 0 {
+			return 0
+		}
+		return time.Duration(secs) * time.Second
+	}
+	return DefaultMCPToolTimeout
 }
 
 func (sm *SettingsManager) GetEnabledExtensions() []string {

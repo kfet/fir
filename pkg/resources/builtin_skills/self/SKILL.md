@@ -605,6 +605,12 @@ All fields are optional. Nested objects merge recursively; arrays and primitives
     "checkEverySeconds": 30              // ...or once per this many seconds
   },
 
+  "mcp": {                               // MCP (Model Context Protocol) behaviour
+    "toolTimeoutSeconds": 120            // Default per-call timeout for model-dispatched MCP tools
+                                         // (default 120; <=0 disables; env FIR_MCP_TOOL_TIMEOUT overrides).
+                                         // Extension/pipe/wait calls (incl. timeout=-1) are never clipped.
+  },
+
   // Internal (managed by fir)
   "lastChangelogVersion": "",            // Last changelog version shown to user
   "packages": []                         // Package metadata

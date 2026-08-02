@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -518,4 +519,29 @@ func (sm *SettingsManager) GetCodeBlockIndent() string {
 		return *sm.settings.Markdown.CodeBlockIndent
 	}
 	return "  "
+}
+
+func TestSettingsManager_GetMCPToolTimeout(t *testing.T) {
+	// Default when unset.
+	sm := NewInMemorySettingsManager(Settings{})
+	assert.Equal(t, DefaultMCPToolTimeout, sm.GetMCPToolTimeout())
+
+	// Explicit positive value from settings.
+	secs := 45
+	sm = NewInMemorySettingsManager(Settings{MCP: &MCPSettings{ToolTimeoutSeconds: &secs}})
+	assert.Equal(t, 45*time.Second, sm.GetMCPToolTimeout())
+
+	// Non-positive disables the bound.
+	zero := 0
+	sm = NewInMemorySettingsManager(Settings{MCP: &MCPSettings{ToolTimeoutSeconds: &zero}})
+	assert.Equal(t, time.Duration(0), sm.GetMCPToolTimeout())
+
+	// Env override wins over settings.
+	t.Setenv("FIR_MCP_TOOL_TIMEOUT", "5")
+	sm = NewInMemorySettingsManager(Settings{MCP: &MCPSettings{ToolTimeoutSeconds: &secs}})
+	assert.Equal(t, 5*time.Second, sm.GetMCPToolTimeout())
+
+	// Env override can disable.
+	t.Setenv("FIR_MCP_TOOL_TIMEOUT", "0")
+	assert.Equal(t, time.Duration(0), sm.GetMCPToolTimeout())
 }

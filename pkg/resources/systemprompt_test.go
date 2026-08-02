@@ -3,6 +3,7 @@ package resources
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestBuildSystemPrompt_Default(t *testing.T) {
@@ -145,5 +146,22 @@ func TestBuildSystemPrompt_EmptySelectedToolsIncludesSkills(t *testing.T) {
 	}
 	if !strings.Contains(prompt, "my-skill") {
 		t.Error("empty SelectedTools should still list skill names")
+	}
+}
+
+func TestBuildSystemPrompt_MCPTimeoutBlock(t *testing.T) {
+	// Present when MCPToolTimeout > 0.
+	prompt := BuildSystemPrompt(BuildSystemPromptOptions{
+		Cwd:            "/test",
+		MCPToolTimeout: 120 * time.Second,
+	})
+	if !strings.Contains(prompt, "mcp__") || !strings.Contains(prompt, "2m0s") {
+		t.Errorf("expected MCP timeout guideline advertising 2m0s, got:\n%s", prompt)
+	}
+
+	// Absent when zero (no MCP tools / disabled).
+	prompt = BuildSystemPrompt(BuildSystemPromptOptions{Cwd: "/test"})
+	if strings.Contains(prompt, "mcp__") {
+		t.Errorf("MCP timeout guideline should be omitted when timeout is 0, got:\n%s", prompt)
 	}
 }
