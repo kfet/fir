@@ -111,12 +111,64 @@ class TestAutoresearchLock(unittest.TestCase):
         self.assertNotEqual(out["locked_sha256"], out["current_sha256"])
 
     # An experiment must not be able to authorise itself with its own lock file.
-    def test_selfsigned_lock_in_subworktree_is_ignored(self):
+    def test_selfsigned_lock_in_subworktree_is_refused_as_ambiguous(self):
+        """A forged in-worktree lock must never authorise its own benchmark."""
         autoresearch.lock_benchmark({"cwd": self.repo}, self.ctx)
         wt = self._worktree("exp-selfsigned", TAMPERED_BENCH)
         autoresearch.lock_benchmark({"cwd": wt}, self.ctx)  # forged lock, in-worktree
 
-        result = autoresearch.run_experiment({"cwd": wt}, self.ctx)
+        with self.assertRaises(fir_ext.ToolError) as cm:
+            autoresearch.run_experiment({"cwd": wt}, self.ctx)
+        self.assertIn("Ambiguous benchmark lock", str(cm.exception))
+        self.assertIn("2 distinct locks", str(cm.exception))
+
+    def test_campaign_root_ignores_stranger_lock_in_sibling_worktree(self):
+        """A stale/other-campaign lock elsewhere in the repo must not be silently used."""
+        autoresearch.lock_benchmark({"cwd": self.repo}, self.ctx)
+        stranger = self._worktree("other-campaign")
+        (Path(stranger) / "autoresearch_bench.sh").write_text(TAMPERED_BENCH)
+        autoresearch.lock_benchmark({"cwd": stranger}, self.ctx)
+
+        # Re-running the baseline from the campaign root is legitimate: it must
+        # not be refused with a bogus "benchmark modified" against the stranger.
+        with self.assertRaises(fir_ext.ToolError) as cm:
+            autoresearch.run_experiment({"cwd": self.repo}, self.ctx)
+        self.assertIn("Ambiguous benchmark lock", str(cm.exception))
+        self.assertNotIn("Benchmark modified", str(cm.exception))
+
+        # …and the documented escape hatch makes the legitimate run succeed.
+        out = _payload(
+            autoresearch.run_experiment(
+                {"cwd": self.repo, "lock_path": "autoresearch.lock"}, self.ctx
+            )
+        )
+        self.assertTrue(out["success"])
+
+    def test_only_lock_in_repo_is_used_from_campaign_root(self):
+        """The single-lock case: a baseline re-run from the campaign root just works."""
+        autoresearch.lock_benchmark({"cwd": self.repo}, self.ctx)
+        self._worktree("exp-untouched")  # sibling worktree, no lock of its own
+
+        out = _payload(autoresearch.run_experiment({"cwd": self.repo}, self.ctx))
+        self.assertTrue(out["success"])
+        self.assertNotIn("lock_note", out)
+
+    def test_committed_lock_inherited_by_subworktree_is_one_logical_lock(self):
+        """The campaign commits its lock; sub-worktrees inherit an identical copy."""
+        autoresearch.lock_benchmark({"cwd": self.repo}, self.ctx)
+        _git(self.repo, "add", "-A")
+        _git(self.repo, "commit", "-qm", "commit the lock")
+
+        clean = self._worktree("exp-inherited")
+        self.assertTrue((Path(clean) / "autoresearch.lock").exists())
+        out = _payload(autoresearch.run_experiment({"cwd": clean}, self.ctx))
+        self.assertTrue(out["success"])
+        self.assertEqual(out["metrics"], {"score": 42.0})
+
+        # Same inherited lock, but this experiment rewrote the benchmark: the
+        # refusal must be the precise one, not the ambiguity fallback.
+        tampered = self._worktree("exp-inherited-tampered", TAMPERED_BENCH)
+        result = autoresearch.run_experiment({"cwd": tampered}, self.ctx)
         self.assertTrue(result["is_error"])
         self.assertIn("Benchmark modified since lock", _payload(result)["error"])
 

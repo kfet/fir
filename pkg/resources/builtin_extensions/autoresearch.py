@@ -110,26 +110,76 @@ def _sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
-def _find_lock(cwd: str) -> Path | None:
-    """Locate the campaign's autoresearch.lock, or None when unlocked.
-
-    The lock lives in the campaign root — the worktree where autoresearch.jsonl
-    lives and where lock_benchmark was called. Experiments run in disposable
-    sub-worktrees of the same repo, so we scan every *other* worktree first
-    (main worktree first, per `git worktree list` order) and only fall back to
-    the current worktree's own lock. That ordering matters: an experiment must
-    not be able to authorise itself by committing a doctored autoresearch.lock
-    into its own sub-worktree.
-    """
-    own = os.path.realpath(_own_worktree(cwd))
-    for wt in _worktrees(cwd):
-        if os.path.realpath(wt) == own:
+def _collect_locks(cwd: str) -> list[Path]:
+    """Every autoresearch.lock across the repo's worktrees (git order, cwd last)."""
+    seen: set[str] = set()
+    found: list[Path] = []
+    for root in [*_worktrees(cwd), _own_worktree(cwd), cwd]:
+        real = os.path.realpath(root)
+        if real in seen:
             continue
-        candidate = Path(wt) / "autoresearch.lock"
+        seen.add(real)
+        candidate = Path(root) / "autoresearch.lock"
         if candidate.exists():
-            return candidate
-    candidate = Path(own) / "autoresearch.lock"
-    return candidate if candidate.exists() else None
+            found.append(candidate)
+    return found
+
+
+def _read_lock_sha(path: Path) -> str:
+    """Read a lock's sha256, refusing anything unverifiable."""
+    try:
+        lock = json.loads(path.read_text())
+    except Exception as exc:
+        raise fir_ext.ToolError(
+            f"Benchmark lock at {path} is unreadable: {exc}. "
+            "Fix or remove the lock, then re-baseline and call lock_benchmark again."
+        ) from exc
+    sha = lock.get("sha256") if isinstance(lock, dict) else None
+    if not sha:
+        raise fir_ext.ToolError(
+            f"Benchmark lock at {path} has no sha256 field — it is malformed. "
+            "Refusing to run against an unverifiable lock. Remove it, re-baseline, "
+            "and call lock_benchmark again."
+        )
+    return str(sha)
+
+
+def _resolve_lock(cwd: str) -> tuple[Path | None, str | None]:
+    """Find the campaign's lock and its sha256, or (None, None) when unlocked.
+
+    Locks are collected from every worktree of the repo and deduplicated **by
+    content**, because the campaign root's lock is routinely committed and so
+    every experiment sub-worktree inherits an identical copy — that is one
+    logical lock, not a conflict.
+
+    One distinct sha256 → that is the campaign's lock, wherever it was found.
+    This is what lets a run from the campaign root and a run from a
+    sub-worktree agree, without either trusting a lock merely because it sits
+    in the current directory.
+
+    Several distinct sha256s → genuinely ambiguous (a second campaign in the
+    repo, a stale lock, or an experiment that re-locked itself). Refuse and
+    defer to the user rather than guess; guessing is how an experiment would
+    authorise its own rewritten benchmark.
+    """
+    by_sha: dict[str, Path] = {}
+    for path in _collect_locks(cwd):
+        by_sha.setdefault(_read_lock_sha(path), path)
+
+    if not by_sha:
+        return None, None
+    if len(by_sha) == 1:
+        sha, path = next(iter(by_sha.items()))
+        return path, sha
+
+    listed = "\n".join(f"  {p}  (sha256 {sha[:12]}…)" for sha, p in by_sha.items())
+    raise fir_ext.ToolError(
+        f"Ambiguous benchmark lock — {len(by_sha)} distinct locks found in this repo:\n"
+        f"{listed}\n"
+        "Refusing to guess which one governs this campaign. Stop and ask the user "
+        "which lock is authoritative; do not pick one yourself. They can remove the "
+        "stale lock or supply lock_path."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -254,10 +304,11 @@ def run_experiment(params: dict[str, Any], ctx: fir_ext.Context) -> dict[str, An
     # A relative lock_path resolves against this experiment's cwd, not fir's.
     if params.get("lock_path"):
         lock_path = Path(cwd) / Path(params["lock_path"])
+        if not lock_path.exists():
+            raise fir_ext.ToolError(f"No benchmark lock found at {lock_path} (explicit lock_path).")
+        locked_sha: str | None = _read_lock_sha(lock_path)
     else:
-        lock_path = _find_lock(cwd)
-    if lock_path is not None and not lock_path.exists():
-        raise fir_ext.ToolError(f"No benchmark lock found at {lock_path} (explicit lock_path).")
+        lock_path, locked_sha = _resolve_lock(cwd)
 
     # Prefer autoresearch_bench.sh, fall back to autoresearch.sh
     script = Path(cwd) / "autoresearch_bench.sh"
@@ -281,21 +332,7 @@ def run_experiment(params: dict[str, Any], ctx: fir_ext.Context) -> dict[str, An
     # hash. This closes the self-confirming loop where an experiment rewrites
     # its own benchmark, "wins", and gets merged with the tampered script.
     lock_note: str | None = None
-    if lock_path is not None:
-        try:
-            lock = json.loads(lock_path.read_text())
-        except Exception as exc:
-            raise fir_ext.ToolError(
-                f"Benchmark lock at {lock_path} is unreadable: {exc}. "
-                "Fix or remove the lock, then re-baseline and call lock_benchmark again."
-            ) from exc
-        locked_sha = lock.get("sha256")
-        if not locked_sha:
-            raise fir_ext.ToolError(
-                f"Benchmark lock at {lock_path} has no sha256 field — it is malformed. "
-                "Refusing to run against an unverifiable lock. Remove it, re-baseline, "
-                "and call lock_benchmark again."
-            )
+    if lock_path is not None and locked_sha is not None:
         current_sha = _sha256_file(script)
         if current_sha != locked_sha:
             error = (
@@ -308,7 +345,7 @@ def run_experiment(params: dict[str, Any], ctx: fir_ext.Context) -> dict[str, An
                 "benchmark change in this experiment, or — if the benchmark genuinely "
                 "must change — stop, get explicit user consent, re-baseline, and call "
                 "lock_benchmark again. (If that lock file belongs to a different "
-                "campaign in this repo, pass lock_path explicitly.)"
+                "campaign in this repo, ask the user to remove it or supply lock_path.)"
             )
             return {
                 "content": [
