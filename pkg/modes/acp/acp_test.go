@@ -91,9 +91,10 @@ func TestACPResourceLoaderOptions_SurfacesPackageExtension(t *testing.T) {
 
 	sm := config.NewSettingsManager(cwd, agentDir)
 
-	opts := acpResourceLoaderOptions(agentDir, cwd, sm, false, nil)
+	pa := &firAgent{sessions: make(map[string]*firSession)}
+	opts := pa.resourceLoaderOptions(agentDir, cwd, sm)
 	if opts.PackageResolver == nil {
-		t.Fatal("acpResourceLoaderOptions must wire a PackageResolver (ACP package parity regression)")
+		t.Fatal("resourceLoaderOptions must wire a PackageResolver (ACP package parity regression)")
 	}
 
 	rl := resources.NewResourceLoader(*opts)

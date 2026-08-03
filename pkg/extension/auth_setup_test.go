@@ -147,11 +147,11 @@ cat >/dev/null
 	t.Cleanup(func() { ai.UnregisterOAuthProvider(providerID) })
 
 	result, err := SetupAuthProviders(AuthSetupOptions{
-		ProjectDir:          projectDir,
-		Mode:                "acp",
-		TrustStorePath:      trustPath,
-		ConfirmFn:           func(string, string) bool { return true },
-		ExtraExtensionFiles: []string{script},
+		ProjectDir:     projectDir,
+		Mode:           "acp",
+		TrustStorePath: trustPath,
+		ConfirmFn:      func(string, string) bool { return true },
+		ExtraSources:   ExtraSources{Files: []string{script}},
 	})
 	if err != nil {
 		t.Fatalf("SetupAuthProviders: %v", err)

@@ -212,15 +212,14 @@ func setupSession(args *Args, deferExtensions bool) (*sessionSetup, error) {
 	var extOpts *extension.SetupOptions
 	if !args.NoExtensions {
 		extOpts = &extension.SetupOptions{
-			ProjectDir:          cwd,
-			Cwd:                 cwd,
-			Mode:                resolveExtensionMode(args),
-			Version:             version,
-			EnabledNames:        resolveEnabledExtensions(args, settingsManager),
-			DisabledNames:       args.DisabledExtensions,
-			ExtraExtensionFiles: rl.GetPackageExtensionPaths(),
-			ExtraExtensionDirs:  resources.ResolveSettingsExtensionPaths(cwd, settingsManager),
-			ConfigDirs:          extensionConfigDirs(cwd),
+			ProjectDir:    cwd,
+			Cwd:           cwd,
+			Mode:          resolveExtensionMode(args),
+			Version:       version,
+			EnabledNames:  resolveEnabledExtensions(args, settingsManager),
+			DisabledNames: args.DisabledExtensions,
+			ExtraSources:  extension.ResolveExtraSources(cwd, settingsManager, rl.GetPackageExtensionPaths()),
+			ConfigDirs:    extensionConfigDirs(cwd),
 		}
 		if !deferExtensions {
 			extSetup, err = extension.Setup(result.Session, *extOpts)
@@ -1326,4 +1325,3 @@ func registerBedrockEnvModel(reg *models.ModelRegistry, id string) {
 	}
 	reg.AddRuntimeModel(&clone)
 }
-

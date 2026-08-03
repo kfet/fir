@@ -21,7 +21,6 @@ import (
 	"github.com/kfet/fir/pkg/mcp"
 	"github.com/kfet/fir/pkg/models"
 	firpkg "github.com/kfet/fir/pkg/pkg"
-	"github.com/kfet/fir/pkg/resources"
 	"github.com/kfet/fir/pkg/session"
 	"github.com/kfet/fir/pkg/session/store"
 )
@@ -58,20 +57,28 @@ func (pa *firAgent) Initialize(_ context.Context, params acpsdk.InitializeReques
 		// Wire package-contributed and settings-provided extension paths so a
 		// package-provided auth extension is discoverable in ACP mode, at
 		// parity with the CLI/TUI path.
+		//
+		// DELIBERATE: this builds a SettingsManager + resolves package
+		// resources against the process cwd, and each ACP session later
+		// resolves again against its own per-session cwd (see createSession).
+		// Initialize runs once, before any session exists, so it can only use
+		// the process cwd to advertise AuthMethods; session-scoped resolution
+		// must stay per-session because different sessions may arrive with
+		// different cwds. Do NOT hoist this into a cached field shared across
+		// sessions — that would bind every session to Initialize's cwd.
 		authSettings := config.NewSettingsManager(cwd, agentDir)
 		pkgExtFiles, _, _, perr := firpkg.New(agentDir, cwd, authSettings).ResolvePackageResources()
 		if perr != nil {
 			firlog.Warn("acp initialize: resolve package resources failed", "err", perr)
 		}
 		authSetup, aerr := extension.SetupAuthProviders(extension.AuthSetupOptions{
-			ProjectDir:          cwd,
-			Cwd:                 cwd,
-			Mode:                "acp",
-			Version:             version,
-			EnabledNames:        pa.options.EnabledExtensions,
-			DisabledNames:       pa.options.DisabledExtensions,
-			ExtraExtensionFiles: pkgExtFiles,
-			ExtraExtensionDirs:  resources.ResolveSettingsExtensionPaths(cwd, authSettings),
+			ProjectDir:    cwd,
+			Cwd:           cwd,
+			Mode:          "acp",
+			Version:       version,
+			EnabledNames:  pa.options.EnabledExtensions,
+			DisabledNames: pa.options.DisabledExtensions,
+			ExtraSources:  extension.ResolveExtraSources(cwd, authSettings, pkgExtFiles),
 		})
 		if aerr != nil {
 			firlog.Warn("acp initialize: auth extension setup failed", "err", aerr)

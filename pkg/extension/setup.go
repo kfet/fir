@@ -60,17 +60,11 @@ type SetupOptions struct {
 	// This is populated from --disable-extension flags.
 	DisabledNames []string
 
-	// ExtraExtensionDirs lists additional directories to scan for extension
-	// scripts. Each directory is scanned with "package" scope, shadowed by
-	// both global and project extensions. Use this to load extensions
-	// contributed by installed fir packages.
-	ExtraExtensionDirs []string
-
-	// ExtraExtensionFiles lists individual extension script paths to load.
-	// Each file is treated as a "package"-scoped extension and is shadowed by
-	// global and project extensions with the same name.
-	// Use this to load individual extension files discovered in installed packages.
-	ExtraExtensionFiles []string
+	// Extra carries lower-priority extension sources contributed outside the
+	// project/global .fir/extensions dirs: package-provided script files and
+	// settings `extensionPaths` scan dirs. Both are shadowed by project/global
+	// extensions of the same name. Populate via ResolveExtraSources.
+	ExtraSources
 
 	// ConfigDirs is the priority-ordered list of directories sent to each
 	// extension via the init handshake. Highest priority first. Typically
@@ -169,11 +163,11 @@ func Setup(asession *session.AgentSession, opts SetupOptions) (*SetupResult, err
 	if len(opts.DisabledNames) > 0 {
 		mgr.SetDisabledNames(opts.DisabledNames)
 	}
-	if len(opts.ExtraExtensionDirs) > 0 {
-		mgr.SetExtraExtensionDirs(opts.ExtraExtensionDirs)
+	if len(opts.Dirs) > 0 {
+		mgr.SetExtraExtensionDirs(opts.Dirs)
 	}
-	if len(opts.ExtraExtensionFiles) > 0 {
-		mgr.SetExtraExtensionFiles(opts.ExtraExtensionFiles)
+	if len(opts.Files) > 0 {
+		mgr.SetExtraExtensionFiles(opts.Files)
 	}
 	if len(opts.ConfigDirs) > 0 {
 		mgr.SetConfigDirs(opts.ConfigDirs)

@@ -220,29 +220,15 @@ func (m *Manager) Start(ctx context.Context, projectDir string, cwd string, api 
 	extraFiles := append([]string(nil), m.extraExtensionFiles...)
 	m.mu.Unlock()
 	if len(extraDirs) > 0 || len(extraFiles) > 0 {
-		// Build a name set from existing configs so we don't shadow them.
-		existing := make(map[string]bool, len(configs))
-		for _, c := range configs {
-			existing[c.Name] = true
-		}
+		// Layer package-contributed extensions beneath discovered ones.
+		// mergeConfigsByName enforces project/global shadowing by Name.
 		if len(extraDirs) > 0 {
-			extraConfigs, extraErr := DiscoverExtra(extraDirs)
-			if extraErr == nil {
-				for _, c := range extraConfigs {
-					if !existing[c.Name] {
-						configs = append(configs, c)
-						existing[c.Name] = true
-					}
-				}
+			if extraConfigs, extraErr := DiscoverExtra(extraDirs); extraErr == nil {
+				configs = mergeConfigsByName(configs, extraConfigs)
 			}
 		}
 		if len(extraFiles) > 0 {
-			for _, c := range ConfigsFromFiles(extraFiles) {
-				if !existing[c.Name] {
-					configs = append(configs, c)
-					existing[c.Name] = true
-				}
-			}
+			configs = mergeConfigsByName(configs, ConfigsFromFiles(extraFiles))
 		}
 	}
 

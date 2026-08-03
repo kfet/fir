@@ -133,6 +133,28 @@ func DiscoverWithDirs(globalDir, projectExtDir string) ([]ExtProcConfig, error) 
 	return result, nil
 }
 
+// mergeConfigsByName appends configs from extra onto base, skipping any whose
+// Name already appears in base. Base wins — this is the single place that
+// enforces "project/global shadow package-contributed extensions" when layering
+// lower-priority sources (package dirs/files) beneath discovered extensions.
+func mergeConfigsByName(base, extra []ExtProcConfig) []ExtProcConfig {
+	if len(extra) == 0 {
+		return base
+	}
+	existing := make(map[string]bool, len(base))
+	for _, c := range base {
+		existing[c.Name] = true
+	}
+	for _, c := range extra {
+		if existing[c.Name] {
+			continue
+		}
+		base = append(base, c)
+		existing[c.Name] = true
+	}
+	return base
+}
+
 // DiscoverExtra scans a list of additional directories for extension scripts,
 // returning configs with scope "package". Package extensions are lowest
 // priority — they are shadowed by global and project extensions.

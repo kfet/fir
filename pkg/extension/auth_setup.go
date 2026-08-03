@@ -15,18 +15,18 @@ import (
 // Use this when a mode needs OAuth providers registered before any session
 // exists (e.g. ACP Initialize, which must advertise AuthMethods).
 type AuthSetupOptions struct {
-	ProjectDir         string
-	Cwd                string
-	Mode               string
-	Version            string
-	TrustStorePath     string
-	ConfirmFn          ConfirmFunc
-	EnabledNames       []string
-	DisabledNames      []string
-	ExtraExtensionDirs []string
-	// ExtraExtensionFiles lists individual extension script paths (e.g.
-	// package-contributed extensions) to consider for auth-provider startup.
-	ExtraExtensionFiles []string
+	ProjectDir     string
+	Cwd            string
+	Mode           string
+	Version        string
+	TrustStorePath string
+	ConfirmFn      ConfirmFunc
+	EnabledNames   []string
+	DisabledNames  []string
+	// Extra carries lower-priority extension sources (package files + settings
+	// dirs) considered for auth-provider startup. Populate via
+	// ResolveExtraSources.
+	ExtraSources
 }
 
 // AuthSetupResult is the running state of auth-provider extensions.
@@ -64,32 +64,13 @@ func SetupAuthProviders(opts AuthSetupOptions) (*AuthSetupResult, error) {
 	if err != nil {
 		return nil, fmt.Errorf("discover: %w", err)
 	}
-	if len(opts.ExtraExtensionDirs) > 0 {
-		existing := make(map[string]bool, len(configs))
-		for _, c := range configs {
-			existing[c.Name] = true
-		}
-		extra, xerr := DiscoverExtra(opts.ExtraExtensionDirs)
-		if xerr == nil {
-			for _, c := range extra {
-				if !existing[c.Name] {
-					configs = append(configs, c)
-					existing[c.Name] = true
-				}
-			}
+	if len(opts.Dirs) > 0 {
+		if extra, xerr := DiscoverExtra(opts.Dirs); xerr == nil {
+			configs = mergeConfigsByName(configs, extra)
 		}
 	}
-	if len(opts.ExtraExtensionFiles) > 0 {
-		existing := make(map[string]bool, len(configs))
-		for _, c := range configs {
-			existing[c.Name] = true
-		}
-		for _, c := range ConfigsFromFiles(opts.ExtraExtensionFiles) {
-			if !existing[c.Name] {
-				configs = append(configs, c)
-				existing[c.Name] = true
-			}
-		}
+	if len(opts.Files) > 0 {
+		configs = mergeConfigsByName(configs, ConfigsFromFiles(opts.Files))
 	}
 
 	var authNames []string
@@ -133,11 +114,11 @@ func SetupAuthProviders(opts AuthSetupOptions) (*AuthSetupResult, error) {
 	if len(opts.DisabledNames) > 0 {
 		mgr.SetDisabledNames(opts.DisabledNames)
 	}
-	if len(opts.ExtraExtensionDirs) > 0 {
-		mgr.SetExtraExtensionDirs(opts.ExtraExtensionDirs)
+	if len(opts.Dirs) > 0 {
+		mgr.SetExtraExtensionDirs(opts.Dirs)
 	}
-	if len(opts.ExtraExtensionFiles) > 0 {
-		mgr.SetExtraExtensionFiles(opts.ExtraExtensionFiles)
+	if len(opts.Files) > 0 {
+		mgr.SetExtraExtensionFiles(opts.Files)
 	}
 	mgr.ActiveMode = opts.Mode
 

@@ -246,19 +246,20 @@ func RunAcpMode(opts Options) error {
 // Session creation
 // ============================================================================
 
-// acpResourceLoaderOptions builds the ResourceLoaderOptions used by ACP
-// session setup. It wires the package resolver (firpkg) so that skills and
-// extensions contributed by installed fir packages are surfaced in ACP mode,
-// at parity with the CLI/TUI path (cmd/fir/app.go). Without the PackageResolver
+// resourceLoaderOptions builds the ResourceLoaderOptions used by ACP session
+// setup. It wires the package resolver (firpkg) so that skills and extensions
+// contributed by installed fir packages are surfaced in ACP mode, at parity
+// with the CLI/TUI path (cmd/fir/app.go). Without the PackageResolver
 // GetPackageExtensionPaths() is empty and package skills are never loaded.
-func acpResourceLoaderOptions(agentDir, cwd string, sm *config.SettingsManager, noSkills bool, additionalSkillPaths []string) *resources.ResourceLoaderOptions {
+// NoSkills / AdditionalSkillPaths are read from the agent's options.
+func (pa *firAgent) resourceLoaderOptions(agentDir, cwd string, sm *config.SettingsManager) *resources.ResourceLoaderOptions {
 	return &resources.ResourceLoaderOptions{
 		Cwd:                  cwd,
 		AgentDir:             agentDir,
 		SettingsManager:      sm,
 		PackageResolver:      firpkg.New(agentDir, cwd, sm),
-		NoSkills:             noSkills,
-		AdditionalSkillPaths: additionalSkillPaths,
+		NoSkills:             pa.options.NoSkills,
+		AdditionalSkillPaths: pa.options.AdditionalSkillPaths,
 	}
 }
 
@@ -301,15 +302,15 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mc
 	firlog.Info("acp createSession: tools created", "count", len(toolList), "clientTerminal", useClientTerminal, "clientFs", useClientFs)
 
 	result, err := session.Setup(ctx, session.SetupOptions{
-		Cwd:             cwd,
-		AgentDir:        agentDir,
-		AuthStorage:     authStorage,
-		ModelRegistry:   modelRegistry,
-		SettingsManager: settingsManager,
-		SessionStore:    store.NewSessionStore(cwd, store.DefaultSessionDir(agentDir, cwd)),
-		Tools:           toolList,
-		MCPConfigs:      mcpConfigs,
-		ResourceLoaderOptions: acpResourceLoaderOptions(agentDir, cwd, settingsManager, pa.options.NoSkills, pa.options.AdditionalSkillPaths),
+		Cwd:                   cwd,
+		AgentDir:              agentDir,
+		AuthStorage:           authStorage,
+		ModelRegistry:         modelRegistry,
+		SettingsManager:       settingsManager,
+		SessionStore:          store.NewSessionStore(cwd, store.DefaultSessionDir(agentDir, cwd)),
+		Tools:                 toolList,
+		MCPConfigs:            mcpConfigs,
+		ResourceLoaderOptions: pa.resourceLoaderOptions(agentDir, cwd, settingsManager),
 		CompactionRunner: &compaction.DefaultRunner{
 			SettingsManager: settingsManager,
 			ModelRegistry:   modelRegistry,
@@ -405,15 +406,14 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mc
 		disabled := append([]string(nil), pa.options.DisabledExtensions...)
 		disabled = append(disabled, authExtNames...)
 		extSetup, err := extension.Setup(result.Session, extension.SetupOptions{
-			ProjectDir:          cwd,
-			Cwd:                 cwd,
-			Mode:                "acp",
-			Version:             version,
-			EnabledNames:        resolveEnabledExtensions(pa.options.EnabledExtensions, result.SettingsManager),
-			DisabledNames:       disabled,
-			ExtraExtensionFiles: result.ResourceLoader.GetPackageExtensionPaths(),
-			ExtraExtensionDirs:  resources.ResolveSettingsExtensionPaths(cwd, result.SettingsManager),
-			ConfigDirs:          []string{filepath.Join(cwd, ".fir"), resolveAgentDir()},
+			ProjectDir:    cwd,
+			Cwd:           cwd,
+			Mode:          "acp",
+			Version:       version,
+			EnabledNames:  resolveEnabledExtensions(pa.options.EnabledExtensions, result.SettingsManager),
+			DisabledNames: disabled,
+			ExtraSources:  extension.ResolveExtraSources(cwd, result.SettingsManager, result.ResourceLoader.GetPackageExtensionPaths()),
+			ConfigDirs:    []string{filepath.Join(cwd, ".fir"), resolveAgentDir()},
 		})
 		firlog.Info("acp createSession: extension setup (eager)", "elapsed_ms", time.Since(t0).Milliseconds())
 		if err == nil && extSetup != nil {

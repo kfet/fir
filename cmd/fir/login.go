@@ -336,15 +336,14 @@ func startLoginSession(args *Args) (func(), error) {
 	var extSetup *extension.SetupResult
 	if !args.NoExtensions {
 		extOpts := extension.SetupOptions{
-			ProjectDir:          cwd,
-			Cwd:                 cwd,
-			Mode:                "login",
-			Version:             version,
-			EnabledNames:        resolveEnabledExtensions(args, settingsManager),
-			DisabledNames:       args.DisabledExtensions,
-			ExtraExtensionFiles: rl.GetPackageExtensionPaths(),
-			ExtraExtensionDirs:  resources.ResolveSettingsExtensionPaths(cwd, settingsManager),
-			ConfigDirs:          extensionConfigDirs(cwd),
+			ProjectDir:    cwd,
+			Cwd:           cwd,
+			Mode:          "login",
+			Version:       version,
+			EnabledNames:  resolveEnabledExtensions(args, settingsManager),
+			DisabledNames: args.DisabledExtensions,
+			ExtraSources:  extension.ResolveExtraSources(cwd, settingsManager, rl.GetPackageExtensionPaths()),
+			ConfigDirs:    extensionConfigDirs(cwd),
 		}
 		extSetup, err = extension.Setup(result.Session, extOpts)
 		if err != nil {
