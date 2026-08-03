@@ -118,3 +118,60 @@ func TestSetupAuthProviders_NoAuthExtensions(t *testing.T) {
 		}
 	}
 }
+
+// TestSetupAuthProviders_ExtraExtensionFiles verifies that a package-provided
+// auth extension (supplied via ExtraExtensionFiles, i.e. a single script path
+// outside the project dir) is discovered and started. This is the ACP-parity
+// regression for package-contributed auth extensions.
+func TestSetupAuthProviders_ExtraExtensionFiles(t *testing.T) {
+	projectDir := t.TempDir()
+
+	// A package extension living outside the project dir.
+	pkgDir := t.TempDir()
+	script := filepath.Join(pkgDir, "pkg-auth.sh")
+	const providerID = "pkg-test-provider"
+	content := `#!/bin/sh
+# ---
+# name: pkg-auth
+# auth_providers: ` + providerID + `
+# ---
+read line
+echo '{"jsonrpc":"2.0","id":1,"result":{"name":"pkg-auth","tools":[],"events":[],"auth_providers":[{"id":"` + providerID + `","name":"pkg-auth"}]}}'
+cat >/dev/null
+`
+	if err := os.WriteFile(script, []byte(content), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	trustPath := filepath.Join(projectDir, "trust.json")
+	t.Cleanup(func() { ai.UnregisterOAuthProvider(providerID) })
+
+	result, err := SetupAuthProviders(AuthSetupOptions{
+		ProjectDir:          projectDir,
+		Mode:                "acp",
+		TrustStorePath:      trustPath,
+		ConfirmFn:           func(string, string) bool { return true },
+		ExtraExtensionFiles: []string{script},
+	})
+	if err != nil {
+		t.Fatalf("SetupAuthProviders: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	t.Cleanup(func() { result.Stop() })
+
+	found := false
+	for _, n := range result.Names {
+		if n == "pkg-auth" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("package auth extension pkg-auth not started; Names = %v", result.Names)
+	}
+	if p := ai.GetOAuthProvider(providerID); p == nil {
+		t.Errorf("oauth provider %s not registered", providerID)
+	}
+}

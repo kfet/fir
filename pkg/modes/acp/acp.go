@@ -26,6 +26,7 @@ import (
 	firlog "github.com/kfet/fir/pkg/log"
 	"github.com/kfet/fir/pkg/mcp"
 	"github.com/kfet/fir/pkg/models"
+	firpkg "github.com/kfet/fir/pkg/pkg"
 	"github.com/kfet/fir/pkg/resources"
 	"github.com/kfet/fir/pkg/session"
 	"github.com/kfet/fir/pkg/session/compaction"
@@ -245,6 +246,22 @@ func RunAcpMode(opts Options) error {
 // Session creation
 // ============================================================================
 
+// acpResourceLoaderOptions builds the ResourceLoaderOptions used by ACP
+// session setup. It wires the package resolver (firpkg) so that skills and
+// extensions contributed by installed fir packages are surfaced in ACP mode,
+// at parity with the CLI/TUI path (cmd/fir/app.go). Without the PackageResolver
+// GetPackageExtensionPaths() is empty and package skills are never loaded.
+func acpResourceLoaderOptions(agentDir, cwd string, sm *config.SettingsManager, noSkills bool, additionalSkillPaths []string) *resources.ResourceLoaderOptions {
+	return &resources.ResourceLoaderOptions{
+		Cwd:                  cwd,
+		AgentDir:             agentDir,
+		SettingsManager:      sm,
+		PackageResolver:      firpkg.New(agentDir, cwd, sm),
+		NoSkills:             noSkills,
+		AdditionalSkillPaths: additionalSkillPaths,
+	}
+}
+
 func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mcpConfigs map[string]mcp.ServerConfig) (*firSession, error) {
 	createStart := time.Now()
 	firlog.Info("acp createSession: start", "sessionID", sessionID, "cwd", cwd)
@@ -292,13 +309,7 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mc
 		SessionStore:    store.NewSessionStore(cwd, store.DefaultSessionDir(agentDir, cwd)),
 		Tools:           toolList,
 		MCPConfigs:      mcpConfigs,
-		ResourceLoaderOptions: &resources.ResourceLoaderOptions{
-			Cwd:                  cwd,
-			AgentDir:             agentDir,
-			SettingsManager:      settingsManager,
-			NoSkills:             pa.options.NoSkills,
-			AdditionalSkillPaths: pa.options.AdditionalSkillPaths,
-		},
+		ResourceLoaderOptions: acpResourceLoaderOptions(agentDir, cwd, settingsManager, pa.options.NoSkills, pa.options.AdditionalSkillPaths),
 		CompactionRunner: &compaction.DefaultRunner{
 			SettingsManager: settingsManager,
 			ModelRegistry:   modelRegistry,
@@ -394,13 +405,15 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mc
 		disabled := append([]string(nil), pa.options.DisabledExtensions...)
 		disabled = append(disabled, authExtNames...)
 		extSetup, err := extension.Setup(result.Session, extension.SetupOptions{
-			ProjectDir:    cwd,
-			Cwd:           cwd,
-			Mode:          "acp",
-			Version:       version,
-			EnabledNames:  resolveEnabledExtensions(pa.options.EnabledExtensions, result.SettingsManager),
-			DisabledNames: disabled,
-			ConfigDirs:    []string{filepath.Join(cwd, ".fir"), resolveAgentDir()},
+			ProjectDir:          cwd,
+			Cwd:                 cwd,
+			Mode:                "acp",
+			Version:             version,
+			EnabledNames:        resolveEnabledExtensions(pa.options.EnabledExtensions, result.SettingsManager),
+			DisabledNames:       disabled,
+			ExtraExtensionFiles: result.ResourceLoader.GetPackageExtensionPaths(),
+			ExtraExtensionDirs:  resources.ResolveSettingsExtensionPaths(cwd, result.SettingsManager),
+			ConfigDirs:          []string{filepath.Join(cwd, ".fir"), resolveAgentDir()},
 		})
 		firlog.Info("acp createSession: extension setup (eager)", "elapsed_ms", time.Since(t0).Milliseconds())
 		if err == nil && extSetup != nil {

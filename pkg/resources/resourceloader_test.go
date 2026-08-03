@@ -720,3 +720,33 @@ body`)
 		t.Errorf("reload not idempotent: %d vs %d skills", len(skills1), len(skills2))
 	}
 }
+
+// TestResolveSettingsExtensionPaths verifies the shared helper (used by both
+// the CLI/TUI path and ACP mode) resolves settings extensionPaths against cwd,
+// expands '~', passes absolute paths through, trims whitespace, and
+// de-duplicates.
+func TestResolveSettingsExtensionPaths(t *testing.T) {
+	// nil manager → nil.
+	if got := ResolveSettingsExtensionPaths("/cwd", nil); got != nil {
+		t.Errorf("nil sm: want nil, got %v", got)
+	}
+	// empty → nil.
+	if got := ResolveSettingsExtensionPaths("/cwd", config.NewInMemorySettingsManager(config.Settings{})); got != nil {
+		t.Errorf("empty sm: want nil, got %v", got)
+	}
+
+	cwd := t.TempDir()
+	sm := config.NewInMemorySettingsManager(config.Settings{
+		ExtensionPaths: []string{"ext", "/abs/path", "ext", "  dup  "},
+	})
+	got := ResolveSettingsExtensionPaths(cwd, sm)
+	want := []string{filepath.Join(cwd, "ext"), "/abs/path", filepath.Join(cwd, "dup")}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("path %d: got %q, want %q", i, got[i], want[i])
+		}
+	}
+}

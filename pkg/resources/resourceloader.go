@@ -642,6 +642,35 @@ func ResolveResourcePath(cwd, p string) string {
 	return resolveResourcePath(cwd, p)
 }
 
+// ResolveSettingsExtensionPaths resolves extensionPaths entries from settings
+// (merged global + project) against cwd, matching the semantics used for
+// skills/themes path settings. Relative paths resolve against cwd,
+// '~' expands to $HOME, and absolute paths pass through unchanged.
+// Duplicates are removed while preserving order.
+//
+// Shared by the CLI/TUI path (cmd/fir) and ACP mode so both wire the same
+// settings-provided extension directories.
+func ResolveSettingsExtensionPaths(cwd string, sm *config.SettingsManager) []string {
+	if sm == nil {
+		return nil
+	}
+	raw := sm.GetExtensionPaths()
+	if len(raw) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(raw))
+	seen := make(map[string]bool)
+	for _, p := range raw {
+		r := ResolveResourcePath(cwd, p)
+		if r == "" || seen[r] {
+			continue
+		}
+		seen[r] = true
+		out = append(out, r)
+	}
+	return out
+}
+
 // resolveResourcePath expands ~ and resolves relative paths.
 func resolveResourcePath(cwd, p string) string {
 	trimmed := strings.TrimSpace(p)

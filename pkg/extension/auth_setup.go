@@ -24,6 +24,9 @@ type AuthSetupOptions struct {
 	EnabledNames       []string
 	DisabledNames      []string
 	ExtraExtensionDirs []string
+	// ExtraExtensionFiles lists individual extension script paths (e.g.
+	// package-contributed extensions) to consider for auth-provider startup.
+	ExtraExtensionFiles []string
 }
 
 // AuthSetupResult is the running state of auth-provider extensions.
@@ -76,6 +79,18 @@ func SetupAuthProviders(opts AuthSetupOptions) (*AuthSetupResult, error) {
 			}
 		}
 	}
+	if len(opts.ExtraExtensionFiles) > 0 {
+		existing := make(map[string]bool, len(configs))
+		for _, c := range configs {
+			existing[c.Name] = true
+		}
+		for _, c := range ConfigsFromFiles(opts.ExtraExtensionFiles) {
+			if !existing[c.Name] {
+				configs = append(configs, c)
+				existing[c.Name] = true
+			}
+		}
+	}
 
 	var authNames []string
 	for _, c := range configs {
@@ -120,6 +135,9 @@ func SetupAuthProviders(opts AuthSetupOptions) (*AuthSetupResult, error) {
 	}
 	if len(opts.ExtraExtensionDirs) > 0 {
 		mgr.SetExtraExtensionDirs(opts.ExtraExtensionDirs)
+	}
+	if len(opts.ExtraExtensionFiles) > 0 {
+		mgr.SetExtraExtensionFiles(opts.ExtraExtensionFiles)
 	}
 	mgr.ActiveMode = opts.Mode
 

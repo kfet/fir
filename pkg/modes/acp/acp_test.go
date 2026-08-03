@@ -17,6 +17,7 @@ import (
 	"github.com/kfet/agent"
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/auth"
+	"github.com/kfet/fir/pkg/config"
 	"github.com/kfet/fir/pkg/extension"
 	"github.com/kfet/fir/pkg/mcp"
 	"github.com/kfet/fir/pkg/models"
@@ -53,6 +54,63 @@ func TestPiAgent_Initialize(t *testing.T) {
 	// Verify authStorage was set globally
 	if pa.authStorage == nil {
 		t.Error("authStorage should be set after Initialize")
+	}
+}
+
+// TestACPResourceLoaderOptions_SurfacesPackageExtension is the key regression
+// for the ACP package-extensions parity fix. It asserts that the
+// ResourceLoaderOptions ACP builds for session setup wires a PackageResolver so
+// that an extension contributed by an installed fir package is surfaced via
+// GetPackageExtensionPaths(). Before the fix ACP omitted PackageResolver and
+// this list was always empty (package extensions + skills never loaded in ACP).
+func TestACPResourceLoaderOptions_SurfacesPackageExtension(t *testing.T) {
+	agentDir := t.TempDir()
+	cwd := t.TempDir()
+
+	// Create a local package directory containing an extension script,
+	// mirroring the reminders.py case from the brief.
+	pkgDir := t.TempDir()
+	extPath := filepath.Join(pkgDir, "reminders", "reminders.py")
+	if err := os.MkdirAll(filepath.Dir(extPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	const extBody = "#!/usr/bin/env python3\n# modes: tui, acp\n# name: reminders\nprint('hi')\n"
+	if err := os.WriteFile(extPath, []byte(extBody), 0o755); err != nil {
+		t.Fatalf("write ext: %v", err)
+	}
+
+	// Register the package in global settings so firpkg discovers it.
+	settings := map[string]any{"packages": []any{pkgDir}}
+	data, err := json.Marshal(settings)
+	if err != nil {
+		t.Fatalf("marshal settings: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(agentDir, "settings.json"), data, 0o644); err != nil {
+		t.Fatalf("write settings: %v", err)
+	}
+
+	sm := config.NewSettingsManager(cwd, agentDir)
+
+	opts := acpResourceLoaderOptions(agentDir, cwd, sm, false, nil)
+	if opts.PackageResolver == nil {
+		t.Fatal("acpResourceLoaderOptions must wire a PackageResolver (ACP package parity regression)")
+	}
+
+	rl := resources.NewResourceLoader(*opts)
+	if err := rl.Reload(); err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+
+	got := rl.GetPackageExtensionPaths()
+	found := false
+	for _, p := range got {
+		if p == extPath {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("package extension %q not surfaced by ACP resource loader; got %v", extPath, got)
 	}
 }
 

@@ -15,10 +15,13 @@ import (
 	"github.com/kfet/agent"
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/auth"
+	"github.com/kfet/fir/pkg/config"
 	"github.com/kfet/fir/pkg/extension"
 	firlog "github.com/kfet/fir/pkg/log"
 	"github.com/kfet/fir/pkg/mcp"
 	"github.com/kfet/fir/pkg/models"
+	firpkg "github.com/kfet/fir/pkg/pkg"
+	"github.com/kfet/fir/pkg/resources"
 	"github.com/kfet/fir/pkg/session"
 	"github.com/kfet/fir/pkg/session/store"
 )
@@ -52,13 +55,23 @@ func (pa *firAgent) Initialize(_ context.Context, params acpsdk.InitializeReques
 	// client would only see env-var methods.
 	if !pa.options.NoExtensions {
 		cwd, _ := os.Getwd()
+		// Wire package-contributed and settings-provided extension paths so a
+		// package-provided auth extension is discoverable in ACP mode, at
+		// parity with the CLI/TUI path.
+		authSettings := config.NewSettingsManager(cwd, agentDir)
+		pkgExtFiles, _, _, perr := firpkg.New(agentDir, cwd, authSettings).ResolvePackageResources()
+		if perr != nil {
+			firlog.Warn("acp initialize: resolve package resources failed", "err", perr)
+		}
 		authSetup, aerr := extension.SetupAuthProviders(extension.AuthSetupOptions{
-			ProjectDir:    cwd,
-			Cwd:           cwd,
-			Mode:          "acp",
-			Version:       version,
-			EnabledNames:  pa.options.EnabledExtensions,
-			DisabledNames: pa.options.DisabledExtensions,
+			ProjectDir:          cwd,
+			Cwd:                 cwd,
+			Mode:                "acp",
+			Version:             version,
+			EnabledNames:        pa.options.EnabledExtensions,
+			DisabledNames:       pa.options.DisabledExtensions,
+			ExtraExtensionFiles: pkgExtFiles,
+			ExtraExtensionDirs:  resources.ResolveSettingsExtensionPaths(cwd, authSettings),
 		})
 		if aerr != nil {
 			firlog.Warn("acp initialize: auth extension setup failed", "err", aerr)
