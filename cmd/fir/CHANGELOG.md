@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [0.94.0] - 2026-08-03
+
+### Added
+- **Default per-call timeout for MCP tools, with true cancellation.** Every MCP tool call the model dispatches is now bounded by a default 120s wall-clock timeout (the MCP ecosystem norm is 60s; fir is more generous so slow-but-legitimate tools — browser automation, large fetches/queries — aren't clipped). Previously fir had *no* per-call MCP timeout, so a hung server hung the whole turn until the user hit ESC. On expiry the underlying `tools/call` is genuinely cancelled — the derived context is a child of the turn context, so cancellation propagates into the go-sdk MCP client and unwinds the round-trip — and the model gets a clean `MCP tool "…" timed out after 2m0s …` result rather than a raw context error. Configurable via `settings.json` `mcp.toolTimeoutSeconds` or the `FIR_MCP_TOOL_TIMEOUT` env var (seconds; env wins); `<= 0` disables the bound. The timeout is scoped to the model-dispatch path only: calls made *through* `pipe`/`wait`/`aside` or any extension (via `SessionBridge.CallTool`) are stamped internal and keep honouring their own declared timeout, so a `timeout=-1` step whose body is a slow MCP tool still runs arbitrarily long. When MCP tools are present the system prompt advertises the default so the model can react to a timeout. Documented in `docs/mcp.md` and the `self` skill.
+
 ## [0.93.0] - 2026-08-02
 
 ### Added
@@ -31,8 +36,6 @@
 
 ### Changed
 - **Documented and pinned the agent lifecycle-event contract for extensions.** A report that the `agent_start` extension event never fires under `--mode acp` does not reproduce: forwarding lives in `extension.Setup` (`AgentSession` → extension manager) and is mode-independent, which end-to-end ACP runs confirm for fresh, sequential and idle-reaped/re-hydrated sessions. What is real is that `agent_start` marks an *agent loop*, not a user prompt: a prompt submitted while the agent is streaming is queued as a follow-up and runs inside the current loop, yielding `turn_start`/`turn_end` with no extra `agent_start` — visible to ACP clients that pipeline prompts. Both properties are now guarded by tests (`pkg/extension/lifecycle_events_test.go`: a mode-matrix test over `interactive`/`acp`, and a follow-up test asserting `agent_start`/`agent_end` stay paired 1:1) and spelled out in `docs/extension-protocol.md` and the `fir_ext.py` event table.
-### Added
-- **Default per-call timeout for MCP tools, with true cancellation.** Every MCP tool call the model dispatches is now bounded by a default 120s wall-clock timeout (the MCP ecosystem norm is 60s; fir is more generous so slow-but-legitimate tools — browser automation, large fetches/queries — aren't clipped). Previously fir had *no* per-call MCP timeout, so a hung server hung the whole turn until the user hit ESC. On expiry the underlying `tools/call` is genuinely cancelled — the derived context is a child of the turn context, so cancellation propagates into the go-sdk MCP client and unwinds the round-trip — and the model gets a clean `MCP tool "…" timed out after 2m0s …` result rather than a raw context error. Configurable via `settings.json` `mcp.toolTimeoutSeconds` or the `FIR_MCP_TOOL_TIMEOUT` env var (seconds; env wins); `<= 0` disables the bound. The timeout is scoped to the model-dispatch path only: calls made *through* `pipe`/`wait`/`aside` or any extension (via `SessionBridge.CallTool`) are stamped internal and keep honouring their own declared timeout, so a `timeout=-1` step whose body is a slow MCP tool still runs arbitrarily long. When MCP tools are present the system prompt advertises the default so the model can react to a timeout. Documented in `docs/mcp.md` and the `self` skill.
 
 ## [0.90.1] - 2026-07-28
 
