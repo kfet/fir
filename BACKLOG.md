@@ -43,3 +43,29 @@ contract: the streaming response emits assistant content shapes that
 its own input validator will then reject on replay (consecutive
 `thinking` blocks). Worth filing now that the proper fix is in and we
 can credibly say "this is your bug, not ours".
+
+## Deferred: self-improving-agents review (2026-08-03)
+
+Reviewing arXiv:2607.13104 against fir produced one real fix — the autoresearch
+benchmark lock, shipped in `eab9a1a2` + `bbb93991` — and three items deliberately
+NOT built. Each is recorded with the trigger that would change the verdict; absent
+that trigger, building it is theatre.
+
+**Memory hygiene (the missing CRUD "D").** fir's durable state is append-only:
+`doctor.jsonl`, `instruction-feedback.jsonl`, agent notes. No consolidation, no
+expiry. Judged out of scope — `instruction-tune` already archives, and note bloat
+belongs to whatever keeps the notes, not to fir. *Trigger: fir grows a first-class
+agent-memory mechanism of its own; then it needs a delete/consolidate story from
+day one.*
+
+**Per-skill regression evals for `instruction-tune`.** An eval harness so skill
+edits are verifier-gated rather than reviewed by eye. Judged unnecessary:
+`instruction-tune` proposes a diff and applies only on user consent, so the
+acceptor already exists and is a human. *Trigger: `instruction-tune` (or anything
+else) starts editing `AGENTS.md`/skills without a human in the loop.*
+
+**Shared versioned artifact pool for fleets.** A cross-agent repository of reusable
+artifacts (benchmarks, tool wrappers, skill patches). Judged redundant: git
+branches plus `fir-exts` packages already serve it. *Trigger: fleets are observed
+independently re-deriving the same artifacts, i.e. the duplication is real rather
+than anticipated.*
