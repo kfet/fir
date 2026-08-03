@@ -7,7 +7,7 @@ override: true
 
 # Autoresearch — Autonomous Experiment Loop
 
-Requires the `autoresearch` builtin extension (`run_experiment`, `log_experiment` tools).
+Requires the `autoresearch` builtin extension (`run_experiment`, `log_experiment`, `lock_benchmark` tools).
 
 ## Phase 0 — Gather Context
 
@@ -69,7 +69,7 @@ Living memory — re-read on every context reset. Use the template in `./autores
 
 ### 1d. Run baseline
 
-Call `run_experiment`, then `log_experiment` with `status="baseline"`. Set `best_so_far` to the primary metric value. Record it in `autoresearch.md`.
+Call `run_experiment`, then `log_experiment` with `status="baseline"` (pass the returned `wall_ms`). Set `best_so_far` to the primary metric value. Record it in `autoresearch.md`. Then call `lock_benchmark` to freeze `autoresearch_bench.sh` for the campaign — `run_experiment` will refuse any experiment whose benchmark differs from this locked hash.
 
 ## Phase 2 — Experiment Loop
 
@@ -97,7 +97,7 @@ On failure (`success` false, non-zero exit, or no METRIC lines): log from the ma
 - **Maximise:** keep if `primary_value > best_so_far`.
 - Negligible (|Δ| < 0.5%) → revert.
 
-**Keep:** Cherry-pick or merge the experiment commit into the main worktree's branch. `log_experiment(..., status="keep")` from main worktree. Update `autoresearch.md` wins table and current best. Set `best_so_far = primary_value`. Stop if target reached.
+**Keep:** Cherry-pick or merge the experiment commit into the main worktree's branch — never carry `autoresearch_bench.sh`, `autoresearch.lock`, or `autoresearch.jsonl` hunks across. `log_experiment(..., status="keep")` from main worktree. Update `autoresearch.md` wins table and current best. Set `best_so_far = primary_value`. Stop if target reached.
 
 **Revert:** `log_experiment(..., status="revert")` from main worktree. Add to dead ends in `autoresearch.md`.
 
@@ -105,19 +105,21 @@ Always remove the sub-worktree after deciding.
 
 ### E — Reflect every 3–5 experiments
 
-Re-read `autoresearch.md`. Identify patterns. Generate fresh hypotheses. Report brief status: experiments run, current best, Δ% vs baseline.
+Re-read `autoresearch.md`. Identify patterns. Generate fresh hypotheses. Report brief status: experiments run, current best, Δ% vs baseline, and efficiency (total wall time, keep rate, wall/win — from `/autoresearch`).
 
 ## Phase 3 — Wrap Up
 
 1. Update `autoresearch.md` fully.
-2. Report: total experiments, best value vs baseline (absolute + %), top 3 wins, remaining hypotheses.
+2. Report: total experiments, best value vs baseline (absolute + %), top 3 wins, remaining hypotheses, and campaign efficiency (total wall time, keep rate, wall/win — see `/autoresearch`).
 3. Offer to merge the worktree/branch back.
 
 ## Rules
 
 - Never edit `autoresearch.jsonl` — append-only via `log_experiment`.
+- `autoresearch_bench.sh` is **FROZEN** for the campaign — locked via `lock_benchmark` after the baseline. Never edit it inside an experiment worktree (a self-rewriting benchmark invalidates every result). The lock covers the script's bytes only, so keep helpers it invokes out of scope too. If it genuinely must change: stop, get explicit user consent, re-baseline, and call `lock_benchmark` again.
 - Always commit before running an experiment.
 - Re-read `autoresearch.md` on every context reset.
 - Never modify out-of-scope files without explicit user approval.
 - One hypothesis per experiment — compound changes obscure causality.
 - Always pass the original `baseline_value` to `log_experiment`, not the current best.
+- Always pass `run_experiment`'s returned `wall_ms` through to `log_experiment` so efficiency stats stay accurate.

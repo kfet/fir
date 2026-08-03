@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Added
+- **`autoresearch`: benchmark integrity lock + wall-time efficiency stats.** An autoresearch campaign optimises the metric emitted by `autoresearch_bench.sh`, but nothing stopped an experiment worktree from editing that script — a change could rewrite its own benchmark, "win", and get merged with the tampered script, invalidating the whole campaign (a self-confirming loop). A new `lock_benchmark` tool computes the sha256 of `autoresearch_bench.sh` and writes `autoresearch.lock` (sha256, path, iso timestamp, git short sha) in the campaign root, next to `autoresearch.jsonl`; the `autoresearch-create` skill calls it right after the baseline. `run_experiment` now finds that lock — scanning the repo's *other* worktrees (via `git worktree list --porcelain`) before its own, so an experiment cannot authorise itself with a doctored in-worktree lock — hashes the benchmark before running, and **refuses** (returns `success: false`, `is_error`) when it differs, naming both hashes and the fix (revert the change, or re-baseline + re-lock with user consent). Deleting the benchmark, or a lock that is unreadable or missing its hash, is refused too. Fully back-compat: with no lock file present it runs exactly as before, noting that no lock is set. Separately, `run_experiment` measures and returns `wall_ms`, `log_experiment` persists it, and `/autoresearch` now reports total wall time, keep rate (keeps/total), and wall time per kept win. No token-cost numbers are invented — the extension cannot see them.
+
 ## [0.94.0] - 2026-08-03
 
 ### Added

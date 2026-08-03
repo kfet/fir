@@ -75,18 +75,23 @@ Python extension using `fir_ext`. Provides:
 
 | Tool | Maps to |
 |---|---|
-| `run_experiment` | Run benchmark, parse `METRIC name=value`, return metrics dict |
+| `run_experiment` | Run benchmark, parse `METRIC name=value`, return metrics dict + `wall_ms` |
 | `log_experiment` | Append JSONL to `autoresearch.jsonl` |
+| `lock_benchmark` | Freeze `autoresearch_bench.sh`'s sha256 in `autoresearch.lock` |
 
-Additional feature over pi-autoresearch:
+Additional features over pi-autoresearch:
 - `/autoresearch` slash command to show a quick summary of `autoresearch.jsonl`
-  (experiment count, current best, last N experiments).
+  (experiment count, current best, last N experiments, wall-time efficiency).
+- **Benchmark integrity lock**: `lock_benchmark` records the benchmark's sha256 in the
+  campaign root after the baseline; `run_experiment` refuses to run any experiment whose
+  `autoresearch_bench.sh` differs, so an experiment cannot rewrite its own benchmark and
+  "win". Unlocked campaigns behave exactly as before.
 
 ### Skill: `.fir/skills/autoresearch-create/SKILL.md`
 
 Mirrors the pi skill, adapted for fir conventions:
 - Uses fir's worktree pattern for git branching.
-- References the two extension tools by their exact names.
+- References the extension tools by their exact names.
 - Tells the agent how to keep `autoresearch.md` updated as the living doc.
 - Specifies the loop protocol (hypothesis → edit → commit → run → log → keep/revert).
 
@@ -124,6 +129,7 @@ Each line is a JSON object:
   "primary_value": 142.3,
   "baseline_value": 120.0,
   "delta_pct": 18.6,
+  "wall_ms": 4210.5,
   "status": "keep"
 }
 ```

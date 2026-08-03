@@ -30,14 +30,14 @@ import (
 //	agent-introspect: 1 tool  (agent_introspect)
 //	doctor:         2 tools (doctor_query, doctor_summary)
 //	mood:           2 tools (mood_note, mood_recent)
-//	autoresearch:   2 tools (run_experiment, log_experiment)
+//	autoresearch:   3 tools (run_experiment, log_experiment, lock_benchmark)
 //	handoff:        3 tools (self_handoff, bookmark, pin)
 //	forge:          1 tool  (forge_tool)
 //	remote:         6 tools (rexec, rjob, rput, rget, rtmux, rhosts)
 //
 // The exact composition is tested elsewhere; this constant pins the total
 // for shape-checking tests in this file.
-const builtinToolCount = 27
+const builtinToolCount = 28
 
 // Write a test extension script that responds to the init handshake
 // and then stays alive reading from stdin.

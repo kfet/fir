@@ -6,10 +6,11 @@
 # ---
 """autoresearch.py — autonomous experiment loop for fir.
 
-Provides two tools the agent uses to drive an iterative optimisation loop:
+Provides three tools the agent uses to drive an iterative optimisation loop:
 
   run_experiment   Run autoresearch_bench.sh, parse METRIC lines, return results.
   log_experiment   Append a JSONL record to autoresearch.jsonl.
+  lock_benchmark   Freeze the benchmark script's sha256 so experiments can't tamper with it.
 
 And one slash command:
 
@@ -23,10 +24,12 @@ for each metric they measure.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import os
 import re
 import subprocess
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -66,18 +69,133 @@ def _next_experiment_number(cwd: str) -> int:
     return count + 1
 
 
-def _current_commit(cwd: str) -> str:
+def _git(cwd: str, *args: str) -> str:
+    """Run a git command in cwd, returning stdout (empty string on any failure)."""
     try:
         result = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
+            ["git", *args],
             cwd=cwd,
             capture_output=True,
             text=True,
             timeout=5,
         )
-        return result.stdout.strip() if result.returncode == 0 else ""
     except Exception:
         return ""
+    return result.stdout if result.returncode == 0 else ""
+
+
+def _current_commit(cwd: str) -> str:
+    return _git(cwd, "rev-parse", "--short", "HEAD").strip()
+
+
+def _worktrees(cwd: str) -> list[str]:
+    """All worktree roots of the repo containing cwd, main worktree first."""
+    return [
+        line[len("worktree ") :].strip()
+        for line in _git(cwd, "worktree", "list", "--porcelain").splitlines()
+        if line.startswith("worktree ")
+    ]
+
+
+def _own_worktree(cwd: str) -> str:
+    """Root of the worktree containing cwd (cwd itself if git is unavailable)."""
+    return _git(cwd, "rev-parse", "--show-toplevel").strip() or cwd
+
+
+def _sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _find_lock(cwd: str) -> Path | None:
+    """Locate the campaign's autoresearch.lock, or None when unlocked.
+
+    The lock lives in the campaign root — the worktree where autoresearch.jsonl
+    lives and where lock_benchmark was called. Experiments run in disposable
+    sub-worktrees of the same repo, so we scan every *other* worktree first
+    (main worktree first, per `git worktree list` order) and only fall back to
+    the current worktree's own lock. That ordering matters: an experiment must
+    not be able to authorise itself by committing a doctored autoresearch.lock
+    into its own sub-worktree.
+    """
+    own = os.path.realpath(_own_worktree(cwd))
+    for wt in _worktrees(cwd):
+        if os.path.realpath(wt) == own:
+            continue
+        candidate = Path(wt) / "autoresearch.lock"
+        if candidate.exists():
+            return candidate
+    candidate = Path(own) / "autoresearch.lock"
+    return candidate if candidate.exists() else None
+
+
+# ---------------------------------------------------------------------------
+# Tool: lock_benchmark
+# ---------------------------------------------------------------------------
+
+
+@fir_ext.tool(
+    name="lock_benchmark",
+    description=(
+        "Freeze the campaign's benchmark. Computes the sha256 of "
+        "<cwd>/autoresearch_bench.sh and writes autoresearch.lock in the campaign "
+        "root (cwd — next to autoresearch.jsonl). run_experiment then refuses to "
+        "run any experiment whose benchmark differs from this hash. Call once after "
+        "the baseline. Re-locking is a deliberate, explicit act (it overwrites)."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "cwd": {
+                "type": "string",
+                "description": (
+                    "Campaign root — the worktree holding autoresearch_bench.sh and "
+                    "autoresearch.jsonl. Defaults to the current directory if omitted."
+                ),
+            },
+        },
+        "required": [],
+    },
+    display_hint={
+        "title_args": [{"name": "cwd", "style": "path"}],
+    },
+)
+def lock_benchmark(params: dict[str, Any], ctx: fir_ext.Context) -> dict[str, Any]:
+    cwd = params.get("cwd") or os.getcwd()
+
+    script = Path(cwd) / "autoresearch_bench.sh"
+    if not script.exists():
+        raise fir_ext.ToolError(
+            f"No autoresearch_bench.sh found in {cwd} — cannot lock a missing benchmark. "
+            "Write and verify the benchmark first (see the autoresearch-create skill)."
+        )
+
+    digest = _sha256_file(script)
+    lock_path = Path(cwd) / "autoresearch.lock"
+    lock = {
+        "sha256": digest,
+        "path": str(script),
+        "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+        "commit": _current_commit(cwd),
+    }
+    lock_path.write_text(json.dumps(lock, indent=2) + "\n")
+
+    ctx.set_status(f"🔒 benchmark locked ({digest[:12]}…)")
+
+    summary = {
+        "locked": True,
+        "sha256": digest,
+        "script": str(script),
+        "lock_path": str(lock_path),
+        "commit": lock["commit"],
+    }
+    return {
+        "content": [{"type": "text", "text": json.dumps(summary, indent=2)}],
+        "is_error": False,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -90,7 +208,9 @@ def _current_commit(cwd: str) -> str:
     description=(
         "Run autoresearch_bench.sh (the benchmark script) and return the metrics it reports. "
         "The script must output lines of the form 'METRIC name=value' for each metric. "
-        "Returns: metrics (dict), stdout, stderr, exit_code, and success flag."
+        "Returns: metrics (dict), wall_ms, stdout, stderr, exit_code, and success flag. "
+        "If the campaign locked its benchmark (see lock_benchmark), this refuses to run "
+        "when autoresearch_bench.sh differs from the locked hash."
     ),
     parameters={
         "type": "object",
@@ -105,6 +225,14 @@ def _current_commit(cwd: str) -> str:
             "timeout": {
                 "type": "number",
                 "description": "Maximum seconds to wait for the benchmark. Default 300.",
+            },
+            "lock_path": {
+                "type": "string",
+                "description": (
+                    "Optional explicit path to the campaign's autoresearch.lock. "
+                    "Overrides the automatic lookup (useful when several campaigns "
+                    "share one repo). Rarely needed."
+                ),
             },
         },
         "required": [],
@@ -121,18 +249,95 @@ def run_experiment(params: dict[str, Any], ctx: fir_ext.Context) -> dict[str, An
     cwd = params.get("cwd") or os.getcwd()
     timeout = float(params.get("timeout") or 300)
 
+    # Locate the campaign lock first — a missing benchmark under an active lock
+    # is itself tampering (delete-and-replace), not a "no benchmark" mistake.
+    # A relative lock_path resolves against this experiment's cwd, not fir's.
+    if params.get("lock_path"):
+        lock_path = Path(cwd) / Path(params["lock_path"])
+    else:
+        lock_path = _find_lock(cwd)
+    if lock_path is not None and not lock_path.exists():
+        raise fir_ext.ToolError(f"No benchmark lock found at {lock_path} (explicit lock_path).")
+
     # Prefer autoresearch_bench.sh, fall back to autoresearch.sh
     script = Path(cwd) / "autoresearch_bench.sh"
-    if not script.exists():
+    if not script.exists() and lock_path is None:
         script = Path(cwd) / "autoresearch.sh"
     if not script.exists():
+        if lock_path is not None:
+            raise fir_ext.ToolError(
+                f"No autoresearch_bench.sh in {cwd}, but the campaign is locked "
+                f"({lock_path}) — the benchmark was deleted or renamed in this "
+                "experiment. Restore it, or get explicit user consent to re-baseline "
+                "and call lock_benchmark again."
+            )
         raise fir_ext.ToolError(
             f"No benchmark script found in {cwd}. "
             "Create autoresearch_bench.sh with a benchmark that outputs 'METRIC name=value' lines."
         )
 
+    # Benchmark integrity check: if the campaign locked the benchmark, refuse
+    # to run when the script this experiment sees differs from the locked
+    # hash. This closes the self-confirming loop where an experiment rewrites
+    # its own benchmark, "wins", and gets merged with the tampered script.
+    lock_note: str | None = None
+    if lock_path is not None:
+        try:
+            lock = json.loads(lock_path.read_text())
+        except Exception as exc:
+            raise fir_ext.ToolError(
+                f"Benchmark lock at {lock_path} is unreadable: {exc}. "
+                "Fix or remove the lock, then re-baseline and call lock_benchmark again."
+            ) from exc
+        locked_sha = lock.get("sha256")
+        if not locked_sha:
+            raise fir_ext.ToolError(
+                f"Benchmark lock at {lock_path} has no sha256 field — it is malformed. "
+                "Refusing to run against an unverifiable lock. Remove it, re-baseline, "
+                "and call lock_benchmark again."
+            )
+        current_sha = _sha256_file(script)
+        if current_sha != locked_sha:
+            error = (
+                f"Benchmark modified since lock — refusing to run.\n"
+                f"  script:  {script}\n"
+                f"  locked sha256:  {locked_sha}\n"
+                f"  current sha256: {current_sha}\n"
+                f"  lock file: {lock_path}\n"
+                "autoresearch_bench.sh is FROZEN for the campaign. Either revert the "
+                "benchmark change in this experiment, or — if the benchmark genuinely "
+                "must change — stop, get explicit user consent, re-baseline, and call "
+                "lock_benchmark again. (If that lock file belongs to a different "
+                "campaign in this repo, pass lock_path explicitly.)"
+            )
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": json.dumps(
+                            {
+                                "success": False,
+                                "metrics": {},
+                                "error": error,
+                                "locked_sha256": locked_sha,
+                                "current_sha256": current_sha,
+                                "lock_path": str(lock_path),
+                            },
+                            indent=2,
+                        ),
+                    }
+                ],
+                "is_error": True,
+            }
+    else:
+        lock_note = (
+            "No benchmark lock set (autoresearch.lock not found) — running unlocked. "
+            "Call lock_benchmark after the baseline to freeze the benchmark."
+        )
+
     ctx.set_status("⚗️  running experiment…")
 
+    wall_start = time.monotonic()
     try:
         proc = subprocess.run(
             ["bash", str(script)],
@@ -147,6 +352,7 @@ def run_experiment(params: dict[str, Any], ctx: fir_ext.Context) -> dict[str, An
     except Exception as exc:
         ctx.set_status("")
         raise fir_ext.ToolError(f"Failed to run benchmark: {exc}") from exc
+    wall_ms = round((time.monotonic() - wall_start) * 1000, 1)
 
     ctx.set_status("")
 
@@ -154,42 +360,34 @@ def run_experiment(params: dict[str, Any], ctx: fir_ext.Context) -> dict[str, An
     metrics = _parse_metrics(combined)
 
     if proc.returncode != 0 and not metrics:
+        payload = {
+            "success": False,
+            "exit_code": proc.returncode,
+            "metrics": {},
+            "wall_ms": wall_ms,
+            "stdout": proc.stdout,
+            "stderr": proc.stderr,
+            "error": "Benchmark exited with non-zero status and produced no metrics.",
+        }
+        if lock_note:
+            payload["lock_note"] = lock_note
         return {
-            "content": [
-                {
-                    "type": "text",
-                    "text": json.dumps(
-                        {
-                            "success": False,
-                            "exit_code": proc.returncode,
-                            "metrics": {},
-                            "stdout": proc.stdout,
-                            "stderr": proc.stderr,
-                            "error": "Benchmark exited with non-zero status and produced no metrics.",
-                        },
-                        indent=2,
-                    ),
-                }
-            ],
+            "content": [{"type": "text", "text": json.dumps(payload, indent=2)}],
             "is_error": False,
         }
 
+    payload = {
+        "success": proc.returncode == 0,
+        "exit_code": proc.returncode,
+        "metrics": metrics,
+        "wall_ms": wall_ms,
+        "stdout": proc.stdout,
+        "stderr": proc.stderr,
+    }
+    if lock_note:
+        payload["lock_note"] = lock_note
     return {
-        "content": [
-            {
-                "type": "text",
-                "text": json.dumps(
-                    {
-                        "success": proc.returncode == 0,
-                        "exit_code": proc.returncode,
-                        "metrics": metrics,
-                        "stdout": proc.stdout,
-                        "stderr": proc.stderr,
-                    },
-                    indent=2,
-                ),
-            }
-        ],
+        "content": [{"type": "text", "text": json.dumps(payload, indent=2)}],
         "is_error": False,
     }
 
@@ -229,6 +427,10 @@ def run_experiment(params: dict[str, Any], ctx: fir_ext.Context) -> dict[str, An
             "baseline_value": {
                 "type": "number",
                 "description": "Baseline value of the primary metric (from experiment #1).",
+            },
+            "wall_ms": {
+                "type": "number",
+                "description": "Benchmark wall-clock time in milliseconds, as returned by run_experiment.",
             },
             "status": {
                 "type": "string",
@@ -283,6 +485,9 @@ def log_experiment(params: dict[str, Any], ctx: fir_ext.Context) -> dict[str, An
         "delta_pct": delta_pct,
         "status": params["status"],
     }
+    wall_ms = params.get("wall_ms")
+    if wall_ms is not None:
+        record["wall_ms"] = wall_ms
     if params.get("notes"):
         record["notes"] = params["notes"]
 
@@ -318,6 +523,18 @@ def log_experiment(params: dict[str, Any], ctx: fir_ext.Context) -> dict[str, An
 # ---------------------------------------------------------------------------
 # Slash command: /autoresearch
 # ---------------------------------------------------------------------------
+
+
+def _fmt_wall(ms: float) -> str:
+    """Format a millisecond duration compactly (ms / s / m)."""
+    if ms < 1000:
+        return f"{ms:.0f}ms"
+    secs = ms / 1000.0
+    if secs < 60:
+        return f"{secs:.1f}s"
+    mins = int(secs // 60)
+    rem = secs - mins * 60
+    return f"{mins}m{rem:.0f}s"
 
 
 def _load_experiments(cwd: str) -> list[dict[str, Any]]:
@@ -356,6 +573,8 @@ def cmd_autoresearch(args: list[str], ctx: fir_ext.Context) -> dict[str, Any]:
     reverted = sum(1 for e in experiments if e.get("status") == "revert")
     errors = sum(1 for e in experiments if e.get("status") == "error")
 
+    total_wall_ms = sum(e.get("wall_ms") or 0 for e in experiments)
+
     # Find baseline and best.
     baseline = next((e for e in experiments if e.get("status") == "baseline"), None)
     baseline_val = baseline.get("primary_value") if baseline else None
@@ -386,6 +605,16 @@ def cmd_autoresearch(args: list[str], ctx: fir_ext.Context) -> dict[str, Any]:
             f"**Best: {best_val} ({sign}{delta}%) — exp #{best['experiment']}: "
             f"{best.get('description', '')}**"
         )
+
+    # Efficiency — wall time only (the extension cannot see token cost).
+    keep_rate = (kept / total * 100) if total else 0.0
+    eff = (
+        f"Efficiency: total wall {_fmt_wall(total_wall_ms)} | "
+        f"keep rate {keep_rate:.0f}% ({kept}/{total})"
+    )
+    if kept:
+        eff += f" | wall/win {_fmt_wall(total_wall_ms / kept)}"
+    lines.append(eff)
     lines.append("")
 
     # Last 10 experiments.
