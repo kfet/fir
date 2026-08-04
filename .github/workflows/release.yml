@@ -70,6 +70,19 @@ jobs:
       - name: Guard release version
         uses: kfet/gha/release-guard@4c729c719a3c76fbfa85c26722f0bd1ab63216ba
 
+      # The compiled-in model catalog is only a snapshot of whatever was last
+      # committed, so a release could otherwise ship provider data months stale.
+      # Regenerate it here and let `make all` compile AND test the result, so
+      # every release bakes in the current catalog.
+      #
+      # This must never block a release: day-to-day churn between releases is
+      # already handled by the catalog overlay (pkg/models/catalog-v1.json ->
+      # kfet/fir-dist, hot-applied on a TTL), so if models.dev / OpenRouter are
+      # unreachable we simply fall back to the committed snapshot.
+      - name: Refresh model catalog
+        continue-on-error: true
+        run: make generate-models
+
       - name: Build and test
         run: make all
 
