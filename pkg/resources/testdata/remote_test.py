@@ -220,7 +220,7 @@ class TestClassify(unittest.TestCase):
         self.assertEqual("nonzero_exit", remote._classify(126, "bash: x: Permission denied"))
         # The method list is the tell for a genuine ssh auth rejection.
         self.assertEqual(
-            "auth_failed", remote._classify(255, "kfet@box: Permission denied (publickey).")
+            "auth_failed", remote._classify(255, "user@box: Permission denied (publickey).")
         )
 
 
@@ -853,7 +853,7 @@ class TestToolPlumbing(unittest.TestCase):
         self.assertEqual("nonzero_exit", _payload(result)["outcome"])
 
     def test_scp_real_auth_failure_is_an_error(self):
-        err = "kfet@box: Permission denied (publickey).\n"
+        err = "user@box: Permission denied (publickey).\n"
         with mock.patch.object(remote, "_run_local", return_value=(1, "", err, False)):
             result = remote.rput({"host": "box", "local": __file__, "remote": "/tmp/x"}, self.ctx)
         self.assertTrue(result["is_error"])

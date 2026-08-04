@@ -19,7 +19,7 @@ func TestPlanComponent_LineOverflow(t *testing.T) {
 	}
 	metadata := map[string]string{
 		"version":        "0.27.0",
-		"cwd":            "/Users/kfet/dev/ai/fir",
+		"cwd":            "/Users/x/dev/ai/fir",
 		"next_update_in": "5",
 	}
 	c := NewPlanComponent("Release v0.27.0", entries, metadata)

@@ -75,16 +75,16 @@ func TestBuildToolTitleWithHint(t *testing.T) {
 		{
 			name: "hint absent falls back to tool name",
 			tool: "rexec",
-			args: map[string]any{"host": "zbox", "command": "uname -a"},
+			args: map[string]any{"host": "host1", "command": "uname -a"},
 			hint: nil,
 			want: "rexec",
 		},
 		{
 			name: "rexec host + command",
 			tool: "rexec",
-			args: map[string]any{"host": "zboxserver", "command": "make all"},
+			args: map[string]any{"host": "server1", "command": "make all"},
 			hint: rexecHint,
-			want: "rexec zboxserver make all",
+			want: "rexec server1 make all",
 		},
 		{
 			name: "missing arg skipped",
@@ -173,25 +173,25 @@ func TestBuildToolInitialContentWithHint(t *testing.T) {
 	}
 
 	// Boxed hint with host + command produces a fenced block preceded by host.
-	content := BuildToolInitialContentWithHint("rexec", map[string]any{"host": "zbox", "command": "make all"}, rexecHint)
+	content := BuildToolInitialContentWithHint("rexec", map[string]any{"host": "host1", "command": "make all"}, rexecHint)
 	if len(content) != 1 || content[0].Content == nil {
 		t.Fatalf("expected one text content, got %v", content)
 	}
 	got := content[0].Content.Content.Text.Text
-	want := "host: zbox\n```\n$ make all\n```"
+	want := "host: host1\n```\n$ make all\n```"
 	if got != want {
 		t.Errorf("rexec init content = %q, want %q", got, want)
 	}
 
 	// No command: context-only, no fenced block.
-	content = BuildToolInitialContentWithHint("rexec", map[string]any{"host": "zbox"}, rexecHint)
-	if len(content) != 1 || content[0].Content.Content.Text.Text != "host: zbox" {
+	content = BuildToolInitialContentWithHint("rexec", map[string]any{"host": "host1"}, rexecHint)
+	if len(content) != 1 || content[0].Content.Content.Text.Text != "host: host1" {
 		t.Errorf("host-only init content = %v", content)
 	}
 
 	// use_box false falls through to builtin behaviour (nil for unknown tools).
 	noBox := &agent.ToolDisplayHint{TitleArgs: rexecHint.TitleArgs}
-	content = BuildToolInitialContentWithHint("rexec", map[string]any{"host": "zbox", "command": "ls"}, noBox)
+	content = BuildToolInitialContentWithHint("rexec", map[string]any{"host": "host1", "command": "ls"}, noBox)
 	if content != nil {
 		t.Errorf("expected nil content when use_box is false, got %v", content)
 	}
