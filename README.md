@@ -237,12 +237,30 @@ pkg/
   tui/           Terminal UI (markdown rendering, themes)
 ```
 
+> **No API stability guarantee.** fir is a `v0.x` application, not a library.
+> The `pkg/` tree is importable but is shaped for fir's own internal use:
+> exported types, signatures, and package layout can and do change between
+> releases with no deprecation cycle and no semver guarantee. If you import
+> anything under `pkg/`, pin an exact version and expect to do work on upgrade —
+> import at your own risk. The stable, supported way to build on fir is the
+> [extension surface](#extensions), not importing these packages.
+
 ## Built with pi and fir
 
 The initial port was built using the original
 [pi](https://github.com/badlogic/pi-mono) coding agent. Once enough of the
 codebase was functional, development switched to self-hosting: fir now
 continues its own development.
+
+## Contributing & security
+
+fir is primarily a personal project published in the open. Bug fixes,
+documentation, and security fixes are welcome; large refactors and new core
+features are usually better built on the [extension surface](#extensions). See
+[CONTRIBUTING.md](CONTRIBUTING.md) for the full stance before opening a PR.
+
+To report a security vulnerability, **do not** open a public issue — use
+GitHub's private vulnerability reporting and see [SECURITY.md](SECURITY.md).
 
 ## License
 
