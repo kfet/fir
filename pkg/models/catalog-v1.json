@@ -1,6 +1,64 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-08-04T13:14:36Z",
-  "providerDefaults": {},
-  "providers": {}
+  "generatedAt": "2026-08-05T04:05:00Z",
+  "providers": {
+    "groq": {
+      "models": [
+        {
+          "id": "qwen/qwen3.6-27b",
+          "name": "Qwen3.6 27B",
+          "api": "openai-completions",
+          "reasoning": true,
+          "input": ["text", "image"],
+          "cost": {
+            "input": 0.6,
+            "output": 3,
+            "cacheRead": 0.3,
+            "cacheWrite": 0
+          },
+          "contextWindow": 131072,
+          "maxTokens": 16384
+        }
+      ]
+    },
+    "opencode": {
+      "modelOverrides": {
+        "deepseek-v4-flash": {
+          "name": "DeepSeek V4 Flash (New)"
+        }
+      }
+    },
+    "openrouter": {
+      "modelOverrides": {
+        "minimax/minimax-m2.7": {
+          "cost": {
+            "input": 0.27,
+            "output": 1.08,
+            "cacheRead": 0.054,
+            "cacheWrite": 0
+          }
+        },
+        "mistralai/mistral-small-3.2-24b-instruct": {
+          "cost": {
+            "input": 0.09375,
+            "output": 0.25,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          }
+        },
+        "x-ai/grok-4.20": {
+          "name": "SpaceXAI: Grok 4.20"
+        },
+        "x-ai/grok-4.3": {
+          "name": "SpaceXAI: Grok 4.3"
+        },
+        "x-ai/grok-4.5": {
+          "name": "SpaceXAI: Grok 4.5"
+        },
+        "x-ai/grok-build-0.1": {
+          "name": "SpaceXAI: Grok Build 0.1"
+        }
+      }
+    }
+  }
 }
