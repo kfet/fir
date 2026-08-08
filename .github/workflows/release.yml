@@ -94,7 +94,13 @@ jobs:
         with:
           distribution: goreleaser
           version: "~> v2"
-          args: release --clean
+          # --skip=validate: the "Refresh model catalog" step above deliberately
+          # regenerates pkg/ai/models_generated.go so every release bakes in the
+          # current catalog. That leaves the checkout dirty by design, which
+          # GoReleaser's git-state validation rejects ("git is in a dirty
+          # state"). The tag is already resolved and guarded by the
+          # release-guard step, so validation buys nothing here.
+          args: release --clean --skip=validate
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
