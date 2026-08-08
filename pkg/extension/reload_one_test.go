@@ -177,6 +177,86 @@ func TestManager_ReloadOne_DeletedFileUnloads(t *testing.T) {
 	}
 }
 
+// TestManager_ReloadOne_NotDiscoveredNotRunning asserts that reloading a name
+// that discovery does not know about, and which is not running either, is an
+// error rather than a silent no-op "success". The error names the extension
+// and lists the names that were discovered.
+func TestManager_ReloadOne_NotDiscoveredNotRunning(t *testing.T) {
+	reloadGrace = 0
+	dir := t.TempDir()
+	pathD := writeExtScriptTool(t, dir, "ext-d", "d_tool")
+
+	ts := NewTrustStoreWithPath(filepath.Join(dir, "trust.json"))
+	trustExt(t, ts, dir, "ext-d", pathD)
+
+	mgr := NewManager(slog.Default())
+	mgr.SetTrustStore(ts)
+
+	api := newMockAPI()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := mgr.Start(ctx, dir, dir, api); err != nil {
+		t.Fatal(err)
+	}
+	defer mgr.Stop() //nolint:errcheck
+
+	err := mgr.ReloadOne(ctx, "never_existed")
+	if err == nil {
+		t.Fatal("expected error reloading an extension that was never discovered")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "never_existed") {
+		t.Fatalf("expected the requested name in the error, got %q", msg)
+	}
+	if !strings.Contains(msg, "not found in discovery") {
+		t.Fatalf("expected 'not found in discovery' in the error, got %q", msg)
+	}
+	// The discovered names are listed — free, factual context.
+	if !strings.Contains(msg, "ext-d") {
+		t.Fatalf("expected discovered names listed in the error, got %q", msg)
+	}
+}
+
+// TestManager_ReloadOne_DiscoveredAndRunningStillReloads is a regression guard
+// for the ordinary path: a discovered, running extension still reloads and
+// keeps its tools registered.
+func TestManager_ReloadOne_DiscoveredAndRunningStillReloads(t *testing.T) {
+	reloadGrace = 0
+	dir := t.TempDir()
+	pathE := writeExtScriptTool(t, dir, "ext-e", "e_tool")
+
+	ts := NewTrustStoreWithPath(filepath.Join(dir, "trust.json"))
+	trustExt(t, ts, dir, "ext-e", pathE)
+
+	mgr := NewManager(slog.Default())
+	mgr.SetTrustStore(ts)
+	mgr.ConfirmFn = func(_, _ string) bool { return true }
+
+	api := newMockAPI()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := mgr.Start(ctx, dir, dir, api); err != nil {
+		t.Fatal(err)
+	}
+	defer mgr.Stop() //nolint:errcheck
+
+	if n := pollToolCount(api, builtinToolCount+1, 5*time.Second); n != builtinToolCount+1 {
+		t.Fatalf("expected %d tools, got %d", builtinToolCount+1, n)
+	}
+
+	if err := mgr.ReloadOne(ctx, "ext-e"); err != nil {
+		t.Fatalf("ReloadOne(ext-e) failed: %v", err)
+	}
+	if !api.toolNameSet()["e_tool"] {
+		t.Fatalf("expected e_tool still registered after reload, got %v", api.toolNameSet())
+	}
+	if got := mgr.ExtensionToolNames()["ext-e"]; got == nil {
+		t.Fatal("expected ext-e still registered with the manager after reload")
+	}
+}
+
 // TestManager_ReloadOneBeforeStart asserts ReloadOne errors before Start.
 func TestManager_ReloadOneBeforeStart(t *testing.T) {
 	mgr := NewManager(slog.Default())

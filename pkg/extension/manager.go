@@ -629,8 +629,11 @@ var reloadGrace = 100 * time.Millisecond
 //     intact), tear down its provider/auth/api registrations, cancel its
 //     context, stop its process, and drop it from m.bridges.
 //  4. If the cfg was found in discovery, startOne it to (re)spawn the
-//     edited/new version. If it was NOT found (the file was deleted), this is
-//     a stop-only unload.
+//     edited/new version. If it was NOT found but an instance was running
+//     (the file was deleted mid-session), this is a stop-only unload and
+//     succeeds. If it was NOT found and nothing was running, nothing happened
+//     at all, so ReloadOne returns an error naming the extension and listing
+//     the names that were discovered.
 func (m *Manager) ReloadOne(ctx context.Context, name string) error {
 	// Serialize reloads so two concurrent ReloadOne(name) calls cannot both
 	// miss the running instance and spawn duplicate bridges.
@@ -725,6 +728,21 @@ func (m *Manager) ReloadOne(ctx context.Context, name string) error {
 
 	// 4. Respawn the edited/new version, or stop-only if the file was deleted.
 	if found == nil {
+		if running == nil {
+			// Nothing was discovered and nothing was running: this call did
+			// nothing at all, so reporting success would be a lie.
+			names := make([]string, 0, len(configs))
+			for i := range configs {
+				names = append(names, configs[i].Name)
+			}
+			sort.Strings(names)
+			if len(names) == 0 {
+				return fmt.Errorf("extension %q not found in discovery (found: none)", name)
+			}
+			return fmt.Errorf("extension %q not found in discovery (found: %s)", name, strings.Join(names, ", "))
+		}
+		// Genuine stop-only unload: it was running, its file is gone.
+		m.logger.Info("extension unloaded (no longer discovered)", "ext", name)
 		return nil
 	}
 	return m.startOne(ctx, *found, cwd, sdkEnv, api, projectDir)
