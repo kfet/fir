@@ -192,6 +192,10 @@ class FakeFir:
                 {"name": "bash", "description": "mock"},
                 {"name": "read", "description": "mock"},
             ]
+        elif method == "list_extensions":
+            result = [
+                {"name": "demo", "id": "builtin__demo", "scope": "builtin", "tools": []},
+            ]
         elif method == "available_models":
             result = {
                 "models": [
@@ -786,6 +790,12 @@ class TestDemoEvents(DemoTestCase):
         assert msg is not None
         self.assertEqual(msg["params"]["key"], "started")
         self.assertEqual(msg["params"]["value"], "true")
+
+    def test_session_start_calls_list_extensions(self) -> None:
+        fake = self._run_event("session_start")
+        msg = fake.wait_for_method("list_extensions")
+        fake.stop()
+        self.assertIsNotNone(msg, "expected list_extensions after session_start")
 
     def test_session_start_calls_prepend(self) -> None:
         fake = self._run_event("session_start")

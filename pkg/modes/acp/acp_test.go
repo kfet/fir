@@ -1403,6 +1403,7 @@ func (n *noopBridgeAPI) ReloadExtension(_ string) error             { return nil
 func (n *noopBridgeAPI) ReloadMCP() (extension.ReloadMCPResult, error) {
 	return extension.ReloadMCPResult{}, nil
 }
+func (n *noopBridgeAPI) ListExtensions() []extension.ExtensionInfo { return nil }
 
 // writeCommandExtScript writes a Python extension script that:
 //   - responds to the init handshake with a "greet" command

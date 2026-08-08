@@ -16,7 +16,7 @@ Outbound calls demonstrated (extension → fir):
   set_label · clear_label ·
   set_model · send_message · send_user_message ·
   set_session_data · get_session_data · get_session_file · get_session_name · get_session_id · continue_session · side_query · call_tool ·
-  list_tools · available_models ·
+  list_tools · list_extensions · available_models ·
   report_progress · restart_session · reload_extension · reload_mcp ·
   prepend
 
@@ -381,6 +381,7 @@ def on_session_start(params: fir_ext.SessionStartParams, ctx: fir_ext.Context) -
     ctx.set_status("demo ready")  # set_status
     ctx.set_session_data("started", "true")  # set_session_data
     ctx.list_tools()  # list_tools (read-only discovery)
+    ctx.list_extensions()  # list_extensions (which extensions are actually live)
     ctx.available_models()  # available_models (live-availability)
     ctx.prepend("Demo extension is active.")  # prepend
     ctx.agent_info()  # agent_info

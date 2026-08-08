@@ -39,6 +39,9 @@ type SessionBridge struct {
 	reloadMCPMu sync.RWMutex
 	reloadMCPFn func() (ReloadMCPResult, error)
 
+	listExtMu sync.RWMutex
+	listExtFn func() []ExtensionInfo
+
 	// Version and Mode are passed through into Introspect results.
 	// Populated by Setup.
 	Version string
@@ -508,6 +511,27 @@ func (b *SessionBridge) ReloadExtension(name string) error {
 		return fmt.Errorf("extension reload is not supported in this session")
 	}
 	return fn(name)
+}
+
+// SetListExtensionsFn registers the loaded-extension lister. Wired by the
+// extension Manager at Start so the inbound list_extensions RPC can report
+// what is actually running. Pass nil to remove. Mirrors SetReloadFn.
+func (b *SessionBridge) SetListExtensionsFn(fn func() []ExtensionInfo) {
+	b.listExtMu.Lock()
+	b.listExtFn = fn
+	b.listExtMu.Unlock()
+}
+
+// ListExtensions reports the extensions currently running in this session.
+// Returns nil when no manager is wired (reload/introspection unsupported).
+func (b *SessionBridge) ListExtensions() []ExtensionInfo {
+	b.listExtMu.RLock()
+	fn := b.listExtFn
+	b.listExtMu.RUnlock()
+	if fn == nil {
+		return nil
+	}
+	return fn()
 }
 
 // SetReloadMCPFn registers the MCP reload handler. It is wired by app.go at

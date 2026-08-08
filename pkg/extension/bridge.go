@@ -546,6 +546,13 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 	case "list_tools":
 		result = api.ListTools()
 
+	case "list_extensions":
+		exts := api.ListExtensions()
+		if exts == nil {
+			exts = []ExtensionInfo{}
+		}
+		result = exts
+
 	case "prepend_context":
 		var p prependContextParams
 		if req.Params != nil {

@@ -97,6 +97,23 @@ type BridgeAPI interface {
 	// detected (when multiple config files define the same server name)
 	// and any errors from individual server starts/restarts.
 	ReloadMCP() (ReloadMCPResult, error)
+	// ListExtensions returns one entry per extension currently running in
+	// this session (name, canonical ID, scope, path, registered tools).
+	// Extensions use it to verify that a file they just wrote actually
+	// became a live extension — a file that fails discovery (missing
+	// frontmatter, not executable, mode-gated) is simply absent here.
+	// Returns nil for hosts without an extension manager wired.
+	ListExtensions() []ExtensionInfo
+}
+
+// ExtensionInfo describes one running extension, as reported to extensions
+// over the `list_extensions` RPC.
+type ExtensionInfo struct {
+	Name  string   `json:"name"`
+	ID    string   `json:"id,omitempty"`
+	Scope string   `json:"scope,omitempty"`
+	Path  string   `json:"path,omitempty"`
+	Tools []string `json:"tools,omitempty"`
 }
 
 // ExecResult is the result of a shell command.

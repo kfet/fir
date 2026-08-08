@@ -947,6 +947,33 @@ Response:
 
 ---
 
+#### `list_extensions`
+
+Return one entry per extension currently loaded and running in the session.
+Presence means the extension passed discovery (executable + valid comment
+frontmatter + not `builtin: true` for user dirs), passed mode filtering, and
+completed its init handshake. A file on disk that fails any of those is
+absent from this list — this is the reliable way to check whether a
+just-written extension actually became live.
+
+```json
+{"jsonrpc":"2.0","id":1017,"method":"list_extensions","params":{}}
+```
+
+Response:
+
+```json
+[
+  {"name": "mood", "id": "builtin__mood", "scope": "builtin",
+   "path": "/tmp/fir-builtin-extensions/ab12/mood.py",
+   "tools": ["mood_note", "mood_recent"]}
+]
+```
+
+Returns `[]` on hosts with no extension manager wired (e.g. the auth helper).
+
+---
+
 #### `prepend_context`
 
 Add a `[SYS_EXT]` block to the session's system prompt.  The content is

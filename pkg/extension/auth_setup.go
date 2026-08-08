@@ -212,5 +212,7 @@ func (n *nopBridgeAPI) ReloadMCP() (ReloadMCPResult, error) {
 	return ReloadMCPResult{}, fmt.Errorf("MCP reload not available outside a session")
 }
 
+func (n *nopBridgeAPI) ListExtensions() []ExtensionInfo { return nil }
+
 // Ensure agent import is used (ToolDefinition references agent.ToolDisplayHint
 // transitively); keep this to avoid goimports churn.

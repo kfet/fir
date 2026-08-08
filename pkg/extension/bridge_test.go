@@ -36,6 +36,7 @@ type mockBridgeAPI struct {
 	restartErr      error
 	reloadNames     []string
 	reloadErr       error
+	extensions      []ExtensionInfo
 	reloadFn        func(name string) error
 	reloadMCPFn     func() (ReloadMCPResult, error)
 	reloadMCPCalls  int
@@ -202,6 +203,12 @@ func (m *mockBridgeAPI) RestartSession(prompt, prependContext string) error {
 	m.restartPrompts = append(m.restartPrompts, prompt)
 	m.restartPrepends = append(m.restartPrepends, prependContext)
 	return m.restartErr
+}
+
+func (m *mockBridgeAPI) ListExtensions() []ExtensionInfo {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.extensions
 }
 
 func (m *mockBridgeAPI) ReloadExtension(name string) error {
@@ -1283,5 +1290,63 @@ func TestSessionBridge_TakePendingRestart(t *testing.T) {
 	// Consumed — a second take returns ok=false.
 	if _, _, ok := sb.TakePendingRestart(); ok {
 		t.Fatal("expected ok=false after consuming pending restart")
+	}
+}
+
+func TestBridge_InboundListExtensions(t *testing.T) {
+	b, extCodec := pipePair(&InitResult{})
+	api := newMockAPI()
+	api.extensions = []ExtensionInfo{
+		{Name: "mood", ID: "builtin__mood", Scope: "builtin", Path: "/x/mood.py", Tools: []string{"mood_note"}},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = b.Run(ctx, api) }()
+
+	_ = extCodec.WriteRequest(1, "list_extensions", nil)
+
+	msg, err := extCodec.ReadMessage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, ok := msg.(*Response)
+	if !ok {
+		t.Fatalf("expected Response, got %T", msg)
+	}
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %v", resp.Error)
+	}
+	var got []ExtensionInfo
+	if err := json.Unmarshal(*resp.Result, &got); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	if len(got) != 1 || got[0].Name != "mood" || len(got[0].Tools) != 1 {
+		t.Fatalf("unexpected result: %+v", got)
+	}
+}
+
+// No extensions must marshal as [], never null — the SDK treats a non-list
+// as "host cannot report" and would then refuse to assert anything.
+func TestBridge_InboundListExtensions_EmptyIsArray(t *testing.T) {
+	b, extCodec := pipePair(&InitResult{})
+	api := newMockAPI()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = b.Run(ctx, api) }()
+
+	_ = extCodec.WriteRequest(1, "list_extensions", nil)
+
+	msg, err := extCodec.ReadMessage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp := msg.(*Response)
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %v", resp.Error)
+	}
+	if string(*resp.Result) != "[]" {
+		t.Fatalf("expected [], got %s", string(*resp.Result))
 	}
 }

@@ -1175,6 +1175,14 @@ class ListToolsItem(TypedDict, total=False):
     parameters: dict
 
 
+class ListExtensionsItem(TypedDict, total=False):
+    name: str
+    id: str
+    scope: str
+    path: str
+    tools: list[str]
+
+
 class PrependContextParams(TypedDict, total=False):
     content: str
 
@@ -3017,6 +3025,27 @@ class Context:
             and ``parameters`` (dict, optional — JSON Schema).
         """
         result = self._call("list_tools", {}, timeout=timeout)
+        if isinstance(result, list):
+            return result  # type: ignore[return-value]
+        return []
+
+    def list_extensions(self, timeout: float = 10.0) -> list[ListExtensionsItem]:
+        """Return the extensions currently loaded and running in this session.
+
+        Presence in this list means the extension survived discovery (it is
+        executable and has valid comment frontmatter), passed mode filtering,
+        and completed its init handshake. A file on disk that fails any of
+        those is simply absent here — which is how a caller can tell that a
+        freshly written extension did NOT become live.
+
+        Returns
+        -------
+        list of ListExtensionsItem
+            Each item has ``name``, and optionally ``id``, ``scope``,
+            ``path`` and ``tools`` (list of registered tool names).
+            Empty when the host has no extension manager wired.
+        """
+        result = self._call("list_extensions", {}, timeout=timeout)
         if isinstance(result, list):
             return result  # type: ignore[return-value]
         return []

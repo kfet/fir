@@ -208,6 +208,14 @@ func (m *Manager) Start(ctx context.Context, projectDir string, cwd string, api 
 		})
 	}
 
+	// Wire the loaded-extension lister so extensions can verify (over the
+	// list_extensions RPC) what actually survived discovery + handshake.
+	if l, ok := api.(interface {
+		SetListExtensionsFn(func() []ExtensionInfo)
+	}); ok {
+		l.SetListExtensionsFn(m.RunningExtensions)
+	}
+
 	configs, err := Discover(projectDir)
 	if err != nil {
 		return err
@@ -945,6 +953,37 @@ func (m *Manager) ExtensionToolNames() map[string][]string {
 		}
 	}
 	return result
+}
+
+// RunningExtensions returns one ExtensionInfo per extension currently
+// running under this manager, sorted by name. Unlike EnabledExtensionNames
+// it never reports a configured-but-not-started extension: presence here
+// means the extension survived discovery, mode filtering and handshake.
+func (m *Manager) RunningExtensions() []ExtensionInfo {
+	m.mu.Lock()
+	bridges := append([]*managedBridge(nil), m.bridges...)
+	m.mu.Unlock()
+
+	out := make([]ExtensionInfo, 0, len(bridges))
+	for _, mb := range bridges {
+		if mb.cfg.Name == "" {
+			continue
+		}
+		info := ExtensionInfo{
+			Name:  mb.cfg.Name,
+			ID:    mb.cfg.ID,
+			Scope: mb.cfg.Scope,
+			Path:  mb.cfg.Path,
+		}
+		if mb.bridge != nil && mb.bridge.caps != nil {
+			for _, t := range mb.bridge.caps.Tools {
+				info.Tools = append(info.Tools, t.Name)
+			}
+		}
+		out = append(out, info)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
 }
 
 // ManagerPaths holds the filesystem paths used by the extension manager.

@@ -167,7 +167,8 @@ The `ctx` object passed to every handler provides methods for calling back into
 fir: `notify`, `exec`, `set_status`, `set_session_name`, `set_label`,
 `clear_label`, `get_active_tools`, `set_active_tools`, `set_model`,
 `send_message`, `send_user_message`, `set_session_data`, `get_session_data`,
-`continue_session`, `side_query`, `call_tool`, `list_tools`, and `prepend`.
+`continue_session`, `side_query`, `call_tool`, `list_tools`,
+`list_extensions`, and `prepend`.
 
 All methods are synchronous — they send a JSON-RPC request to fir and block
 until fir responds. Full signatures, parameters, and return values are
