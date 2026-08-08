@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	firlog "github.com/kfet/fir/pkg/log"
 	"github.com/kfet/fir/pkg/resources"
 )
 
@@ -241,11 +242,13 @@ func scanExtDir(dir, scope string, byName map[string]ExtProcConfig) error {
 		if err != nil {
 			continue
 		}
-		if info.Mode()&0111 == 0 {
-			continue
-		}
 		name := stripExt(e.Name())
 		filePath := filepath.Join(dir, e.Name())
+
+		if info.Mode()&0111 == 0 {
+			logNonExecutableExt(filePath, scope)
+			continue
+		}
 
 		// Parse comment frontmatter once so we can skip builtin files and capture mode constraints.
 		// Files without valid frontmatter (e.g. test scripts, helper modules) are not extensions.
@@ -253,9 +256,17 @@ func scanExtDir(dir, scope string, byName map[string]ExtProcConfig) error {
 		if data, err := os.ReadFile(filePath); err == nil {
 			fm = resources.ParseCommentFrontmatter(string(data))
 			if !fm.Present {
+				// Silent skips here cost real debugging time (a written-but-
+				// undiscoverable extension looks like nothing happened), so
+				// leave a breadcrumb. Debug level: helper modules and stray
+				// scripts legitimately live in extensions dirs.
+				firlog.Debug("extension file skipped: no comment frontmatter",
+					"path", filePath, "scope", scope,
+					"hint", "add a '# ---' frontmatter block with at least 'name:'")
 				continue
 			}
 			if fm.Builtin {
+				// Expected: builtins are loaded by LoadBuiltinExtensions.
 				continue
 			}
 		}
@@ -334,4 +345,31 @@ func extensionFrontmatterFromPath(path string) resources.ExtensionFrontmatter {
 		return resources.ExtensionFrontmatter{}
 	}
 	return resources.ParseCommentFrontmatter(string(data))
+}
+
+// logNonExecutableExt warns when a file that looks like a real extension (it
+// carries valid, non-builtin comment frontmatter) is skipped purely because
+// it lacks the executable bit. Files without frontmatter are not extensions,
+// so they are ignored silently — that keeps the volume down in directories
+// holding helper modules, READMEs and data files.
+func logNonExecutableExt(filePath, scope string) {
+	f, err := os.Open(filePath)
+	if err != nil {
+		return
+	}
+	defer func() { _ = f.Close() }()
+	// Frontmatter lives at the very top; never read more than a prefix so a
+	// stray large/binary file in the dir costs nothing.
+	buf := make([]byte, 4096)
+	n, _ := f.Read(buf)
+	if n <= 0 {
+		return
+	}
+	fm := resources.ParseCommentFrontmatter(string(buf[:n]))
+	if !fm.Present || fm.Builtin {
+		return
+	}
+	firlog.Warn("extension file skipped: not executable",
+		"path", filePath, "scope", scope,
+		"hint", "chmod +x the file")
 }

@@ -4,7 +4,10 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
+
+	firlog "github.com/kfet/fir/pkg/log"
 )
 
 func TestDiscover_Empty(t *testing.T) {
@@ -455,5 +458,97 @@ func TestLoadBuiltinExtensions_OriginAndID(t *testing.T) {
 	}
 	if !sawBuiltin {
 		t.Skip("no builtin extensions discovered in this environment")
+	}
+}
+
+// captureExtLog runs fn with firlog wired to a temp file at Trace level and
+// returns everything it logged.
+func captureExtLog(t *testing.T, fn func()) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "fir.log")
+	cleanup, err := firlog.Init(true, path, firlog.RotateConfig{})
+	if err != nil {
+		t.Fatalf("firlog.Init: %v", err)
+	}
+	prev := firlog.CurrentLevel()
+	firlog.SetLevel(firlog.LevelTrace)
+	defer func() {
+		firlog.SetLevel(prev)
+		cleanup()
+	}()
+	fn()
+	b, _ := os.ReadFile(path)
+	return string(b)
+}
+
+// A file skipped for missing frontmatter used to vanish without a trace,
+// which is exactly the failure mode this logging exists to prevent.
+func TestScanExtDir_LogsFrontmatterSkip(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "noframe.py")
+	if err := os.WriteFile(p, []byte("#!/usr/bin/env python3\nprint('hi')\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	byName := map[string]ExtProcConfig{}
+	out := captureExtLog(t, func() {
+		if err := scanExtDir(dir, "global", byName); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	if _, ok := byName["noframe"]; ok {
+		t.Fatal("file without frontmatter must not be discovered")
+	}
+	if !strings.Contains(out, "no comment frontmatter") || !strings.Contains(out, p) {
+		t.Fatalf("expected a skip log naming %s, got:\n%s", p, out)
+	}
+}
+
+func TestScanExtDir_LogsNonExecutableSkip(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "ext.py")
+	src := "#!/usr/bin/env python3\n# ---\n# name: ext\n# ---\nprint('hi')\n"
+	if err := os.WriteFile(p, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// A non-extension file must stay silent even though it is also skipped.
+	if err := os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	byName := map[string]ExtProcConfig{}
+	out := captureExtLog(t, func() {
+		if err := scanExtDir(dir, "global", byName); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	if _, ok := byName["ext"]; ok {
+		t.Fatal("non-executable file must not be discovered")
+	}
+	if !strings.Contains(out, "not executable") || !strings.Contains(out, p) {
+		t.Fatalf("expected a not-executable log naming %s, got:\n%s", p, out)
+	}
+	if strings.Contains(out, "notes.txt") {
+		t.Fatalf("non-extension file should not be logged, got:\n%s", out)
+	}
+}
+
+// Builtin skips are expected and must stay silent.
+func TestScanExtDir_BuiltinSkipIsSilent(t *testing.T) {
+	dir := t.TempDir()
+	src := "#!/usr/bin/env python3\n# ---\n# name: b\n# builtin: true\n# ---\n"
+	if err := os.WriteFile(filepath.Join(dir, "b.py"), []byte(src), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	byName := map[string]ExtProcConfig{}
+	out := captureExtLog(t, func() {
+		if err := scanExtDir(dir, "global", byName); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if strings.Contains(out, "b.py") {
+		t.Fatalf("builtin skip should be silent, got:\n%s", out)
 	}
 }
