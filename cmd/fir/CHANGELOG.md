@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.96.0] - 2026-08-09
+
 ### Fixed
 - **Reloading an extension name that was never discovered now fails instead of reporting success.** `Manager.ReloadOne` ended with `if found == nil { return nil }`, so when a name was neither found by discovery **nor** currently running, the call did literally nothing and returned success — the `reload_extension` RPC answered `{ok:true}` and `ext_reload` / `forge_tool` reported a reload that never happened. That cost a real ~30-tool-call misdiagnosis: an extension file lacking its `# ---` frontmatter was never discovered, the reload silently no-op'd, and the conclusion drawn was the false "reload can't add tools to a live session". `ReloadOne` now returns `extension %q not found in discovery (found: …)`, listing the names that *were* discovered — it does not attempt to explain *why* the file was skipped. The genuine stop-only unload (not discovered but running, i.e. the file was deleted mid-session) still succeeds and is logged at INFO. **Behaviour break:** a `reload_extension` RPC for an unknown name now returns a JSON-RPC error instead of `{ok:true}`.
 
