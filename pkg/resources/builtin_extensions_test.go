@@ -174,3 +174,31 @@ func TestExtractBuiltinExtensionsTo_ReExtractsWhenIncomplete(t *testing.T) {
 		t.Fatalf(".complete missing after re-extract: %v", err)
 	}
 }
+
+// forge.py repairs extensions it writes by injecting exactly this header.
+// Its Python-side parser mirrors ParseCommentFrontmatter; if the two ever
+// drift, forge would happily write files that fir silently skips — the very
+// bug this shape exists to prevent. Keep this literal in sync with
+// _inject_frontmatter in pkg/resources/builtin_extensions/forge.py.
+func TestParseCommentFrontmatter_ForgeInjectedHeader(t *testing.T) {
+	src := "#!/usr/bin/env python3\n" +
+		"# ---\n" +
+		"# name: skill_judge\n" +
+		"# description: skill_judge extension (forged in-session)\n" +
+		"# ---\n" +
+		"import fir_ext\n"
+
+	fm := ParseCommentFrontmatter(src)
+	if !fm.Present {
+		t.Fatal("forge-injected frontmatter must parse as present")
+	}
+	if fm.Name != "skill_judge" {
+		t.Fatalf("name = %q, want skill_judge", fm.Name)
+	}
+	if fm.Builtin {
+		t.Fatal("forge-injected frontmatter must not be builtin")
+	}
+	if len(fm.Modes) != 0 {
+		t.Fatalf("forge injects no modes (all modes), got %v", fm.Modes)
+	}
+}

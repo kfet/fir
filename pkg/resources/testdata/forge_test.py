@@ -36,10 +36,19 @@ def _load_forge():
     return forge
 
 
-def _make_ctx(before_tools, after_tools):
-    """ctx.list_tools() returns before_tools first, then after_tools."""
+def _make_ctx(before_tools, after_tools, loaded=None, mode="interactive"):
+    """ctx.list_tools() returns before_tools first, then after_tools.
+
+    ``loaded`` is the list of extension names ctx.list_extensions() reports;
+    None makes the host look like one that cannot report them.
+    """
     ctx = mock.MagicMock()
     ctx.list_tools.side_effect = [before_tools, after_tools]
+    if loaded is None:
+        ctx.list_extensions.return_value = []
+    else:
+        ctx.list_extensions.return_value = [{"name": n} for n in loaded]
+    ctx.agent_info.return_value = {"mode": mode}
     return ctx
 
 
@@ -112,36 +121,40 @@ class TestForgeTool(unittest.TestCase):
         for p in self._patches:
             p.stop()
 
+    def _written(self, name):
+        with open(os.path.join(self.tmp, "extensions", f"{name}.py")) as f:
+            return f.read()
+
     def test_invalid_name_rejected(self):
         ctx = mock.MagicMock()
-        res = self.handler({"name": "bad name!", "code": "x"}, ctx)
+        res = self.handler({"name": "bad name!", "code": _TINY_EXT}, ctx)
         self.assertTrue(res["is_error"])
         ctx.reload_extension.assert_not_called()
 
     def test_name_forge_rejected(self):
         ctx = mock.MagicMock()
-        res = self.handler({"name": "forge", "code": "x"}, ctx)
+        res = self.handler({"name": "forge", "code": _TINY_EXT}, ctx)
         self.assertTrue(res["is_error"])
         ctx.reload_extension.assert_not_called()
 
     def test_no_global_dir(self):
         with mock.patch.object(fir_ext, "config_dirs", []):
             ctx = mock.MagicMock()
-            res = self.handler({"name": "tinyext", "code": "x"}, ctx)
+            res = self.handler({"name": "tinyext", "code": _TINY_EXT}, ctx)
         self.assertTrue(res["is_error"])
         self.assertIn("global config dir", res["content"][0]["text"])
 
     def test_makedirs_error(self):
         ctx = mock.MagicMock()
         with mock.patch.object(self.mod.os, "makedirs", side_effect=OSError("denied")):
-            res = self.handler({"name": "tinyext", "code": "x"}, ctx)
+            res = self.handler({"name": "tinyext", "code": _TINY_EXT}, ctx)
         self.assertTrue(res["is_error"])
         self.assertIn("extensions dir", res["content"][0]["text"])
 
     def test_write_error(self):
         ctx = _make_ctx([], [])
         with mock.patch("builtins.open", side_effect=OSError("disk full")):
-            res = self.handler({"name": "tinyext", "code": "x"}, ctx)
+            res = self.handler({"name": "tinyext", "code": _TINY_EXT}, ctx)
         self.assertTrue(res["is_error"])
         self.assertIn("could not write", res["content"][0]["text"])
 
@@ -159,16 +172,118 @@ class TestForgeTool(unittest.TestCase):
         self.assertEqual(os.stat(path).st_mode & 0o777, 0o755)
 
     def test_success_no_new_tools(self):
-        ctx = _make_ctx([{"name": "forge_tool"}], [{"name": "forge_tool"}])
+        ctx = _make_ctx(
+            [{"name": "forge_tool"}],
+            [{"name": "forge_tool"}],
+            loaded=["forge", "tinyext"],
+        )
         res = self.handler({"name": "tinyext", "code": _TINY_EXT}, ctx)
         self.assertFalse(res["is_error"])
-        self.assertIn("No new tools", res["content"][0]["text"])
+        text = res["content"][0]["text"]
+        self.assertIn("loaded extension 'tinyext'", text)
+        self.assertIn("registers no tools", text)
+
+    def test_not_loaded_is_hard_error(self):
+        ctx = _make_ctx([], [], loaded=["forge"])
+        res = self.handler({"name": "tinyext", "code": _TINY_EXT}, ctx)
+        self.assertTrue(res["is_error"])
+        text = res["content"][0]["text"]
+        self.assertIn("NOT loaded", text)
+        self.assertIn("tinyext.py", text)
+
+    def test_not_loaded_but_mode_gated_is_not_an_error(self):
+        code = "#!/usr/bin/env python3\n# ---\n# name: tinyext\n# modes: acp\n# ---\n" + _TINY_EXT
+        ctx = _make_ctx([], [], loaded=["forge"], mode="text")
+        res = self.handler({"name": "tinyext", "code": code}, ctx)
+        self.assertFalse(res["is_error"])
+        self.assertIn("excludes the current mode", res["content"][0]["text"])
+
+    def test_unknown_loaded_state_does_not_assert(self):
+        """Host that cannot report extensions: no success/failure assertion."""
+        ctx = _make_ctx([], [], loaded=None)
+        res = self.handler({"name": "tinyext", "code": _TINY_EXT}, ctx)
+        self.assertFalse(res["is_error"])
+        self.assertIn("wrote and reloaded", res["content"][0]["text"])
+
+    def test_injects_shebang_and_frontmatter(self):
+        ctx = _make_ctx([], [], loaded=["tinyext"])
+        res = self.handler({"name": "tinyext", "code": _TINY_EXT}, ctx)
+        self.assertFalse(res["is_error"])
+        written = self._written("tinyext")
+        lines = written.split("\n")
+        self.assertEqual(lines[0], "#!/usr/bin/env python3")
+        self.assertEqual(lines[1], "# ---")
+        self.assertIn("# name: tinyext", lines)
+        self.assertEqual(lines[4], "# ---")
+        self.assertIn("import fir_ext", written)
+
+    def test_preserves_existing_frontmatter(self):
+        code = (
+            "#!/usr/bin/env python3\n"
+            "# ---\n"
+            "# name: tinyext\n"
+            "# description: hand written\n"
+            "# ---\n" + _TINY_EXT
+        )
+        ctx = _make_ctx([], [], loaded=["tinyext"])
+        res = self.handler({"name": "tinyext", "code": code}, ctx)
+        self.assertFalse(res["is_error"])
+        written = self._written("tinyext")
+        self.assertEqual(written, code)
+
+    def test_adds_shebang_to_frontmatter_only_source(self):
+        code = "# ---\n# name: tinyext\n# ---\n" + _TINY_EXT
+        ctx = _make_ctx([], [], loaded=["tinyext"])
+        res = self.handler({"name": "tinyext", "code": code}, ctx)
+        self.assertFalse(res["is_error"])
+        written = self._written("tinyext")
+        self.assertTrue(written.startswith("#!/usr/bin/env python3\n# ---\n"))
+
+    def test_injects_missing_name_key(self):
+        code = "#!/usr/bin/env python3\n# ---\n# description: d\n# ---\n" + _TINY_EXT
+        ctx = _make_ctx([], [], loaded=["tinyext"])
+        res = self.handler({"name": "tinyext", "code": code}, ctx)
+        self.assertFalse(res["is_error"])
+        written = self._written("tinyext")
+        self.assertIn("# name: tinyext", written)
+
+    def test_name_mismatch_rejected(self):
+        code = "#!/usr/bin/env python3\n# ---\n# name: other\n# ---\n" + _TINY_EXT
+        ctx = mock.MagicMock()
+        res = self.handler({"name": "tinyext", "code": code}, ctx)
+        self.assertTrue(res["is_error"])
+        self.assertIn("name: 'other'", res["content"][0]["text"])
+        ctx.reload_extension.assert_not_called()
+        self.assertFalse(os.path.exists(os.path.join(self.tmp, "extensions", "tinyext.py")))
+
+    def test_builtin_true_rejected(self):
+        code = "#!/usr/bin/env python3\n# ---\n# name: tinyext\n# builtin: true\n# ---\n"
+        ctx = mock.MagicMock()
+        res = self.handler({"name": "tinyext", "code": code}, ctx)
+        self.assertTrue(res["is_error"])
+        self.assertIn("builtin", res["content"][0]["text"])
+        ctx.reload_extension.assert_not_called()
+
+    def test_malformed_frontmatter_rejected(self):
+        code = "#!/usr/bin/env python3\n# ---\n# name: tinyext\nimport os\n"
+        ctx = mock.MagicMock()
+        res = self.handler({"name": "tinyext", "code": code}, ctx)
+        self.assertTrue(res["is_error"])
+        self.assertIn("malformed", res["content"][0]["text"])
+        ctx.reload_extension.assert_not_called()
+
+    def test_syntax_error_rejected(self):
+        ctx = mock.MagicMock()
+        res = self.handler({"name": "tinyext", "code": "def broken(:\n"}, ctx)
+        self.assertTrue(res["is_error"])
+        self.assertIn("syntax error", res["content"][0]["text"])
+        ctx.reload_extension.assert_not_called()
 
     def test_reload_error(self):
         ctx = mock.MagicMock()
         ctx.list_tools.return_value = []
         ctx.reload_extension.side_effect = RuntimeError("handshake timeout")
-        res = self.handler({"name": "broken", "code": "import nope_xyz"}, ctx)
+        res = self.handler({"name": "broken", "code": "import nope_xyz\n"}, ctx)
         self.assertTrue(res["is_error"])
         self.assertIn("handshake timeout", res["content"][0]["text"])
 
