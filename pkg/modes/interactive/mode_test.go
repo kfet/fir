@@ -170,9 +170,41 @@ func newTestModeWithSession(t *testing.T) *testMode {
 		ModelRegistry:   models.NewModelRegistry(auth.NewAuthStorage(agentDir+"/auth.json"), ""),
 		Cwd:             cwd,
 	})
-	t.Cleanup(func() { session.Close() })
+	// A submitted bash command (`!cmd` / `!!cmd`) runs on its own goroutine
+	// and appends to the session — plus its metadata sidecar — when it
+	// finishes, which under -race can be several hundred ms after the test
+	// body returns. t.TempDir's RemoveAll would then race that write and
+	// fail the test with "directory not empty". Cleanups run LIFO, so this
+	// one (registered after the TempDirs) drains the session before they are
+	// removed. Registered unconditionally: it is a no-op for tests that
+	// never write.
+	t.Cleanup(func() {
+		waitSessionQuiet(sm)
+		session.Close()
+	})
 
 	return newTestModeInternal(t, session)
+}
+
+// waitSessionQuiet blocks until the session store has stopped growing —
+// entry count unchanged for quietFor — or the deadline expires. Appends hold
+// the store's write lock across both the JSONL append and the sidecar write,
+// so a count that has been stable for a while means no write is in flight.
+func waitSessionQuiet(sm *store.SessionStore) {
+	const quietFor = 150 * time.Millisecond
+	deadline := time.Now().Add(5 * time.Second)
+	last := -1
+	stableSince := time.Now()
+	for time.Now().Before(deadline) {
+		n := len(sm.GetEntries())
+		if n != last {
+			last = n
+			stableSince = time.Now()
+		} else if time.Since(stableSince) >= quietFor {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 // newTestModeInternal creates a minimal interactive mode with MockTerminal.
