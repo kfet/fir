@@ -130,8 +130,14 @@ jobs:
           fi
           # The full set lives in the commit BODY, not the subject: with up to
           # 50 qualifying models a subject carrying every id is unreadable.
-          TITLE="chore(models): $COUNT new model(s) upstream — $SHORT"
-          MESSAGE=$(printf '%s\n\nNew: %s' "$TITLE" "$QUALIFYING")
+          # With none at all (the manual any-diff mode) there is no set to name.
+          if [ "$COUNT" = "0" ]; then
+            TITLE="chore(models): refresh catalog metadata"
+            MESSAGE="$TITLE"
+          else
+            TITLE="chore(models): $COUNT new model(s) upstream — $SHORT"
+            MESSAGE=$(printf '%s\n\nNew: %s' "$TITLE" "$QUALIFYING")
+          fi
           BODY="$RUNNER_TEMP/report.md"
           NUM=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
 
