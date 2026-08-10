@@ -329,3 +329,22 @@ func TestFlagshipIsDeterministicAndPrefersSameProvider(t *testing.T) {
 		t.Errorf("flagship = %v, want watch-b/detmodel-4-6", first)
 	}
 }
+
+// Aggregator costs arrive as $/token × 1e6 and are riddled with float noise.
+// Comparing them raw against the value the generator emitted reported ~220
+// phantom "changed" models on a catalog that had just been regenerated.
+func TestMetadataChangedIgnoresEmittedPrecision(t *testing.T) {
+	old := &ai.Model{ID: "m", Provider: "p", ContextWindow: 1000, MaxTokens: 100}
+	old.Cost.Input = 0.3 // what formatFloat wrote into models_generated.go
+
+	fresh := spec("p", "m")
+	fresh.CostInput = 0.1 * 3 // 0.30000000000000004
+	if metadataChanged(fresh, old) {
+		t.Error("noise below the emitted precision must not count as a change")
+	}
+
+	fresh.CostInput = 0.31
+	if !metadataChanged(fresh, old) {
+		t.Error("a real price change must still be reported")
+	}
+}

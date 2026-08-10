@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- **model-watch reported ~220 phantom "changed" models every night.** The churn count compared freshly fetched costs against the values already written into `models_generated.go`, but aggregator prices arrive as $/token × 1e6 and carry float noise (`0.30000000000000004`), while the generator emits them rounded to 8 decimals. Every aggregator model therefore looked changed forever — on a catalog regenerated minutes earlier. Both sides now round through one `roundEmitted()`, and the first observed run went from 220 to 3.
+
 ## [0.98.0] - 2026-08-11
 
 ### Added

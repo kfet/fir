@@ -205,11 +205,16 @@ func compareCatalogs(fresh []modelSpec, overlayPath, trigger string) *watchResul
 // model it already knows. Deliberately narrow: these are the fields that come
 // straight from upstream, so a difference is upstream news rather than a
 // curation decision of ours.
+//
+// Costs are compared at the precision the generator EMITS: the aggregators
+// hand us $/token × 1e6, so a freshly fetched 0.30000000000000004 would differ
+// forever from the 0.3 in the generated file and report ~220 phantom changes
+// every night.
 func metadataChanged(m modelSpec, old *ai.Model) bool {
-	return m.CostInput != old.Cost.Input ||
-		m.CostOutput != old.Cost.Output ||
-		m.CostCacheRead != old.Cost.CacheRead ||
-		m.CostCacheWrite != old.Cost.CacheWrite ||
+	return roundEmitted(m.CostInput) != old.Cost.Input ||
+		roundEmitted(m.CostOutput) != old.Cost.Output ||
+		roundEmitted(m.CostCacheRead) != old.Cost.CacheRead ||
+		roundEmitted(m.CostCacheWrite) != old.Cost.CacheWrite ||
 		m.ContextWindow != old.ContextWindow ||
 		m.MaxTokens != old.MaxTokens ||
 		m.Reasoning != old.Reasoning

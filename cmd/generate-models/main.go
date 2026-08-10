@@ -2276,8 +2276,16 @@ func deduplicate(all []modelSpec) []modelSpec {
 // It rounds to 8 decimal places to avoid floating-point noise from
 // per-token price arithmetic (e.g. 0.2 × 1e6 → 0.19999999999999998).
 func formatFloat(f float64) string {
-	rounded := math.Round(f*1e8) / 1e8
-	return fmt.Sprintf("%g", rounded)
+	return fmt.Sprintf("%g", roundEmitted(f))
+}
+
+// roundEmitted is the precision the generated catalog actually carries. Costs
+// arrive from the aggregators as $/token multiplied by a million, so they are
+// riddled with float noise (0.30000000000000004); rounding here is what makes
+// the emitted value stable, and anything comparing against the emitted value
+// must round the same way — see metadataChanged.
+func roundEmitted(f float64) float64 {
+	return math.Round(f*1e8) / 1e8
 }
 
 // goString escapes a string for a Go string literal (double-quoted).
