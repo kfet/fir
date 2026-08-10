@@ -1,0 +1,161 @@
+name: model-watch
+
+# Notice new models automatically.
+#
+# Nightly: regenerate the model catalog from upstream (models.dev, OpenRouter,
+# Vercel AI Gateway, Poe, SWE-bench) and, when upstream has models fir does not
+# know about, open a PR with the regenerated catalog plus a report of what is
+# new and which curated fields still need a human.
+#
+# It only ever OPENS A PR. It never merges, never releases, never publishes the
+# overlay: publishing is a push-to-main trigger (publish-catalog.yml), so the
+# human merge is the approval gate. That is deliberate — an unattended pipeline
+# with publish rights is how you ship a broken catalog at 3am.
+#
+# Noise is the failure mode that matters. Upstream churns pricing and metadata
+# constantly and the aggregators list every finetune in existence, so by
+# default only a genuinely interesting new model (`-trigger curated`, see
+# cmd/generate-models/watch.go) opens anything; churn rides along in the next
+# PR a new model triggers. A flaky upstream produces neither a PR nor a red
+# badge: `-strict` makes a partial fetch a no-run.
+
+on:
+  schedule:
+    # 04:20 UTC — after most US launch events, before the working day here.
+    - cron: "20 4 * * *"
+  workflow_dispatch:
+    inputs:
+      trigger:
+        description: "What merits a PR"
+        type: choice
+        default: curated
+        options: [curated, all-new, any-diff]
+      overlay:
+        description: "Also propose catalog-v1.json overlay entries (fleet update on merge)"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: model-watch
+  cancel-in-progress: false
+
+env:
+  BRANCH: bot/model-watch
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
+        with:
+          go-version-file: go.mod
+
+      - name: Regenerate catalog and diff against the compiled-in one
+        env:
+          TRIGGER: ${{ inputs.trigger || 'curated' }}
+          # Default true on the schedule: reaching the fleet on merge, without
+          # waiting for a release, is the entire point of the overlay.
+          OVERLAY: ${{ github.event_name != 'workflow_dispatch' && 'true' || inputs.overlay }}
+        run: |
+          set -euo pipefail
+          args=(
+            -trigger "$TRIGGER"
+            -strict
+            -report "$RUNNER_TEMP/report.md"
+            -summary "$RUNNER_TEMP/summary.json"
+          )
+          if [ "$OVERLAY" = "true" ]; then
+            args+=(-overlay)
+          fi
+          go run ./cmd/generate-models "${args[@]}"
+
+      - name: Decide
+        id: decide
+        run: |
+          set -euo pipefail
+          SUMMARY="$RUNNER_TEMP/summary.json"
+          if [ ! -f "$SUMMARY" ]; then
+            echo "::warning::generator produced no summary — upstream unavailable"
+            echo "open_pr=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          cat "$SUMMARY"
+          if jq -e '.sources_failed // [] | length > 0' "$SUMMARY" > /dev/null; then
+            echo "::notice::upstream fetch failed ($(jq -c .sources_failed "$SUMMARY")); skipping this run"
+            echo "open_pr=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if jq -e '.anomaly // "" | length > 0' "$SUMMARY" > /dev/null; then
+            echo "::warning::$(jq -r .anomaly "$SUMMARY")"
+          fi
+          # Model ids are upstream-controlled strings, so the heredoc
+          # delimiter must not be guessable from upstream.
+          D="EOF_$(openssl rand -hex 8)"
+          echo "open_pr=$(jq -r '.open_pr' "$SUMMARY")" >> "$GITHUB_OUTPUT"
+          {
+            echo "count=$(jq -r '.qualifying // [] | length' "$SUMMARY")"
+            echo "qualifying<<$D"
+            jq -r '.qualifying // [] | join(", ")' "$SUMMARY"
+            echo "$D"
+            # Short form for the title: up to three ids, then an ellipsis.
+            echo "short<<$D"
+            jq -r '(.qualifying // []) as $q | ($q[0:3] | join(", ")) + (if ($q|length) > 3 then ", …" else "" end)' "$SUMMARY"
+            echo "$D"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Open or update the PR
+        if: steps.decide.outputs.open_pr == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          QUALIFYING: ${{ steps.decide.outputs.qualifying }}
+          SHORT: ${{ steps.decide.outputs.short }}
+          COUNT: ${{ steps.decide.outputs.count }}
+        run: |
+          set -euo pipefail
+
+          # A rolling branch, so a second night never opens a second PR: the
+          # open PR is updated in place or nothing happens at all.
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$BRANCH"
+          git add pkg/ai/models_generated.go pkg/models/catalog-v1.json
+          if git diff --cached --quiet; then
+            echo "::notice::nothing to commit"
+            exit 0
+          fi
+          # The full set lives in the commit BODY, not the subject: with up to
+          # 50 qualifying models a subject carrying every id is unreadable.
+          TITLE="chore(models): $COUNT new model(s) upstream — $SHORT"
+          MESSAGE=$(printf '%s\n\nNew: %s' "$TITLE" "$QUALIFYING")
+          BODY="$RUNNER_TEMP/report.md"
+          NUM=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
+
+          # Nightly force-pushes of pure churn are the same noise through a
+          # different channel, so the branch only moves when the set of
+          # qualifying new models changes. The commit message carries that set.
+          # The guard requires an OPEN PR as well: without that, a run that
+          # pushed the branch but failed to open the PR — or a PR a human
+          # closed unmerged — would wedge this workflow permanently silent.
+          git fetch --depth=1 origin "$BRANCH" 2>/dev/null || true
+          if [ -n "$NUM" ] && [ "$(git log -1 --format=%B FETCH_HEAD 2>/dev/null || true)" = "$MESSAGE" ]; then
+            echo "::notice::PR #$NUM already covers exactly these models — leaving it alone"
+            exit 0
+          fi
+
+          git commit -m "$MESSAGE"
+
+          # The existing PR's head is force-updated: the branch is a
+          # regenerated artifact, not a history worth keeping.
+          git push --force origin "$BRANCH"
+
+          if [ -n "$NUM" ]; then
+            gh pr edit "$NUM" --title "$TITLE" --body-file "$BODY"
+            echo "::notice::updated PR #$NUM"
+          else
+            gh pr create --head "$BRANCH" --base main --title "$TITLE" --body-file "$BODY"
+          fi

@@ -42,6 +42,8 @@ class TestDoctor(unittest.TestCase):
         doctor._session_end_fired = False
         doctor._doctor_log().unlink(missing_ok=True)
         self.ctx = MagicMock(spec=doctor.fir_ext.Context)
+        # Default: core reports a healthy configuration.
+        self.ctx.agent_info.return_value = {}
 
     def test_session_with_tool_errors_records_failure(self):
         # Simulate session lifecycle
@@ -158,6 +160,47 @@ class TestDoctor(unittest.TestCase):
         records = doctor._read_records()
         self.assertEqual(len(records), 1)
         self.assertEqual(records[0]["exit_reason"], "shutdown")
+
+    # --- configuration diagnostics (from core, via agent.info) ---
+
+    def _with_diagnostics(self, diagnostics):
+        self.ctx.agent_info.return_value = {"diagnostics": diagnostics}
+
+    def test_summary_includes_configuration_diagnostics(self):
+        self._with_diagnostics(
+            [
+                {
+                    "code": "stale_default_model",
+                    "severity": "warning",
+                    "summary": "defaultModel is pinned to anthropic/claude-opus-4-6, "
+                    "shadowing the newer anthropic/claude-opus-5",
+                    "remediation": 'Edit /cfg/settings.json: set "defaultModel": "claude-opus-5"',
+                    "file": "/cfg/settings.json",
+                }
+            ]
+        )
+        result = doctor.doctor_summary({}, self.ctx)
+        self.assertIn("[WARNING]", result)
+        self.assertIn("claude-opus-4-6", result)
+        self.assertIn("/cfg/settings.json", result)
+        # Still reports the (empty) failure history rather than hiding it.
+        self.assertIn("No failures", result)
+
+    def test_summary_silent_when_no_diagnostics(self):
+        self._with_diagnostics([])
+        result = doctor.doctor_summary({}, self.ctx)
+        self.assertNotIn("Configuration:", result)
+
+    def test_diagnostics_unavailable_is_not_an_error(self):
+        self.ctx.agent_info.side_effect = RuntimeError("no session")
+        self.assertEqual(doctor._diagnostics_text(self.ctx), "")
+        self.assertIn("No failures", doctor.doctor_summary({}, self.ctx))
+
+    def test_command_renders_diagnostics(self):
+        self._with_diagnostics(
+            [{"severity": "warning", "summary": "pinned", "remediation": "edit it"}]
+        )
+        self.assertIn("edit it", doctor.cmd_doctor([], self.ctx)["message"])
 
 
 if __name__ == "__main__":

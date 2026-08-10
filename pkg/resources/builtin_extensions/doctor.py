@@ -68,6 +68,34 @@ def _read_records(limit: int = 200) -> list[dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
+# Configuration diagnostics
+# ---------------------------------------------------------------------------
+
+
+# Core computes configuration diagnostics (currently: a settings defaultModel
+# pin that its provider has since superseded) and returns them in agent.info.
+# The knowledge needed to judge them — the model registry, the catalog overlay,
+# the settings layering — lives in Go, so this side only renders.
+def _diagnostics_text(ctx: fir_ext.Context) -> str:
+    try:
+        info = ctx.agent_info()
+    except Exception:
+        return ""  # no session / older core: diagnostics are a bonus, never a failure
+    diagnostics = (info or {}).get("diagnostics") or []
+
+    lines = []
+    for d in diagnostics:
+        severity = str(d.get("severity", "warning")).upper()
+        lines.append(f"[{severity}] {d.get('summary', '')}".rstrip())
+        remediation = d.get("remediation")
+        if remediation:
+            lines.append(f"  → {remediation}")
+    if not lines:
+        return ""
+    return "\n".join(["Configuration:", *lines])
+
+
+# ---------------------------------------------------------------------------
 # Events
 # ---------------------------------------------------------------------------
 
@@ -207,6 +235,12 @@ def doctor_query(params: dict, ctx: fir_ext.Context) -> str:
     parameters={"type": "object", "properties": {}},
 )
 def doctor_summary(params: dict, ctx: fir_ext.Context) -> str:
+    # Configuration problems are actionable right now, unlike failure history,
+    # so they lead.
+    return "\n\n".join(x for x in (_diagnostics_text(ctx), _failure_summary()) if x)
+
+
+def _failure_summary() -> str:
     records = _read_records(200)
     if not records:
         return "No failures recorded."

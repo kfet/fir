@@ -366,6 +366,12 @@ func (s *FileSettingsStorage) pathForScope(scope SettingsScope) string {
 	return s.projectSettingsPath
 }
 
+// PathForScope exposes the backing file for a scope so diagnostics can tell
+// the operator exactly which file to edit.
+func (s *FileSettingsStorage) PathForScope(scope SettingsScope) string {
+	return s.pathForScope(scope)
+}
+
 func (s *FileSettingsStorage) WithLock(scope SettingsScope, fn func(current string) string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -712,6 +718,32 @@ func (sm *SettingsManager) GetDefaultModel() string {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 	return sm.settings.DefaultModel
+}
+
+// DefaultModelPin reports the effective defaultProvider/defaultModel pin and
+// which settings file supplies it — the project file when it sets
+// defaultModel, otherwise the global one. Path is "" for storage backends
+// that are not file-backed (tests, embedders).
+//
+// Provenance matters because a diagnostic about a stale pin is useless unless
+// it names the file to edit. defaultProvider and defaultModel merge
+// independently, so a project file setting only defaultProvider reports the
+// global scope — correct, because defaultModel is the key to edit.
+func (sm *SettingsManager) DefaultModelPin() (provider, modelID string, scope SettingsScope, path string) {
+	sm.mu.RLock()
+	provider, modelID = sm.settings.DefaultProvider, sm.settings.DefaultModel
+	scope = ScopeGlobal
+	if sm.projectSettings.DefaultModel != "" {
+		scope = ScopeProject
+	}
+	sm.mu.RUnlock()
+
+	if p, ok := sm.storage.(interface {
+		PathForScope(SettingsScope) string
+	}); ok {
+		path = p.PathForScope(scope)
+	}
+	return provider, modelID, scope, path
 }
 
 func (sm *SettingsManager) SetDefaultModelAndProvider(provider, modelID string) {

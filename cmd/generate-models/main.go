@@ -31,6 +31,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/kfet/fir/pkg/ai"
 )
 
 // modelSpec is the internal representation of a model used during generation.
@@ -554,170 +556,10 @@ func matchSWELeaderboardName(lower string) string {
 	return ""
 }
 
-// dateSuffixRe matches date suffixes like -20241022 at end of model IDs.
-var dateSuffixRe = regexp.MustCompile(`-\d{8}$`)
-
-// extractFamily returns a normalised "base family" string for lineage grouping.
-//
-// The goal is to group models that are close iterations of each other (same
-// generation, same class) while keeping distinct generations apart. We preserve
-// the first version-like token as the "generation" to avoid grouping Claude 3
-// with Claude 4, or GPT-5.1 with GPT-5.4.
-//
-// Examples:
-//
-//	claude-opus-4-6              → claude-opus-4
-//	claude-opus-4-5-20251101     → claude-opus-4
-//	claude-sonnet-4-5            → claude-sonnet-4
-//	claude-3-5-sonnet-20241022   → claude-3-sonnet
-//	claude-3-7-sonnet-20250219   → claude-3-sonnet
-//	claude-3-opus-20240229       → claude-3-opus
-//	gemini-3.1-pro-preview       → gemini-3-pro
-//	gemini-2.5-flash             → gemini-2-flash
-//	gpt-5.4-pro                  → gpt-5-pro
-//	gpt-5.2-codex                → gpt-5-codex
-//	gpt-5.2                      → gpt-5
-//	deepseek/deepseek-v3.2       → deepseek
-//	google/gemini-2.5-pro        → gemini-2-pro
-//	minimax-m2.5                 → minimax-m2
-//	grok-4-1-fast                → grok-4-fast
-//	kimi-k2-thinking             → kimi-k2-thinking
-//	k2p5                         → k2p5
-func extractFamily(modelID string) string {
-	id := modelID
-
-	// Strip OpenRouter-style "provider/" prefix.
-	if idx := strings.LastIndex(id, "/"); idx >= 0 {
-		id = id[idx+1:]
-	}
-
-	// Strip Bedrock-style dotted prefixes: "us.anthropic.claude-…" → "claude-…"
-	// We find the FIRST dot followed by a hyphenated model name (contains "-")
-	// to avoid picking version dots like "v3.2".
-	// Assumption: dotted prefixes always end with a lowercase letter segment
-	// (e.g. ".claude", ".deepseek"). This is correct for all known provider
-	// naming conventions as of 2026-03.
-	for i := 0; i < len(id); i++ {
-		if id[i] == '.' {
-			after := id[i+1:]
-			if len(after) > 0 && after[0] >= 'a' && after[0] <= 'z' && strings.Contains(after, "-") {
-				id = after
-				i = -1 // restart scan on the remaining string
-			}
-		}
-	}
-
-	// Lowercase for uniform matching.
-	id = strings.ToLower(id)
-
-	// Strip Bedrock version suffixes like "-v1:0", ":0" at end.
-	if idx := strings.LastIndex(id, ":"); idx >= 0 {
-		id = id[:idx]
-	}
-
-	// Strip date suffixes: -20241022, -20250929, etc.
-	id = dateSuffixRe.ReplaceAllString(id, "")
-
-	// Strip common tags.
-	for _, tag := range []string{"-latest", "-preview", "-exp", "-free", "-customtools"} {
-		id = strings.ReplaceAll(id, tag, "")
-	}
-
-	// Strip trailing dashes left over from tag removal.
-	id = strings.TrimRight(id, "-")
-
-	// Normalise embedded version dots in tokens.
-	// - Pure version tokens like "v3.2", "5.4" are kept as-is (isVersionToken handles them).
-	// - Tokens with alpha prefix like "gemini" stay as-is.
-	// - Mixed tokens like "m2.5" get their trailing ".N" stripped → "m2".
-	parts := strings.Split(id, "-")
-	var expanded []string
-	for _, p := range parts {
-		if dot := strings.Index(p, "."); dot > 0 && !isVersionToken(p) {
-			prefix := p[:dot]
-			suffix := p[dot+1:]
-			if isAlpha(prefix) && isVersionToken(suffix) {
-				// "gemini.5" → split to "gemini" + "5" (alpha prefix + version)
-				expanded = append(expanded, prefix, suffix)
-				continue
-			}
-			// "m2.5" → strip sub-version → "m2"
-			if isVersionToken(suffix) {
-				expanded = append(expanded, prefix)
-				continue
-			}
-		}
-		expanded = append(expanded, p)
-	}
-
-	// Classify tokens: keep word tokens and the FIRST version token (as
-	// the generation marker). Drop subsequent version tokens.
-	var family []string
-	seenGeneration := false
-	for _, p := range expanded {
-		if isVersionToken(p) {
-			if !seenGeneration {
-				// Keep the major part of the first version as the generation.
-				// "4.6" → "4", "3.1" → "3", "5.4" → "5", "v3.2" → "3"
-				gen := p
-				if gen[0] == 'v' {
-					gen = gen[1:]
-				}
-				if dot := strings.Index(gen, "."); dot >= 0 {
-					gen = gen[:dot]
-				}
-				family = append(family, gen)
-				seenGeneration = true
-			}
-			continue
-		}
-		family = append(family, p)
-	}
-
-	if len(family) == 0 {
-		return id
-	}
-	return strings.Join(family, "-")
-}
-
-// isAlpha returns true if s is non-empty and contains only lowercase ASCII letters.
-func isAlpha(s string) bool {
-	if s == "" {
-		return false
-	}
-	for _, c := range s {
-		if c < 'a' || c > 'z' {
-			return false
-		}
-	}
-	return true
-}
-
-// isVersionToken returns true if a hyphen-delimited token looks like a version
-// number or date: pure digits, dotted digits (3.1, 4.5), "v3", "v3.2", single
-// digit, etc.
-func isVersionToken(s string) bool {
-	if s == "" {
-		return false
-	}
-	// "v3", "v3.2"
-	stripped := s
-	if stripped[0] == 'v' && len(stripped) > 1 {
-		stripped = stripped[1:]
-	}
-	// Check if all remaining chars are digits or dots.
-	for _, c := range stripped {
-		if c != '.' && (c < '0' || c > '9') {
-			return false
-		}
-	}
-	return true
-}
-
 // inferSWEScores propagates SWE-bench scores to unscored models via lineage.
 //
 // For each model with SWEScore == 0, it looks up the model's "family" (via
-// extractFamily) and assigns familyMaxScore + 0.1, flagging SWEInferred = true.
+// ai.ExtractFamily) and assigns familyMaxScore + 0.1, flagging SWEInferred = true.
 // This ensures new/unbenched models from strong families surface near the top.
 func inferSWEScores(all []modelSpec) []modelSpec {
 	// Pass 1: find max actual (non-inferred) score per family.
@@ -726,7 +568,7 @@ func inferSWEScores(all []modelSpec) []modelSpec {
 		if all[i].SWEScore == 0 || all[i].SWEInferred {
 			continue
 		}
-		fam := extractFamily(all[i].ID)
+		fam := ai.ExtractFamily(all[i].ID)
 		if all[i].SWEScore > familyMax[fam] {
 			familyMax[fam] = all[i].SWEScore
 		}
@@ -738,7 +580,7 @@ func inferSWEScores(all []modelSpec) []modelSpec {
 		if all[i].SWEScore > 0 {
 			continue
 		}
-		fam := extractFamily(all[i].ID)
+		fam := ai.ExtractFamily(all[i].ID)
 		if maxScore, ok := familyMax[fam]; ok {
 			all[i].SWEScore = math.Round((maxScore+0.1)*10) / 10
 			all[i].SWEInferred = true
@@ -1793,6 +1635,14 @@ func findModel(all []modelSpec, provider, id string) *modelSpec {
 }
 
 // applyOverridesAndAdditions applies all the manual fixups from the TS script.
+// This is where fir's curated per-model knowledge lives (compaction, adaptive
+// thinking, reasoning-effort enums, SWE scores, compat quirks).
+//
+// If the model id you are curating here also has an entry in
+// pkg/models/catalog-v1.json, update or delete that entry too: an overlay
+// entry redefines a model WHOLESALE, so it keeps shadowing whatever you add
+// here until it is changed. The nightly model-watch adds such entries for new
+// models (see watch.go), which is exactly how one gets there.
 func applyOverridesAndAdditions(all []modelSpec) []modelSpec {
 	// Filter out opencode/opencode-go gpt-5.3-codex-spark
 	filtered := all[:0]
@@ -2569,29 +2419,56 @@ func repoRoot() string {
 }
 
 func main() {
-	defaultOut := filepath.Join(repoRoot(), "pkg", "ai", "models_generated.go")
-	out := flag.String("out", defaultOut, "output file path")
+	root := repoRoot()
+	out := flag.String("out", filepath.Join(root, "pkg", "ai", "models_generated.go"), "output file path")
+	// Nightly model-watch flags; see watch.go. All optional — with none of
+	// them set this is exactly the generator `make generate-models` runs.
+	report := flag.String("report", "", "write a human-readable new-model report (markdown) to this path")
+	summary := flag.String("summary", "", "write the machine-readable watch verdict (JSON) to this path")
+	trigger := flag.String("trigger", triggerCurated, "what merits a PR: curated | all-new | any-diff")
+	strict := flag.Bool("strict", false, "treat any upstream fetch failure as \"no run\": report it in -summary and exit 0 without generating")
+	overlay := flag.Bool("overlay", false, "add qualifying new models to pkg/models/catalog-v1.json, so merging reaches the fleet without a release")
 	flag.Parse()
 
-	// Fetch from all sources
+	// Fetch from all sources. In -strict mode a partial fetch is worse than
+	// no run at all: it would look like upstream deleted everything the dead
+	// source lists, so bail out before generating anything.
+	var failed []string
 	modelsDevModels, err := loadModelsDevData()
 	if err != nil {
-		log.Fatalf("models.dev: %v", err)
+		if !*strict {
+			log.Fatalf("models.dev: %v", err)
+		}
+		failed = append(failed, "models.dev: "+err.Error())
 	}
 
 	openRouterModels, err := fetchOpenRouterModels()
 	if err != nil {
 		log.Printf("Warning: OpenRouter fetch failed: %v", err)
+		failed = append(failed, "openrouter: "+err.Error())
 	}
 
 	aiGatewayModels, err := fetchAIGatewayModels()
 	if err != nil {
 		log.Printf("Warning: AI Gateway fetch failed: %v", err)
+		failed = append(failed, "vercel-ai-gateway: "+err.Error())
 	}
 
 	poeModels, err := fetchPoeModels()
 	if err != nil {
 		log.Printf("Warning: Poe fetch failed: %v", err)
+		failed = append(failed, "poe: "+err.Error())
+	}
+
+	if *strict && len(failed) > 0 {
+		// A flaky upstream must not produce a red badge every morning.
+		log.Printf("Upstream unavailable (%s); not generating", strings.Join(failed, "; "))
+		if *summary != "" {
+			if err := writeSummary(*summary, &watchResult{Trigger: *trigger, Failed: failed}); err != nil {
+				log.Fatalf("write verdict: %v", err)
+			}
+		}
+		return
 	}
 
 	// Fetch SWE-bench Verified leaderboard for model capability ordering.
@@ -2634,6 +2511,15 @@ func main() {
 	}
 
 	log.Printf("Generated %s", *out)
+
+	runWatch(watchOptions{
+		fresh:          all,
+		trigger:        *trigger,
+		reportPath:     *report,
+		summaryPath:    *summary,
+		overlayPath:    filepath.Join(root, "pkg", "models", "catalog-v1.json"),
+		proposeOverlay: *overlay,
+	})
 
 	// Print statistics
 	reasoningCount := 0

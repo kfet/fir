@@ -18,6 +18,22 @@ func (m *mockSettings) SetGlobalPackages(p []any)  { m.global = p }
 func (m *mockSettings) GetProjectPackages() []any  { return m.project }
 func (m *mockSettings) SetProjectPackages(p []any) { m.project = p }
 
+// testGitEnv is the environment for git invocations in tests: a fixed
+// identity, and — load-bearing — the developer's global and system git config
+// neutralised. Without that, a machine with `tag.gpgsign = true` (a perfectly
+// normal setting) turns `git tag v1` into a signed annotated tag and these
+// tests fail with "fatal: no tag message?" on that machine only.
+func testGitEnv() []string {
+	return append(os.Environ(),
+		"GIT_AUTHOR_NAME=test",
+		"GIT_AUTHOR_EMAIL=test@test",
+		"GIT_COMMITTER_NAME=test",
+		"GIT_COMMITTER_EMAIL=test@test",
+		"GIT_CONFIG_GLOBAL=/dev/null",
+		"GIT_CONFIG_SYSTEM=/dev/null",
+	)
+}
+
 // initBareRepo creates a minimal bare git repository at dir so that
 // "git clone" can use it as a source in tests.
 func initBareRepo(t *testing.T, dir string) {
@@ -29,12 +45,7 @@ func initBareRepo(t *testing.T, dir string) {
 		t.Helper()
 		cmd := exec.Command("git", args...)
 		cmd.Dir = tmp
-		cmd.Env = append(os.Environ(),
-			"GIT_AUTHOR_NAME=test",
-			"GIT_AUTHOR_EMAIL=test@test",
-			"GIT_COMMITTER_NAME=test",
-			"GIT_COMMITTER_EMAIL=test@test",
-		)
+		cmd.Env = testGitEnv()
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)

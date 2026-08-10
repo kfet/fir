@@ -1020,9 +1020,19 @@ after compaction):
   "thinking": {"current": "...", "available": ["..."]},
   "messages": {"user": 0, "assistant": 0, "toolCalls": 0, "toolResults": 0, "total": 0},
   "tokens":   {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0},
-  "cost": 0.0
+  "cost": 0.0,
+  "diagnostics": [
+    {"code": "stale_default_model", "severity": "warning",
+     "summary": "...", "remediation": "...", "file": "/abs/settings.json"}
+  ]
 }
 ```
+
+`diagnostics` is omitted when the configuration is healthy. It carries
+actionable configuration problems found by core — currently a settings
+`defaultModel` pin that its provider has since superseded. `code` is a stable
+identifier, `file` (optional) is the file to edit. The builtin `doctor`
+extension renders it in `/doctor`.
 
 ```json
 {"jsonrpc":"2.0","id":1020,"method":"agent.info","params":{}}

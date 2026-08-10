@@ -505,6 +505,9 @@ All fields are optional. Nested objects merge recursively; arrays and primitives
   // Model defaults
   "defaultProvider": "anthropic",        // Provider name
   "defaultModel": "claude-sonnet-4-20250514",  // Model ID
+                                         // A pin here beats the provider's own default forever.
+                                         // /doctor warns when the provider has moved on to a
+                                         // newer generation of the same model line (never rewrites it).
   "defaultThinkingLevel": "medium",      // none, minimal, low, medium, high
 
   // UI

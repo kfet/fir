@@ -3094,7 +3094,9 @@ class Context:
         """Return a structured snapshot of the current agent runtime.
 
         Fields include version, mode, session, model, context usage,
-        thinking level, message counts, token totals, and cost.
+        thinking level, message counts, token totals, cost, and
+        ``diagnostics`` — actionable configuration problems found by core
+        (omitted when there are none).
 
         Returns a free-form dict — fir's :class:`session.Introspection`
         evolves over time, so we keep this loosely typed by design.

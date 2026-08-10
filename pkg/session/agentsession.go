@@ -1939,6 +1939,21 @@ type Introspection struct {
 		Total      int `json:"total"`
 	} `json:"tokens"`
 	Cost float64 `json:"cost"`
+	// Diagnostics are actionable configuration problems found while taking
+	// the snapshot — empty in the healthy case. This is the channel the
+	// doctor extension renders; adding a check here is additive and needs no
+	// new bridge method.
+	Diagnostics []Diagnostic `json:"diagnostics,omitempty"`
+}
+
+// Diagnostic is one actionable configuration problem. Every field except File
+// is required: a diagnostic the operator cannot act on immediately is noise.
+type Diagnostic struct {
+	Code        string `json:"code"`     // stable identifier, e.g. "stale_default_model"
+	Severity    string `json:"severity"` // "warning" | "info"
+	Summary     string `json:"summary"`
+	Remediation string `json:"remediation"`
+	File        string `json:"file,omitempty"` // file to edit, when there is one
 }
 
 // IntrospectOptions carries host-side context not reachable from AgentSession.
@@ -1995,7 +2010,25 @@ func (s *AgentSession) Introspect(opts IntrospectOptions) Introspection {
 	out.Tokens.CacheWrite = stats.Tokens.CacheWrite
 	out.Tokens.Total = stats.Tokens.Total
 	out.Cost = stats.Cost
+	out.Diagnostics = s.diagnostics()
 
+	return out
+}
+
+// diagnostics runs the configuration checks. Computed per call over
+// already-loaded state (a couple of map lookups), so there is nothing to cache
+// and nothing to invalidate.
+func (s *AgentSession) diagnostics() []Diagnostic {
+	var out []Diagnostic
+	if pin := models.StaleDefaultPinFor(s.SettingsManager, s.modelRegistry); pin != nil {
+		out = append(out, Diagnostic{
+			Code:        "stale_default_model",
+			Severity:    "warning",
+			Summary:     pin.Summary(),
+			Remediation: pin.Remediation(),
+			File:        pin.Path,
+		})
+	}
 	return out
 }
 

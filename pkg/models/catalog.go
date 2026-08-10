@@ -112,10 +112,11 @@ func (o *CatalogOverlay) modelsConfig() *ModelsConfig {
 	return &ModelsConfig{Providers: o.Providers}
 }
 
-// parseCatalogOverlay decodes and validates a catalog document. Every rejection
+// ParseCatalogOverlay decodes and validates a catalog document. Every rejection
 // is an error the caller turns into "ignore this document" — never a
-// user-visible failure.
-func parseCatalogOverlay(data []byte) (*CatalogOverlay, error) {
+// user-visible failure. Exported so cmd/generate-models can validate an
+// overlay it proposes with exactly the code that will later load it.
+func ParseCatalogOverlay(data []byte) (*CatalogOverlay, error) {
 	var o CatalogOverlay
 	if err := json.Unmarshal(data, &o); err != nil {
 		return nil, fmt.Errorf("parse: %w", err)
@@ -189,6 +190,20 @@ func validateCatalogProviders(providers map[string]ProviderConfig) error {
 	return nil
 }
 
+// MarshalCatalogOverlay renders an overlay document in the canonical published
+// form: two-space indent, trailing newline. It is the single definition of
+// that form — cmd/generate-models writes proposed entries with it and
+// TestEmbeddedCatalogIsCanonical holds the committed file to it, so a
+// generated hunk is a few added lines rather than a 300-line reformat of
+// somebody's hand-written entries.
+func MarshalCatalogOverlay(o *CatalogOverlay) ([]byte, error) {
+	data, err := json.MarshalIndent(o, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	return append(data, '\n'), nil
+}
+
 // catalogCachePath returns the on-disk cache path, or "" when the registry has
 // no agent directory to hang a cache off (embedded snapshot only).
 func (r *ModelRegistry) catalogCachePath() string {
@@ -211,7 +226,7 @@ func (r *ModelRegistry) loadCatalogOverlay() (*CatalogOverlay, []byte) {
 		if len(data) == 0 {
 			return
 		}
-		o, err := parseCatalogOverlay(data)
+		o, err := ParseCatalogOverlay(data)
 		if err != nil {
 			firlog.Debug("catalog overlay: ignoring %s: %v", src, err)
 			return
@@ -299,7 +314,7 @@ func fetchCatalogOverlay(ctx context.Context, url string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, err := parseCatalogOverlay(data); err != nil {
+	if _, err := ParseCatalogOverlay(data); err != nil {
 		return nil, err
 	}
 	return data, nil

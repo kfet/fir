@@ -3,6 +3,7 @@ package models
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -65,7 +66,7 @@ func writeCatalogCache(t *testing.T, agentDir, content string) string {
 func TestEmbeddedCatalogIsValid(t *testing.T) {
 	// Guards the publish path: the file in the tree is what gets shipped to
 	// the fleet, so a typo must fail CI, not the fleet.
-	o, err := parseCatalogOverlay(embeddedCatalog)
+	o, err := ParseCatalogOverlay(embeddedCatalog)
 	if err != nil {
 		t.Fatalf("embedded catalog-v1.json is invalid: %v", err)
 	}
@@ -96,7 +97,7 @@ func TestParseCatalogOverlayRejects(t *testing.T) {
 	}
 	for name, body := range cases {
 		t.Run(name, func(t *testing.T) {
-			if _, err := parseCatalogOverlay([]byte(body)); err == nil {
+			if _, err := ParseCatalogOverlay([]byte(body)); err == nil {
 				t.Fatalf("expected rejection, got none")
 			}
 		})
@@ -106,7 +107,7 @@ func TestParseCatalogOverlayRejects(t *testing.T) {
 // --- Load precedence between embedded snapshot and cache ---
 
 func TestLoadCatalogOverlayPrefersNewerGeneratedAt(t *testing.T) {
-	embedded, err := parseCatalogOverlay(embeddedCatalog)
+	embedded, err := ParseCatalogOverlay(embeddedCatalog)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +178,7 @@ func TestNoCatalogSourcesStillLoadsBuiltIns(t *testing.T) {
 
 func TestOverlayOverridesBuiltIn(t *testing.T) {
 	dir := t.TempDir()
-	embedded, err := parseCatalogOverlay(embeddedCatalog)
+	embedded, err := ParseCatalogOverlay(embeddedCatalog)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +200,7 @@ func TestOverlayOverridesBuiltIn(t *testing.T) {
 }
 
 func TestUserConfigBeatsOverlay(t *testing.T) {
-	embedded, err := parseCatalogOverlay(embeddedCatalog)
+	embedded, err := ParseCatalogOverlay(embeddedCatalog)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -253,7 +254,7 @@ func TestBrokenUserConfigDoesNotSurfaceOverlayErrors(t *testing.T) {
 	// A broken models.json degrades to built-ins-only with a loud error —
 	// exactly today's behaviour, not worse — and never blames the overlay.
 	dir := t.TempDir()
-	embedded, _ := parseCatalogOverlay(embeddedCatalog)
+	embedded, _ := ParseCatalogOverlay(embeddedCatalog)
 	newer := embedded.GeneratedAt.Add(time.Hour).UTC().Format(time.RFC3339)
 	writeCatalogCache(t, dir, catalogDoc(t, newer, `{"anthropic":{"models":[{"id":"overlay-model"}]}}`))
 	if err := os.WriteFile(filepath.Join(dir, "models.json"), []byte(`{ broken`), 0o644); err != nil {
@@ -272,7 +273,7 @@ func TestBrokenUserConfigDoesNotSurfaceOverlayErrors(t *testing.T) {
 
 func TestOverlayOverridesProviderDefault(t *testing.T) {
 	dir := t.TempDir()
-	embedded, _ := parseCatalogOverlay(embeddedCatalog)
+	embedded, _ := ParseCatalogOverlay(embeddedCatalog)
 	newer := embedded.GeneratedAt.Add(time.Hour).UTC().Format(time.RFC3339)
 	writeCatalogCache(t, dir,
 		`{"schemaVersion":1,"generatedAt":"`+newer+`","providerDefaults":{"anthropic":"claude-opus-9"},"providers":{}}`)
@@ -298,7 +299,7 @@ func TestDefaultModelForProviderUnknownProvider(t *testing.T) {
 // --- Fetch failure modes ---
 
 func TestRefreshCatalogOverlayFailureModes(t *testing.T) {
-	embedded, _ := parseCatalogOverlay(embeddedCatalog)
+	embedded, _ := ParseCatalogOverlay(embeddedCatalog)
 	newer := embedded.GeneratedAt.Add(time.Hour).UTC().Format(time.RFC3339)
 
 	cases := []struct {
@@ -375,7 +376,7 @@ func TestRefreshCatalogOverlayCancelledContext(t *testing.T) {
 }
 
 func TestRefreshCatalogOverlayAppliesAndDetectsChange(t *testing.T) {
-	embedded, _ := parseCatalogOverlay(embeddedCatalog)
+	embedded, _ := ParseCatalogOverlay(embeddedCatalog)
 	newer := embedded.GeneratedAt.Add(time.Hour).UTC().Format(time.RFC3339)
 	body := catalogDoc(t, newer, `{"anthropic":{"models":[{"id":"fetched-model","name":"Fetched"}]}}`)
 
@@ -427,7 +428,7 @@ func TestRefreshCatalogOverlayOlderThanEmbeddedIsNotAChange(t *testing.T) {
 	// A published document that loses the generatedAt comparison is cached
 	// but never loaded, so reporting a change would rebuild the whole
 	// registry on every tick, forever.
-	embedded, _ := parseCatalogOverlay(embeddedCatalog)
+	embedded, _ := ParseCatalogOverlay(embeddedCatalog)
 	older := embedded.GeneratedAt.Add(-time.Hour).UTC().Format(time.RFC3339)
 	body := catalogDoc(t, older, `{"anthropic":{"models":[{"id":"rolled-back"}]}}`)
 
@@ -456,7 +457,7 @@ func TestRefreshCatalogOverlayOlderThanEmbeddedIsNotAChange(t *testing.T) {
 func TestRefreshCatalogOverlayCacheWriteFailureIsAnError(t *testing.T) {
 	// An unwritable cache means the fetch achieved nothing — it must not
 	// claim a change a reload would never see.
-	embedded, _ := parseCatalogOverlay(embeddedCatalog)
+	embedded, _ := ParseCatalogOverlay(embeddedCatalog)
 	newer := embedded.GeneratedAt.Add(time.Hour).UTC().Format(time.RFC3339)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(catalogDoc(t, newer, `{}`)))
@@ -480,7 +481,7 @@ func TestRefreshCatalogOverlayCacheWriteFailureIsAnError(t *testing.T) {
 }
 
 func TestStartCatalogOverlayFetchDoesInitialFetch(t *testing.T) {
-	embedded, _ := parseCatalogOverlay(embeddedCatalog)
+	embedded, _ := ParseCatalogOverlay(embeddedCatalog)
 	newer := embedded.GeneratedAt.Add(time.Hour).UTC().Format(time.RFC3339)
 	body := catalogDoc(t, newer, `{"anthropic":{"models":[{"id":"started"}]}}`)
 
@@ -615,7 +616,7 @@ func TestWriteFileAtomicReplaces(t *testing.T) {
 func TestCatalogOverlayRoundTripsAsModelsFragment(t *testing.T) {
 	// The overlay must be exactly a models.d fragment — same schema, same
 	// merge code. If these ever diverge, this fails.
-	o, err := parseCatalogOverlay([]byte(catalogDoc(t, "2026-01-01T00:00:00Z",
+	o, err := ParseCatalogOverlay([]byte(catalogDoc(t, "2026-01-01T00:00:00Z",
 		`{"anthropic":{"models":[{"id":"x"}],"modelOverrides":{"y":{"name":"Y"}}}}`)))
 	if err != nil {
 		t.Fatal(err)
@@ -631,4 +632,36 @@ func TestCatalogOverlayRoundTripsAsModelsFragment(t *testing.T) {
 	if len(frag.Providers["anthropic"].Models) != 1 || frag.Providers["anthropic"].Models[0].ID != "x" {
 		t.Fatalf("fragment round-trip lost data: %s", raw)
 	}
+}
+
+// updateCatalog rewrites the committed catalog into canonical form:
+//
+//	go test ./pkg/models -run TestEmbeddedCatalogIsCanonical -update
+var updateCatalog = flag.Bool("update", false, "rewrite catalog-v1.json in canonical form")
+
+func TestEmbeddedCatalogIsCanonical(t *testing.T) {
+	// The nightly model-watch proposes overlay entries by parsing this file
+	// and writing it back. If the committed bytes are not already what that
+	// round-trip produces, every proposal arrives as a whole-file reformat
+	// and buries the three lines a human actually needs to review.
+	o, err := ParseCatalogOverlay(embeddedCatalog)
+	if err != nil {
+		t.Fatalf("embedded catalog-v1.json is invalid: %v", err)
+	}
+	canonical, err := MarshalCatalogOverlay(o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(canonical) == string(embeddedCatalog) {
+		return
+	}
+	if *updateCatalog {
+		if err := os.WriteFile(catalogFileName, canonical, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		t.Log("rewrote " + catalogFileName)
+		return
+	}
+	t.Errorf("%s is not in canonical form; rewrite it with:\n"+
+		"    go test ./pkg/models -run TestEmbeddedCatalogIsCanonical -update", catalogFileName)
 }
