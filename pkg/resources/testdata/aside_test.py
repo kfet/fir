@@ -62,6 +62,11 @@ def _load_aside():
     fir_ext._command_handlers.clear()
     with mock.patch.object(fir_ext, "run"):
         import aside
+
+    # Empty-content retries sleep before the second probe in production. Zero
+    # it everywhere so the suite stays fast; the tests that care about the
+    # backoff assert on the constant / patch it explicitly.
+    aside._EMPTY_CONTENT_RETRY_BACKOFF = 0.0
     return aside
 
 
@@ -1091,19 +1096,20 @@ class TestAsideDelegateCommand(unittest.TestCase):
         )
 
 
-class DefaultAdvisorTracksHighestAnthropicFlagship(unittest.TestCase):
-    """Guards aside.py's _DEFAULT_ADVISOR_SPEC.
+class DefaultAdvisorFallbackIsSane(unittest.TestCase):
+    """Guards aside.py's _DEFAULT_ADVISOR_CHAIN — the LAST-RESORT fallback.
 
-    When no aside.json exists the extension falls back to a hard-coded model
-    spec — that spec must always point at the strongest Anthropic flagship
-    baked into fir's bundled model registry: the highest
-    claude-fable-<major>[-<minor>], falling back to the highest
-    claude-opus-X-Y only when no fable exists. We parse both sides as text
-    and compare.
+    This replaces the old DefaultAdvisorTracksHighestAnthropicFlagship drift
+    test. The default advisor chain is now resolved at call time from
+    ctx.available_models() (see _dynamic_default_chain), so the hardcoded
+    constant is only used when the live registry is unknown — pinning it to
+    the registry's strongest flagship would force a manual bump for no
+    behavioural gain, i.e. a test that lies about what matters.
 
-    Date-suffixed aliases (claude-opus-4-1-20250805, claude-opus-4-20250514)
-    are intentionally ignored — those are short-lived; the bare form is the
-    long-lived alias users pin to.
+    What still matters, and is asserted here: every element of the fallback
+    chain must parse, must be a rankable Anthropic flagship, must be ordered
+    strongest-first, and must actually exist in fir's bundled model registry
+    (a fallback pointing at a model fir has never heard of is dead weight).
     """
 
     _ASIDE_PY = os.path.join(_ext_dir, "aside.py")
@@ -1115,99 +1121,64 @@ class DefaultAdvisorTracksHighestAnthropicFlagship(unittest.TestCase):
         "models_generated.go",
     )
 
-    def test_default_advisor_matches_highest_flagship(self):
+    def _registry_ids(self):
         import re
-
-        mod = _load_aside()
-
-        with open(self._ASIDE_PY, encoding="utf-8") as f:
-            aside_src = f.read()
-        m = re.search(r'_DEFAULT_ADVISOR_SPEC\s*=\s*"([^"]+)"', aside_src)
-        self.assertIsNotNone(m, "aside.py: _DEFAULT_ADVISOR_SPEC literal not found")
-        assert m is not None  # for type checker
-        got = m.group(1)
 
         with open(self._MODELS_GO, encoding="utf-8") as f:
             models_src = f.read()
-
-        # Gather every model id registered under the anthropic provider, then
-        # pick the strongest flagship via the SAME ranking helper the runtime
-        # degrade path uses (_best_anthropic_flagship). This guarantees test
-        # and runtime agree on "which model is the flagship".
         id_re = re.compile(r'ID:\s*"([^"]+)"(?:[^}]*?)Provider:\s*"anthropic"', re.DOTALL)
-        anthropic_ids = id_re.findall(models_src)
-        best = mod._best_anthropic_flagship(anthropic_ids)
+        return set(id_re.findall(models_src))
 
-        self.assertIsNotNone(
-            best,
-            "no claude-fable or claude-opus models registered under anthropic provider",
-        )
-        want_spec = "anthropic/" + best
-        self.assertEqual(
-            got,
-            want_spec,
-            "aside.py _DEFAULT_ADVISOR_SPEC out of sync with model registry:\n"
-            f"  got:  {got}\n"
-            f"  want: {want_spec}\n"
-            f"\nFix: edit pkg/resources/builtin_extensions/aside.py and update "
-            f"_DEFAULT_ADVISOR_SPEC to {want_spec!r}.",
-        )
+    def test_fallback_chain_is_ranked_registered_flagships(self):
+        mod = _load_aside()
+        registry = self._registry_ids()
+        ranks = []
+        for spec in mod._DEFAULT_ADVISOR_CHAIN:
+            parsed = mod._parse_advisor_spec(spec)
+            self.assertIsNotNone(parsed, f"unparsable fallback spec: {spec}")
+            self.assertEqual(parsed["provider"], "anthropic", spec)
+            rank = mod._rank_flagship(parsed["model"])
+            self.assertIsNotNone(rank, f"fallback spec is not a rankable flagship: {spec}")
+            self.assertIn(
+                parsed["model"],
+                registry,
+                f"fallback spec {spec} is not in fir's bundled model registry",
+            )
+            ranks.append(rank)
+        self.assertEqual(ranks, sorted(ranks, reverse=True), "fallback chain not strongest-first")
+
+    def test_default_advisor_spec_heads_the_chain(self):
+        mod = _load_aside()
+        self.assertEqual(mod._DEFAULT_ADVISOR_CHAIN[0], mod._DEFAULT_ADVISOR_SPEC)
 
 
-class DefaultDelegateTracksHighestAnthropicHaiku(unittest.TestCase):
-    """Guards aside.py's _DEFAULT_DELEGATE_SPEC.
+class DefaultDelegateFallbackIsSane(unittest.TestCase):
+    """Guards aside.py's _DEFAULT_DELEGATE_SPEC — the LAST-RESORT fallback.
 
-    The default delegate must always point at the cheapest current Anthropic
-    tier baked into fir's bundled model registry — the highest bare
-    claude-haiku-X-Y registered under the anthropic provider. Same
-    parse-both-sides-as-text approach as the advisor drift test;
-    date-suffixed aliases are ignored.
+    Replaces DefaultDelegateTracksHighestAnthropicHaiku for the same reason as
+    the advisor drift test above: the live highest Haiku from
+    ctx.available_models() wins at runtime, so pinning the constant to the
+    registry head only forced manual bumps. It must still be a real,
+    registered, rankable Haiku.
     """
 
-    _ASIDE_PY = os.path.join(_ext_dir, "aside.py")
-    _MODELS_GO = os.path.join(
-        os.path.dirname(os.path.abspath(__file__)),
-        "..",
-        "..",
-        "ai",
-        "models_generated.go",
-    )
+    _MODELS_GO = DefaultAdvisorFallbackIsSane._MODELS_GO
 
-    def test_default_delegate_matches_highest_haiku(self):
+    def test_fallback_delegate_is_a_registered_haiku(self):
         import re
 
         mod = _load_aside()
-
-        with open(self._ASIDE_PY, encoding="utf-8") as f:
-            aside_src = f.read()
-        m = re.search(r'_DEFAULT_DELEGATE_SPEC\s*=\s*"([^"]+)"', aside_src)
-        self.assertIsNotNone(m, "aside.py: _DEFAULT_DELEGATE_SPEC literal not found")
-        assert m is not None  # for type checker
-        got = m.group(1)
-
+        parsed = mod._parse_advisor_spec(mod._DEFAULT_DELEGATE_SPEC)
+        self.assertIsNotNone(parsed)
+        self.assertEqual(parsed["provider"], "anthropic")
+        self.assertIsNotNone(
+            mod._rank_haiku(parsed["model"]),
+            f"fallback delegate is not a rankable Haiku: {mod._DEFAULT_DELEGATE_SPEC}",
+        )
         with open(self._MODELS_GO, encoding="utf-8") as f:
             models_src = f.read()
-
-        # Gather all anthropic ids and pick the highest Haiku via the same
-        # runtime ranking helper (_best_anthropic_haiku).
         id_re = re.compile(r'ID:\s*"([^"]+)"(?:[^}]*?)Provider:\s*"anthropic"', re.DOTALL)
-        anthropic_ids = id_re.findall(models_src)
-        best = mod._best_anthropic_haiku(anthropic_ids)
-
-        self.assertIsNotNone(
-            best,
-            "no claude-haiku-<major>-<minor> models registered under anthropic provider",
-        )
-        want_spec = "anthropic/" + best
-        self.assertEqual(
-            got,
-            want_spec,
-            "aside.py _DEFAULT_DELEGATE_SPEC out of sync with model registry:\n"
-            f"  got:  {got}\n"
-            f"  want: {want_spec}\n"
-            f"\nFix: edit pkg/resources/builtin_extensions/aside.py and update "
-            f"_DEFAULT_DELEGATE_SPEC to {want_spec!r}.",
-        )
+        self.assertIn(parsed["model"], set(id_re.findall(models_src)))
 
 
 class TestRankingHelpers(unittest.TestCase):
@@ -1228,9 +1199,48 @@ class TestRankingHelpers(unittest.TestCase):
             self.mod._rank_flagship("claude-opus-4-7"),
         )
 
-    def test_flagship_rejects_date_stamp_and_nonflagship(self):
-        self.assertIsNone(self.mod._rank_flagship("claude-opus-4-1-20250805"))
+    def test_flagship_rejects_nonflagship(self):
         self.assertIsNone(self.mod._rank_flagship("claude-haiku-4-5"))
+        self.assertIsNone(self.mod._rank_flagship("claude-sonnet-5"))
+        self.assertIsNone(self.mod._rank_flagship("claude-3-opus"))
+
+    def test_flagship_ranks_bare_major_only_id(self):
+        # Regression: _OPUS_RE once required a minor, so the live bare
+        # claude-opus-5 was unrankable and "strongest available" silently
+        # stayed on opus-4-8 — the exact drift this feature exists to fix.
+        self.assertIsNotNone(self.mod._rank_flagship("claude-opus-5"))
+        self.assertGreater(
+            self.mod._rank_flagship("claude-opus-5"),
+            self.mod._rank_flagship("claude-opus-4-8"),
+        )
+        self.assertEqual(
+            self.mod._best_anthropic_flagship(["claude-opus-4-8", "claude-opus-5"]),
+            "claude-opus-5",
+        )
+
+    def test_date_stamped_ranks_below_its_bare_alias(self):
+        self.assertGreater(
+            self.mod._rank_flagship("claude-opus-4-1"),
+            self.mod._rank_flagship("claude-opus-4-1-20250805"),
+        )
+        self.assertGreater(
+            self.mod._rank_haiku("claude-haiku-4-5"),
+            self.mod._rank_haiku("claude-haiku-4-5-20251001"),
+        )
+
+    def test_date_stamp_without_minor_parses_as_date(self):
+        # claude-opus-4-20250514: the minor group must NOT eat a prefix of the
+        # date stamp — lengths are disjoint (1-2 vs 8), so this is major=4,
+        # minor=0, dated.
+        self.assertEqual(self.mod._rank_flagship("claude-opus-4-20250514"), (0, 4, 0, 0))
+
+    def test_dated_only_haiku_is_still_rankable(self):
+        # Observed live: the sole available Haiku was the date-stamped id.
+        # Rejecting it disabled delegation entirely.
+        self.assertEqual(
+            self.mod._best_anthropic_haiku(["claude-haiku-4-5-20251001"]),
+            "claude-haiku-4-5-20251001",
+        )
 
     def test_best_flagship_picks_highest(self):
         ids = ["claude-haiku-4-5", "claude-opus-4-7", "claude-opus-4-8"]
@@ -2023,3 +2033,493 @@ class TestAsideStreamingCards(unittest.TestCase):
         self.assertEqual(captured["model"], "claude-opus-4-x")
         self.assertEqual(captured["provider"], "anthropic")
         self.assertEqual(captured["effort"], "high")
+
+
+# ---------------------------------------------------------------------------
+# Empty-content retry class (transient upstream blip)
+# ---------------------------------------------------------------------------
+
+_EMPTY_ERR = "side-query: response had no usable content (blocks: [thinking(th=0,sig=940)])"
+_EMPTY_NOBLOCKS_ERR = "side-query: response had no usable content (blocks: [])"
+
+
+class TestEmptyContentPredicate(unittest.TestCase):
+    """_is_empty_content_error recognises the whole 'no usable content' family."""
+
+    def setUp(self):
+        self.mod = _load_aside()
+
+    def test_recognises_thinking_only_variant(self):
+        self.assertTrue(self.mod._is_empty_content_error(_EMPTY_ERR))
+
+    def test_recognises_no_blocks_variant(self):
+        self.assertTrue(self.mod._is_empty_content_error(_EMPTY_NOBLOCKS_ERR))
+
+    def test_recognises_blocking_path_wording(self):
+        self.assertTrue(self.mod._is_empty_content_error("advisor returned no content"))
+
+    def test_rejects_unrelated_errors(self):
+        for msg in (
+            "",
+            "not_found_error: model gone",
+            "side-query: Input exceeds context window limit",
+            "connection reset by peer",
+        ):
+            self.assertFalse(self.mod._is_empty_content_error(msg), msg)
+
+    def test_empty_content_is_not_model_unavailable(self):
+        # The two classes must not overlap — otherwise an empty response
+        # would memoize a perfectly live model as dead.
+        self.assertFalse(self.mod._is_model_unavailable_error(_EMPTY_ERR))
+
+    def test_backoff_constant_is_positive_in_production(self):
+        import re
+
+        with open(os.path.join(_ext_dir, "aside.py"), encoding="utf-8") as f:
+            src = f.read()
+        m = re.search(r"^_EMPTY_CONTENT_RETRY_BACKOFF = ([0-9.]+)$", src, re.M)
+        self.assertIsNotNone(m, "_EMPTY_CONTENT_RETRY_BACKOFF constant not found")
+        assert m is not None
+        self.assertGreater(float(m.group(1)), 0)
+
+
+_RETRY_CHAIN = [
+    {"provider": "anthropic", "model": "claude-fable-5"},
+    {"provider": "anthropic", "model": "claude-opus-4-8"},
+]
+_RETRY_AVAILABLE = [
+    {"provider": "anthropic", "id": "claude-fable-5", "name": "Fable"},
+    {"provider": "anthropic", "id": "claude-opus-4-8", "name": "Opus"},
+]
+
+
+class TestEmptyContentRetry(unittest.TestCase):
+    """Empty content is its OWN retryable class: retry once on the same
+    candidate, then advance the chain WITHOUT memoizing, then fall back to
+    the executor model."""
+
+    def _mod(self, advisor=None, delegate=None):
+        mod = _load_aside()
+        mod._ADVISOR = advisor
+        mod._DELEGATE = delegate
+        return mod
+
+    def _ctx(self, sq, available=None):
+        ctx = _blocking_ctx()
+        ctx.side_query = mock.MagicMock(side_effect=sq)
+        if available is not None:
+            ctx.available_models = mock.MagicMock(return_value=available)
+        return ctx
+
+    def test_empty_then_success_retries_same_candidate(self):
+        mod = self._mod(advisor=list(_RETRY_CHAIN))
+        calls = []
+
+        def sq(question, model=None, provider=None, effort=None):
+            calls.append(model)
+            if len(calls) == 1:
+                raise RuntimeError(_EMPTY_ERR)
+            return "fable answered on retry"
+
+        ctx = self._ctx(sq, available=_RETRY_AVAILABLE)
+        result = mod._run_aside([], "q", ctx, escalate=True)
+        self.assertFalse(result["is_error"])
+        text = result["content"][0]["text"]
+        self.assertIn("fable answered on retry", text)
+        # Same candidate twice — no chain advance, no executor fallback.
+        self.assertEqual(calls, ["claude-fable-5", "claude-fable-5"])
+        self.assertTrue(text.startswith("[advisor: anthropic/claude-fable-5]"), text)
+        # Transient, so nothing is memoized as dead.
+        self.assertNotIn("anthropic/claude-fable-5", mod._SESSION_UNAVAILABLE)
+
+    def test_no_blocks_variant_also_retried(self):
+        mod = self._mod(advisor=list(_RETRY_CHAIN))
+        calls = []
+
+        def sq(question, model=None, provider=None, effort=None):
+            calls.append(model)
+            if len(calls) == 1:
+                raise RuntimeError(_EMPTY_NOBLOCKS_ERR)
+            return "answered"
+
+        ctx = self._ctx(sq, available=_RETRY_AVAILABLE)
+        result = mod._run_aside([], "q", ctx, escalate=True)
+        self.assertFalse(result["is_error"])
+        self.assertEqual(calls, ["claude-fable-5", "claude-fable-5"])
+
+    def test_empty_twice_advances_to_next_candidate(self):
+        mod = self._mod(advisor=list(_RETRY_CHAIN))
+        calls = []
+
+        def sq(question, model=None, provider=None, effort=None):
+            calls.append(model)
+            if model == "claude-fable-5":
+                raise RuntimeError(_EMPTY_ERR)
+            return "opus answered"
+
+        ctx = self._ctx(sq, available=_RETRY_AVAILABLE)
+        result = mod._run_aside([], "q", ctx, escalate=True)
+        self.assertFalse(result["is_error"])
+        text = result["content"][0]["text"]
+        self.assertIn("opus answered", text)
+        # fable probed twice (initial + retry), then the next candidate.
+        self.assertEqual(calls, ["claude-fable-5", "claude-fable-5", "claude-opus-4-8"])
+        self.assertTrue(
+            text.startswith(
+                "[advisor: anthropic/claude-opus-4-8 (fallback: claude-fable-5 unavailable)]"
+            ),
+            text,
+        )
+
+    def test_empty_content_never_memoizes_the_model(self):
+        # The whole point of the separate class: a blip must not permanently
+        # degrade the chain for the rest of the session.
+        mod = self._mod(advisor=list(_RETRY_CHAIN))
+
+        def sq(question, model=None, provider=None, effort=None):
+            if model is None:
+                return "executor answered"
+            raise RuntimeError(_EMPTY_ERR)
+
+        ctx = self._ctx(sq, available=_RETRY_AVAILABLE)
+        result = mod._run_aside([], "q", ctx, escalate=True)
+        self.assertFalse(result["is_error"])
+        self.assertEqual(mod._SESSION_UNAVAILABLE, set())
+
+    def test_chain_all_empty_falls_through_to_executor(self):
+        mod = self._mod(advisor=list(_RETRY_CHAIN))
+        calls = []
+
+        def sq(question, model=None, provider=None, effort=None):
+            calls.append(model)
+            if model is None:
+                return "executor answered"
+            raise RuntimeError(_EMPTY_ERR)
+
+        ctx = self._ctx(sq, available=_RETRY_AVAILABLE)
+        result = mod._run_aside([], "q", ctx, escalate=True)
+        self.assertFalse(result["is_error"])
+        text = result["content"][0]["text"]
+        self.assertIn("executor answered", text)
+        self.assertTrue(
+            text.startswith("[advisor returned no usable content — answered on executor model]"),
+            text,
+        )
+        # 2 probes per candidate, then one executor call.
+        self.assertEqual(
+            calls,
+            [
+                "claude-fable-5",
+                "claude-fable-5",
+                "claude-opus-4-8",
+                "claude-opus-4-8",
+                None,
+            ],
+        )
+
+    def test_executor_fallback_also_retried_once_on_empty(self):
+        mod = self._mod(advisor=[{"provider": "anthropic", "model": "claude-fable-5"}])
+        calls = []
+
+        def sq(question, model=None, provider=None, effort=None):
+            calls.append(model)
+            if model is None and calls.count(None) == 2:
+                return "executor answered on retry"
+            raise RuntimeError(_EMPTY_ERR)
+
+        ctx = self._ctx(sq, available=_RETRY_AVAILABLE)
+        result = mod._run_aside([], "q", ctx, escalate=True)
+        self.assertFalse(result["is_error"])
+        self.assertIn("executor answered on retry", result["content"][0]["text"])
+        self.assertEqual(calls, ["claude-fable-5", "claude-fable-5", None, None])
+
+    def test_everything_empty_surfaces_chained_error(self):
+        mod = self._mod(advisor=list(_RETRY_CHAIN))
+
+        def sq(question, model=None, provider=None, effort=None):
+            raise RuntimeError(_EMPTY_ERR)
+
+        ctx = self._ctx(sq, available=_RETRY_AVAILABLE)
+        result = mod._run_aside([], "q", ctx, escalate=True)
+        self.assertTrue(result["is_error"])
+        text = result["content"][0]["text"]
+        self.assertIn("chain exhausted", text)
+        self.assertIn("claude-fable-5", text)
+        self.assertIn("claude-opus-4-8", text)
+        self.assertIn("executor fallback also failed", text)
+        self.assertIn("no usable content", text)
+
+    def test_mixed_dead_and_empty_notes_unavailable(self):
+        # A 404 anywhere in the walk means the note keeps the "unavailable"
+        # wording; the 404'd model is memoized, the empty one is not.
+        mod = self._mod(advisor=list(_RETRY_CHAIN))
+
+        def sq(question, model=None, provider=None, effort=None):
+            if model == "claude-fable-5":
+                raise RuntimeError("not_found_error: fable gone")
+            if model == "claude-opus-4-8":
+                raise RuntimeError(_EMPTY_ERR)
+            return "executor answered"
+
+        ctx = self._ctx(sq, available=_RETRY_AVAILABLE)
+        result = mod._run_aside([], "q", ctx, escalate=True)
+        self.assertFalse(result["is_error"])
+        text = result["content"][0]["text"]
+        self.assertTrue(text.startswith("[advisor unavailable — answered on executor model]"), text)
+        self.assertIn("anthropic/claude-fable-5", mod._SESSION_UNAVAILABLE)
+        self.assertNotIn("anthropic/claude-opus-4-8", mod._SESSION_UNAVAILABLE)
+
+    def test_overflow_after_empty_is_surfaced_not_advanced(self):
+        # Retry is scoped to empty content only: a hard error on the retry
+        # surfaces immediately rather than walking the chain.
+        mod = self._mod(advisor=list(_RETRY_CHAIN))
+        calls = []
+
+        def sq(question, model=None, provider=None, effort=None):
+            calls.append(model)
+            if len(calls) == 1:
+                raise RuntimeError(_EMPTY_ERR)
+            raise RuntimeError("side-query: Input exceeds context window limit")
+
+        ctx = self._ctx(sq, available=_RETRY_AVAILABLE)
+        result = mod._run_aside([], "q", ctx, escalate=True)
+        self.assertTrue(result["is_error"])
+        self.assertIn("context window full", result["content"][0]["text"])
+        self.assertEqual(calls, ["claude-fable-5", "claude-fable-5"])
+
+    def test_retry_and_advance_are_visible_on_a_card(self):
+        mod = self._mod(advisor=list(_RETRY_CHAIN))
+
+        def sq(question, model=None, provider=None, effort=None):
+            if model == "claude-fable-5":
+                raise RuntimeError(_EMPTY_ERR)
+            return "opus answered"
+
+        ctx = self._ctx(sq, available=_RETRY_AVAILABLE)
+        mod._run_aside([], "q", ctx, escalate=True)
+        slugs = [c.kwargs.get("slug") for c in ctx.put_observable.call_args_list]
+        self.assertIn("retry:empty", slugs)
+        self.assertIn("advance:empty", slugs)
+
+    def test_backoff_is_slept_between_attempts(self):
+        mod = self._mod(advisor=[{"provider": "anthropic", "model": "claude-fable-5"}])
+        mod._EMPTY_CONTENT_RETRY_BACKOFF = 1.5
+        calls = []
+
+        def sq(question, model=None, provider=None, effort=None):
+            calls.append(model)
+            if len(calls) == 1:
+                raise RuntimeError(_EMPTY_ERR)
+            return "answered"
+
+        ctx = self._ctx(sq, available=_RETRY_AVAILABLE)
+        with mock.patch.object(mod.time, "sleep") as sleep:
+            mod._run_aside([], "q", ctx, escalate=True)
+        sleep.assert_called_once_with(1.5)
+
+
+# ---------------------------------------------------------------------------
+# Dynamic default advisor/delegate resolution from available_models()
+# ---------------------------------------------------------------------------
+
+
+class TestDynamicDefaultChain(unittest.TestCase):
+    """The DEFAULT chain is resolved from the live model registry, so a new
+    flagship is picked up with zero code changes. Explicit aside.json values
+    still win."""
+
+    def _ctx(self, available, result="reply"):
+        ctx = _blocking_ctx()
+        ctx.side_query = mock.MagicMock(return_value=result)
+        if available is None:
+            del ctx.available_models
+        else:
+            ctx.available_models = mock.MagicMock(return_value=available)
+        return ctx
+
+    def _default_mod(self):
+        """Module whose advisor/delegate came from the bundled default."""
+        return self._mod_with_config(None)
+
+    @staticmethod
+    def _mod_with_config(cfg):
+        """Module whose advisor/delegate were (re-)loaded from *cfg*.
+
+        aside.py resolves the lazy configs during import, so the caches must
+        be reset before patching the config reader — otherwise the injected
+        aside.json is never seen.
+        """
+        mod = _load_aside()
+        mod._ADVISOR = mod._ADVISOR_UNSET
+        mod._DELEGATE = mod._ADVISOR_UNSET
+        with mock.patch.object(mod, "_read_existing_config", return_value=cfg):
+            mod._advisor()
+            mod._delegate()
+        return mod
+
+    def test_ranks_live_flagships_strongest_first(self):
+        mod = self._default_mod()
+        available = [
+            {"provider": "anthropic", "id": "claude-opus-4-8"},
+            {"provider": "anthropic", "id": "claude-opus-5-0"},
+            {"provider": "anthropic", "id": "claude-fable-6"},
+            {"provider": "anthropic", "id": "claude-haiku-4-5"},
+            {"provider": "openai", "id": "gpt-9"},
+        ]
+        chain = mod._dynamic_default_chain(self._ctx(available), "advisor")
+        self.assertEqual(
+            [c["model"] for c in chain],
+            ["claude-fable-6", "claude-opus-5-0", "claude-opus-4-8"],
+        )
+
+    def test_chain_is_capped(self):
+        mod = self._default_mod()
+        available = [{"provider": "anthropic", "id": f"claude-opus-{n}-0"} for n in range(1, 9)]
+        chain = mod._dynamic_default_chain(self._ctx(available), "advisor")
+        self.assertEqual(len(chain), mod._DYNAMIC_ADVISOR_CHAIN_LEN)
+
+    def test_date_stamped_duplicate_is_deduped_keeping_bare(self):
+        mod = self._default_mod()
+        available = [
+            {"provider": "anthropic", "id": "claude-opus-4-8-20250805"},
+            {"provider": "anthropic", "id": "claude-opus-4-8"},
+        ]
+        chain = mod._dynamic_default_chain(self._ctx(available), "advisor")
+        self.assertEqual([c["model"] for c in chain], ["claude-opus-4-8"])
+
+    def test_date_stamped_kept_when_it_is_the_only_spelling(self):
+        mod = self._default_mod()
+        available = [
+            {"provider": "anthropic", "id": "claude-opus-4-1-20250805"},
+            {"provider": "anthropic", "id": "claude-opus-4-8"},
+        ]
+        chain = mod._dynamic_default_chain(self._ctx(available), "advisor")
+        # Used VERBATIM — never normalised to a bare alias the API may reject.
+        self.assertEqual(
+            [c["model"] for c in chain], ["claude-opus-4-8", "claude-opus-4-1-20250805"]
+        )
+
+    def test_delegate_resolves_dated_haiku_when_only_spelling(self):
+        mod = self._default_mod()
+        available = [
+            {"provider": "anthropic", "id": "claude-haiku-4-5-20251001"},
+            {"provider": "anthropic", "id": "claude-opus-5"},
+        ]
+        chain = mod._dynamic_default_chain(self._ctx(available), "delegate")
+        self.assertEqual([c["model"] for c in chain], ["claude-haiku-4-5-20251001"])
+
+    def test_real_live_host_model_set(self):
+        # Verbatim available_models() from a live host on 2026-08-11 — the set
+        # that exposed both ranking bugs (bare claude-opus-5 dropped; only the
+        # dated Haiku live, so the delegate resolved to None).
+        mod = self._default_mod()
+        available = [
+            {"provider": "anthropic", "id": i}
+            for i in (
+                "claude-fable-5",
+                "claude-haiku-4-5-20251001",
+                "claude-opus-4-5-20251101",
+                "claude-opus-4-6",
+                "claude-opus-4-7",
+                "claude-opus-4-8",
+                "claude-opus-5",
+                "claude-sonnet-4-5-20250929",
+                "claude-sonnet-4-6",
+                "claude-sonnet-5",
+            )
+        ]
+        ctx = self._ctx(available)
+        self.assertEqual(
+            [c["model"] for c in mod._dynamic_default_chain(ctx, "advisor")],
+            ["claude-fable-5", "claude-opus-5", "claude-opus-4-8"],
+        )
+        self.assertEqual(
+            [c["model"] for c in mod._dynamic_default_chain(ctx, "delegate")],
+            ["claude-haiku-4-5-20251001"],
+        )
+
+    def test_delegate_resolves_highest_live_haiku(self):
+        mod = self._default_mod()
+        available = [
+            {"provider": "anthropic", "id": "claude-haiku-4-5"},
+            {"provider": "anthropic", "id": "claude-haiku-5-1"},
+            {"provider": "anthropic", "id": "claude-opus-5-0"},
+        ]
+        chain = mod._dynamic_default_chain(self._ctx(available), "delegate")
+        self.assertEqual([c["model"] for c in chain], ["claude-haiku-5-1"])
+
+    def test_degrades_to_static_chain_when_registry_empty(self):
+        mod = self._default_mod()
+        self.assertIsNone(mod._dynamic_default_chain(self._ctx([]), "advisor"))
+        self.assertIsNone(mod._dynamic_default_chain(self._ctx([]), "delegate"))
+
+    def test_degrades_to_static_chain_when_no_anthropic_entries(self):
+        mod = self._default_mod()
+        available = [{"provider": "openai", "id": "gpt-9"}]
+        self.assertIsNone(mod._dynamic_default_chain(self._ctx(available), "advisor"))
+
+    def test_degrades_to_static_chain_when_registry_raises(self):
+        mod = self._default_mod()
+        ctx = _blocking_ctx()
+        ctx.available_models = mock.MagicMock(side_effect=RuntimeError("bridge down"))
+        self.assertIsNone(mod._dynamic_default_chain(ctx, "advisor"))
+
+    def test_old_host_without_verb_uses_static_chain(self):
+        mod = self._default_mod()
+        ctx = self._ctx(None)
+        self.assertIsNone(mod._dynamic_default_chain(ctx, "advisor"))
+        self.assertEqual(
+            [c["model"] for c in mod._resolve_advisor_chain(ctx)],
+            ["claude-fable-5", "claude-opus-4-8", "claude-opus-4-7"],
+        )
+
+    def test_default_routes_to_live_flagship_not_stale_constant(self):
+        # The bug this fixes: hosts run claude-opus-5 while the baked chain
+        # tail is opus-4-8 — escalation must NOT route below the live head.
+        mod = self._default_mod()
+        available = [
+            {"provider": "anthropic", "id": "claude-opus-5-0"},
+            {"provider": "anthropic", "id": "claude-opus-4-8"},
+        ]
+        ctx = self._ctx(available, result="opus5 answered")
+        result = mod._run_aside([], "q", ctx, escalate=True)
+        self.assertFalse(result["is_error"])
+        self.assertEqual(ctx.side_query.call_args.kwargs["model"], "claude-opus-5-0")
+        self.assertTrue(
+            result["content"][0]["text"].startswith("[advisor: anthropic/claude-opus-5-0]"),
+            result["content"][0]["text"],
+        )
+
+    def test_explicit_config_wins_over_dynamic(self):
+        mod = self._mod_with_config({"advisor": "anthropic/claude-opus-4-7"})
+        available = [
+            {"provider": "anthropic", "id": "claude-opus-5-0"},
+            {"provider": "anthropic", "id": "claude-opus-4-7"},
+        ]
+        ctx = self._ctx(available)
+        self.assertEqual([c["model"] for c in mod._resolve_advisor_chain(ctx)], ["claude-opus-4-7"])
+
+    def test_explicit_off_still_disables_the_role(self):
+        mod = self._mod_with_config({"advisor": "off", "delegate": "none"})
+        self.assertIsNone(mod._advisor())
+        self.assertIsNone(mod._delegate())
+        available = [{"provider": "anthropic", "id": "claude-opus-5-0"}]
+        ctx = self._ctx(available, result="executor answered")
+        result = mod._run_aside([], "q", ctx, escalate=True)
+        self.assertFalse(result["is_error"])
+        # No advisor → executor model, no dynamic substitution.
+        self.assertIsNone(ctx.side_query.call_args.kwargs["model"])
+
+    def test_explicit_chain_wins_over_dynamic(self):
+        mod = self._mod_with_config(
+            {"advisor": ["anthropic/claude-opus-4-7", "anthropic/claude-opus-4-8"]}
+        )
+        available = [
+            {"provider": "anthropic", "id": "claude-opus-5-0"},
+            {"provider": "anthropic", "id": "claude-opus-4-7"},
+            {"provider": "anthropic", "id": "claude-opus-4-8"},
+        ]
+        self.assertEqual(
+            [c["model"] for c in mod._resolve_advisor_chain(self._ctx(available))],
+            ["claude-opus-4-7", "claude-opus-4-8"],
+        )

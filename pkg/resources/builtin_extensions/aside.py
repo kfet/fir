@@ -115,13 +115,13 @@ if TYPE_CHECKING:
 
 _CONFIG_FILENAME = "aside.json"
 
-# Default advisor when no config file exists. This is an ORDERED FALLBACK
-# CHAIN, not a single model. The head always points at the strongest Anthropic
-# flagship baked into fir's model registry — the highest Fable, falling back to
-# the highest Opus only when no Fable exists. Drift of the head is caught by
-# DefaultAdvisorTracksHighestAnthropicFlagship in
-# pkg/resources/testdata/aside_test.py — bump _DEFAULT_ADVISOR_SPEC when fir
-# adds a newer flagship.
+# Default advisor chain — LAST-RESORT FALLBACK ONLY.
+#
+# At runtime the default chain is resolved dynamically from
+# ctx.available_models() (see _dynamic_default_chain), ranked strongest-first,
+# so a new flagship is picked up with zero code changes. These constants are
+# used only when that live set is empty, errors, or has no rankable Anthropic
+# entries — and when an explicit aside.json value is absent.
 #
 # Fable is kept FIRST by explicit decision: it is NOT flagged unavailable in
 # /v1/models — it looks identical to a live model, and only a runtime 404
@@ -135,12 +135,14 @@ _DEFAULT_ADVISOR_CHAIN = [
     "anthropic/claude-opus-4-7",
 ]
 
-# Default delegate when no config file exists. Always points at the cheapest
-# current Anthropic tier (highest Haiku) baked into fir's model registry.
-# Drift is caught by DefaultDelegateTracksHighestAnthropicHaiku in
-# pkg/resources/testdata/aside_test.py — bump this constant when fir adds a
-# newer Haiku.
+# Default delegate — LAST-RESORT FALLBACK ONLY, same as above: the live
+# highest Haiku from ctx.available_models() wins when it is resolvable.
 _DEFAULT_DELEGATE_SPEC = "anthropic/claude-haiku-4-5"
+
+# How many candidates the dynamically-resolved advisor chain carries. Matches
+# the static chain length: enough redundancy to survive a couple of dead or
+# empty-responding models, bounded worst-case walk before executor fallback.
+_DYNAMIC_ADVISOR_CHAIN_LEN = 3
 
 
 def _config_path() -> Path | None:
@@ -174,6 +176,13 @@ def _parse_advisor_chain(specs: list[str]) -> list[dict[str, str]]:
 def _load_role_config(
     key: str, default: str | list[str]
 ) -> dict[str, str] | list[dict[str, str]] | None:
+    """Back-compat wrapper around :func:`_load_role_config_source`."""
+    return _load_role_config_source(key, default)[0]
+
+
+def _load_role_config_source(
+    key: str, default: str | list[str]
+) -> tuple[dict[str, str] | list[dict[str, str]] | None, bool]:
     """Read a model-role config (advisor or delegate) from aside.json.
 
     The ``"<key>"`` value may be:
@@ -187,8 +196,11 @@ def _load_role_config(
       * missing / unparsable file → the bundled default (which may itself be a
         chain, e.g. the advisor default).
 
-    Returns a dict (single spec), a non-empty list of dicts (chain), or
-    ``None`` (disabled). The caller normalises dict-vs-list at resolution.
+    Returns ``(value, from_default)`` where value is a dict (single spec), a
+    non-empty list of dicts (chain), or ``None`` (disabled), and
+    ``from_default`` is True when the bundled default was used — the signal
+    that runtime dynamic resolution may replace it. An explicit config value
+    (including an explicit opt-out) always reports False.
     """
     data = _read_existing_config()
     if isinstance(data, dict) and key in data:
@@ -197,22 +209,22 @@ def _load_role_config(
         if value is None or (
             isinstance(value, str) and value.strip().lower() in ("", "off", "none")
         ):
-            return None
+            return None, False
         if isinstance(value, str):
             parsed = _parse_advisor_spec(value)
             if parsed is not None:
-                return parsed
+                return parsed, False
             # Malformed entry — fall through to default rather than disable.
         elif isinstance(value, list):
             chain = _parse_advisor_chain(value)
             if chain:
-                return chain
+                return chain, False
             # All elements malformed — fall through to default.
 
     if isinstance(default, list):
         chain = _parse_advisor_chain(default)
-        return chain if chain else None
-    return _parse_advisor_spec(default)
+        return (chain, True) if chain else (None, True)
+    return _parse_advisor_spec(default), True
 
 
 def _load_advisor_config() -> dict[str, str] | list[dict[str, str]] | None:
@@ -267,22 +279,34 @@ def _format_role_config(cfg: dict[str, str] | list[dict[str, str]]) -> str:
 # Lazily-loaded advisor/delegate configs — populated on first access (after
 # the init handshake has set fir_ext.config_dirs). Tests that want to inject
 # a value can assign to _ADVISOR / _DELEGATE directly.
+#
+# Only a value that came from the bundled static default is eligible for
+# runtime dynamic resolution against ctx.available_models() — an explicit
+# aside.json value always wins. Identity, not a boolean flag, records that:
+# ``_*_DEFAULT_OBJ`` holds the exact object the loader produced when it fell
+# back to the bundled default; a directly-injected _ADVISOR / _DELEGATE
+# (tests, callers) is a different object and is therefore treated as
+# explicit and used verbatim.
 _ADVISOR_UNSET = object()
 _ADVISOR: Any = _ADVISOR_UNSET
 _DELEGATE: Any = _ADVISOR_UNSET
+_ADVISOR_DEFAULT_OBJ: Any = _ADVISOR_UNSET
+_DELEGATE_DEFAULT_OBJ: Any = _ADVISOR_UNSET
 
 
 def _advisor() -> dict[str, str] | list[dict[str, str]] | None:
-    global _ADVISOR
+    global _ADVISOR, _ADVISOR_DEFAULT_OBJ
     if _ADVISOR is _ADVISOR_UNSET:
-        _ADVISOR = _load_advisor_config()
+        _ADVISOR, from_default = _load_role_config_source("advisor", _DEFAULT_ADVISOR_CHAIN)
+        _ADVISOR_DEFAULT_OBJ = _ADVISOR if from_default else _ADVISOR_UNSET
     return _ADVISOR
 
 
 def _delegate() -> dict[str, str] | list[dict[str, str]] | None:
-    global _DELEGATE
+    global _DELEGATE, _DELEGATE_DEFAULT_OBJ
     if _DELEGATE is _ADVISOR_UNSET:
-        _DELEGATE = _load_delegate_config()
+        _DELEGATE, from_default = _load_role_config_source("delegate", _DEFAULT_DELEGATE_SPEC)
+        _DELEGATE_DEFAULT_OBJ = _DELEGATE if from_default else _ADVISOR_UNSET
     return _DELEGATE
 
 
@@ -297,46 +321,60 @@ def _delegate() -> dict[str, str] | list[dict[str, str]] | None:
 # the highest-ranked AVAILABLE Anthropic flagship (advisor) / Haiku (delegate)
 # rather than routing to a dead model.
 #
-# The ranking helpers below are the single source of truth: the drift tests
-# (DefaultAdvisorTracksHighestAnthropicFlagship /
-# DefaultDelegateTracksHighestAnthropicHaiku) reuse them so test and runtime
-# always agree on "which model is strongest/cheapest".
+# The ranking helpers below are the single source of truth: the fallback-
+# sanity tests reuse them so test and runtime always agree on "which model is
+# strongest/cheapest".
 
-# Bare X-Y forms only — minor capped at 2 digits to reject date stamps
-# (e.g. claude-opus-4-1-20250805). Fable's minor is optional; Opus requires it.
-_FABLE_RE = re.compile(r"^claude-fable-(\d+)(?:-(\d{1,2}))?$")
-_OPUS_RE = re.compile(r"^claude-opus-(\d+)-(\d{1,2})$")
-_HAIKU_RE = re.compile(r"^claude-haiku-(\d+)-(\d{1,2})$")
+# Model id grammar: ``claude-<tier>-<major>[-<minor>][-<YYYYMMDD>]``. The minor
+# is OPTIONAL for every tier — bare ``claude-opus-5`` is a real, live id and an
+# earlier version of these patterns required a minor, so opus-5 was unrankable
+# and the "strongest available" answer silently stayed on opus-4-8. The minor
+# is capped at 2 digits and the date stamp fixed at 8 (YYYYMMDD), so the two
+# groups can never be confused: given ``claude-opus-4-20250514`` the engine
+# backtracks to minor=None, date=20250514.
+#
+# Date-stamped ids ARE ranked, but strictly BELOW the bare alias of the same
+# version (the trailing element of the rank tuple: 1 for bare, 0 for dated).
+# They cannot simply be rejected: on a real host the ONLY live Haiku was
+# ``claude-haiku-4-5-20251001``, and dropping it disabled delegation entirely.
+# Callers dedupe by the version part of the rank, so the same model is never
+# probed twice, and the live id is used VERBATIM — never normalised to a bare
+# alias the API may not accept.
+_FABLE_RE = re.compile(r"^claude-fable-(\d+)(?:-(\d{1,2}))?(?:-(\d{8}))?$")
+_OPUS_RE = re.compile(r"^claude-opus-(\d+)(?:-(\d{1,2}))?(?:-(\d{8}))?$")
+_HAIKU_RE = re.compile(r"^claude-haiku-(\d+)(?:-(\d{1,2}))?(?:-(\d{8}))?$")
 
 
-def _rank_flagship(model_id: str) -> tuple[int, int, int] | None:
+def _rank_flagship(model_id: str) -> tuple[int, int, int, int] | None:
     """Rank an Anthropic flagship model id. Higher tuple == stronger.
 
-    The Fable (Mythos-class) tier always outranks the Opus tier, then by
-    (major, minor). Returns None for non-flagship / date-stamped ids.
+    Returns ``(tier, major, minor, bare)`` — the Fable (Mythos-class) tier
+    always outranks the Opus tier, then major, then minor, and a bare id
+    outranks its own date-stamped snapshot. ``None`` for non-flagship ids.
     """
     mid = model_id.strip()
     m = _FABLE_RE.match(mid)
-    if m is not None:
-        return (1, int(m.group(1)), int(m.group(2) or 0))
-    m = _OPUS_RE.match(mid)
-    if m is not None:
-        return (0, int(m.group(1)), int(m.group(2)))
-    return None
+    tier = 1
+    if m is None:
+        m = _OPUS_RE.match(mid)
+        tier = 0
+    if m is None:
+        return None
+    return (tier, int(m.group(1)), int(m.group(2) or 0), 0 if m.group(3) else 1)
 
 
-def _rank_haiku(model_id: str) -> tuple[int, int] | None:
-    """Rank an Anthropic Haiku model id by (major, minor). None if not Haiku."""
+def _rank_haiku(model_id: str) -> tuple[int, int, int] | None:
+    """Rank a Haiku id by ``(major, minor, bare)``. None if not Haiku."""
     m = _HAIKU_RE.match(model_id.strip())
     if m is None:
         return None
-    return (int(m.group(1)), int(m.group(2)))
+    return (int(m.group(1)), int(m.group(2) or 0), 0 if m.group(3) else 1)
 
 
 def _best_anthropic_flagship(model_ids: list[str]) -> str | None:
     """Pick the highest-ranked flagship id from *model_ids* (Fable > Opus)."""
     best_id: str | None = None
-    best_rank: tuple[int, int, int] | None = None
+    best_rank: tuple[int, int, int, int] | None = None
     for mid in model_ids:
         r = _rank_flagship(mid)
         if r is not None and (best_rank is None or r > best_rank):
@@ -347,7 +385,7 @@ def _best_anthropic_flagship(model_ids: list[str]) -> str | None:
 def _best_anthropic_haiku(model_ids: list[str]) -> str | None:
     """Pick the highest-ranked Haiku id from *model_ids*."""
     best_id: str | None = None
-    best_rank: tuple[int, int] | None = None
+    best_rank: tuple[int, int, int] | None = None
     for mid in model_ids:
         r = _rank_haiku(mid)
         if r is not None and (best_rank is None or r > best_rank):
@@ -495,14 +533,91 @@ def _resolve_role_chain(
     return out
 
 
+def _dynamic_default_chain(ctx: fir_ext.Context, role: str) -> list[dict[str, str]] | None:
+    """Resolve a role's DEFAULT chain from the live model registry.
+
+    The hardcoded ``_DEFAULT_ADVISOR_CHAIN`` / ``_DEFAULT_DELEGATE_SPEC``
+    constants drift: hosts have run ``claude-opus-5`` as their executor while
+    the baked chain tail was opus-4-8/opus-4-7 — i.e. escalation could route
+    to a model WEAKER than the one already running. Resolving from
+    ``ctx.available_models()`` (the session registry's live-and-authed set, a
+    local RPC — no network) picks up new flagships with zero code changes.
+
+    Ranking reuses the existing helpers, so runtime and tests agree:
+      * advisor — ``_rank_flagship`` (Fable tier > Opus tier, then major,
+        minor), strongest first, top ``_DYNAMIC_ADVISOR_CHAIN_LEN``.
+      * delegate — ``_best_anthropic_haiku``, a single-element chain.
+    Date-stamped ids rank below the bare alias of the same version and are
+    deduped away when both are live, so the same model is never probed twice —
+    but they are kept when the snapshot is the ONLY live spelling (observed:
+    a host whose sole live Haiku was ``claude-haiku-4-5-20251001``). Sonnet is
+    deliberately excluded — escalating to a mid tier defeats the purpose, and
+    the executor fallback already covers "no flagship available".
+
+    Returns ``None`` when the live set is empty/unavailable/has no rankable
+    Anthropic entries — the caller then keeps the static constants. Never
+    raises: any failure degrades to the static chain.
+    """
+    try:
+        available = _query_available_models(ctx)
+        # Sorted + de-duplicated for deterministic ordering within a rank.
+        ids = sorted({m.get("id", "") for m in available if m.get("provider") == "anthropic"})
+        if role == "delegate":
+            best = _best_anthropic_haiku(ids)
+            return [{"provider": "anthropic", "model": best}] if best else None
+        ranked = [(r, mid) for mid in ids if (r := _rank_flagship(mid)) is not None]
+        if not ranked:
+            return None
+        # Rank descending; `ids` is already ascending so ties stay stable.
+        ranked.sort(key=lambda p: p[0], reverse=True)
+        # Dedupe by VERSION (tier, major, minor) — a date-stamped id is the
+        # same model as its bare alias and must not be probed twice. Bare
+        # sorts first within a version, so keeping the first occurrence keeps
+        # the bare form; when only the snapshot is live it is kept verbatim.
+        out: list[dict[str, str]] = []
+        seen: set[tuple[int, int, int]] = set()
+        for rank, mid in ranked:
+            version = rank[:3]
+            if version in seen:
+                continue
+            seen.add(version)
+            out.append({"provider": "anthropic", "model": mid})
+            if len(out) == _DYNAMIC_ADVISOR_CHAIN_LEN:
+                break
+        return out
+    except Exception:
+        return None
+
+
+def _resolve_role_chain_dynamic(
+    ctx: fir_ext.Context,
+    cfg: dict[str, str] | list | None,
+    role: str,
+    from_default: bool,
+) -> list[dict[str, str]]:
+    """Resolve a role chain, substituting the dynamic default when applicable.
+
+    An explicit ``aside.json`` value (including ``off``/``none``, which yields
+    ``cfg is None``) ALWAYS wins — the dynamic chain replaces only the bundled
+    static default.
+    """
+    if cfg is not None and from_default:
+        dynamic = _dynamic_default_chain(ctx, role)
+        if dynamic:
+            cfg = dynamic
+    return _resolve_role_chain(ctx, cfg, role)
+
+
 def _resolve_advisor_chain(ctx: fir_ext.Context) -> list[dict[str, str]]:
     """Availability-aware advisor chain resolution (Layer A)."""
-    return _resolve_role_chain(ctx, _advisor(), "advisor")
+    cfg = _advisor()
+    return _resolve_role_chain_dynamic(ctx, cfg, "advisor", cfg is _ADVISOR_DEFAULT_OBJ)
 
 
 def _resolve_delegate_chain(ctx: fir_ext.Context) -> list[dict[str, str]]:
     """Availability-aware delegate chain resolution (Layer A)."""
-    return _resolve_role_chain(ctx, _delegate(), "delegate")
+    cfg = _delegate()
+    return _resolve_role_chain_dynamic(ctx, cfg, "delegate", cfg is _DELEGATE_DEFAULT_OBJ)
 
 
 # Substrings (case-insensitive) that signal a model-unavailability error from
@@ -531,6 +646,49 @@ _OVERFLOW_MARKERS = (
     "too many tokens",
     "exceeds",
 )
+
+
+# Empty-content markers. The host raises this class when the provider returns
+# a SUCCESSFUL response (stop_reason=stop) carrying no usable text — typically
+# a lone redacted thinking block, e.g.
+#   side-query: response had no usable content (blocks: [thinking(th=0,sig=940)])
+# or the no-blocks variant "(blocks: [])". Telemetry (2026-08-11) puts this at
+# ~57% of aside calls on one host and ~27% on another, with no config
+# correlation and no burst pattern — it is a TRANSIENT upstream blip: the same
+# question re-probed hours later succeeds immediately.
+#
+# NOTE (design): the durable fix belongs in fir's Go SideQuery streaming path —
+# one transport-level retry there would fix this for every side_query caller
+# and make the same-candidate retry below redundant. This extension-level
+# handling is the graceful-degradation layer (chain advance + executor
+# fallback are policy only the extension knows), not the root fix. If the Go
+# client ever retries empty content itself, delete the same-candidate retry
+# here and keep the advance.
+_EMPTY_CONTENT_MARKERS = (
+    "no usable content",
+    "returned no content",
+)
+
+# Backoff before the single same-candidate retry on empty content. Module
+# constant so tests can zero it.
+_EMPTY_CONTENT_RETRY_BACKOFF = 2.0
+
+
+def _is_empty_content_error(msg: str) -> bool:
+    """True when *msg* is the transient 'response had no usable content' class.
+
+    Covers both the block-summary form (``... (blocks: [thinking(th=0,sig=N)])``,
+    including the empty ``(blocks: [])`` variant) and the bare
+    no-blocks/blocking-path wording. This is its OWN failure class: unlike a
+    model-unavailability 404 it is transient, so the model is never memoized
+    as dead; unlike overflow/connection errors it IS retried.
+    """
+    if not msg:
+        return False
+    if _EMPTY_BLOCKS_RE.search(msg) is not None:
+        return True
+    low = msg.lower()
+    return any(m in low for m in _EMPTY_CONTENT_MARKERS)
 
 
 def _is_model_unavailable_error(msg: str) -> bool:
@@ -767,8 +925,13 @@ def _run_side_query_chain(
         ``(fallback: … unavailable)`` note when Layer A degraded it).
       * A candidate fails with a model-unavailability error → the model is
         memoized and the walk ADVANCES to the next candidate.
-      * A candidate fails with any OTHER error (overflow, connection, empty
-        content) → that error is surfaced immediately (no silent advance).
+      * A candidate returns EMPTY CONTENT → retried ONCE on the same candidate
+        after ``_EMPTY_CONTENT_RETRY_BACKOFF``; still empty → the walk ADVANCES
+        to the next candidate WITHOUT memoizing the model (the blip is
+        transient, the model is not dead — memoizing would degrade the chain
+        for the whole session over a hiccup).
+      * A candidate fails with any OTHER error (overflow, connection) → that
+        error is surfaced immediately (no silent advance).
       * The chain is exhausted after trying ≥1 candidate → retry on the
         executor's own model (``model=None``); on success return
         ``(text, None, None, "[<role> unavailable — answered on executor
@@ -780,13 +943,44 @@ def _run_side_query_chain(
     """
     advisor_errs: list[str] = []
     dead_models: list[str] = []
+    empty_only = True
+    walk_key = f"aside/chain/{int(time.time() * 1000)}"
+
+    def _attempt(
+        *, model: str | None, provider: str | None, effort: str | None, label: str
+    ) -> tuple[str | None, str | None]:
+        """One candidate probe, with a single retry on empty content.
+
+        At most two attempts: the second happens ONLY when the first failed
+        with the transient empty-content class.
+        """
+        text: str | None = None
+        err: str | None = None
+        for attempt in range(2):
+            if attempt:
+                # Keep the retry honest and visible — an observer sees the
+                # second probe, not a silent stall.
+                ctx.put_observable(
+                    walk_key,
+                    slug="retry:empty",
+                    detail=f"{label} returned no usable content — retrying once\n\n{err}",
+                )
+                if _EMPTY_CONTENT_RETRY_BACKOFF > 0:
+                    time.sleep(_EMPTY_CONTENT_RETRY_BACKOFF)
+            text, err = _run_side_query_with_card(
+                ctx, question, model=model, provider=provider, effort=effort
+            )
+            if err is None or not _is_empty_content_error(err):
+                break
+        return text, err
+
     for cfg in chain:
-        text, err = _run_side_query_with_card(
-            ctx,
-            question,
+        label = f"{cfg['provider']}/{cfg['model']}"
+        text, err = _attempt(
             model=cfg["model"],
             provider=cfg["provider"],
             effort=cfg.get("effort"),
+            label=label,
         )
         if err is None:
             # A later candidate answered — surface which higher-priority model
@@ -800,24 +994,39 @@ def _run_side_query_chain(
                 cfg = dict(cfg)
                 cfg["_fallback"] = dead_models[0]
             return text, None, cfg, ""
+        if _is_empty_content_error(err):
+            # Transient — retried once already. Advance, but do NOT memoize:
+            # the model is alive, the response was just empty.
+            ctx.put_observable(
+                walk_key,
+                slug="advance:empty",
+                detail=f"{label} empty twice — advancing past it (not memoized)\n\n{err}",
+            )
+            advisor_errs.append(f"{label}: {err}")
+            dead_models.append(cfg["model"])
+            continue
+        empty_only = False
         if _is_model_unavailable_error(err):
             # Memoize so subsequent escalations skip this dead model and
             # Layer A degrades past it instead of re-probing.
             _mark_model_unavailable(cfg["provider"], cfg["model"])
-            advisor_errs.append(f"{cfg['provider']}/{cfg['model']}: {err}")
+            advisor_errs.append(f"{label}: {err}")
             dead_models.append(cfg["model"])
             continue
-        # Non-unavailability error (overflow, connection, empty content) — do
-        # not swallow it by advancing; surface it as-is.
+        # Non-unavailability, non-empty error (overflow, connection) — do not
+        # swallow it by advancing; surface it as-is.
         return None, err, None, ""
 
-    # Chain exhausted or empty → executor terminal fallback.
-    text, err = _run_side_query_with_card(ctx, question, model=None, provider=None, effort=None)
+    # Chain exhausted or empty → executor terminal fallback (same empty-content
+    # retry applies: the executor model is the last hope, one blip must not
+    # sink the whole call).
+    text, err = _attempt(model=None, provider=None, effort=None, label="executor model")
     if err is None:
         # A non-empty chain that we walked to exhaustion earns the note; an
         # empty chain (no advisor, or nothing resolvable) answers silently.
         if advisor_errs and role_label:
-            note = f"[{role_label} unavailable — answered on executor model]\n\n"
+            reason = "returned no usable content" if empty_only else "unavailable"
+            note = f"[{role_label} {reason} — answered on executor model]\n\n"
             return text, None, None, note
         return text, None, None, ""
 
