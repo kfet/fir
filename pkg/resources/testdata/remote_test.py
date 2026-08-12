@@ -113,11 +113,31 @@ class TestScriptBuilding(unittest.TestCase):
     def test_no_cwd_means_no_cd(self):
         self.assertNotIn("cd --", remote._build_script("ls", None))
 
-    def test_b64_roundtrip(self):
-        import base64
+    def test_heredoc_carries_content_verbatim(self):
+        text = "multi\nline 'quoted' $stuff `backticks` \\backslash\n"
+        frag = remote._write_file_cmd('"$t"', text)
+        first, rest = frag.split("\n", 1)
+        delim = first.split("<<")[1].strip("'")
+        self.assertTrue(first.startswith('cat > "$t" <<\''), first)
+        self.assertEqual(text + delim, rest)
 
-        text = "multi\nline 'quoted' $stuff\n"
-        self.assertEqual(text, base64.b64decode(remote._b64(text)).decode())
+    def test_heredoc_delimiter_is_quoted_so_nothing_expands(self):
+        """An unquoted delimiter would let the remote shell expand $stuff."""
+        frag = remote._write_file_cmd('"$t"', "echo $HOME\n")
+        self.assertRegex(frag.splitlines()[0], r"<<'FIR_EOF_[0-9a-f]{16}'$")
+
+    def test_heredoc_delimiter_rerolls_on_collision(self):
+        """Collision is checked, not merely improbable."""
+        clash = "FIR_EOF_" + "a" * 16
+        rolls = iter(["a" * 16, "b" * 16])
+        with mock.patch.object(remote.secrets, "token_hex", lambda _n: next(rolls)):
+            delim = remote._heredoc_delimiter(f"line\n{clash}\nmore\n")
+        self.assertEqual("FIR_EOF_" + "b" * 16, delim)
+
+    def test_heredoc_content_missing_trailing_newline_still_terminates(self):
+        frag = remote._write_file_cmd('"$t"', "echo hi")
+        delim = frag.splitlines()[0].split("<<")[1].strip("'")
+        self.assertEqual(delim, frag.splitlines()[-1])
 
 
 class TestDetachScript(unittest.TestCase):
@@ -125,22 +145,39 @@ class TestDetachScript(unittest.TestCase):
         self.script = remote._detach_script("fir-1-abc", "make all\n", "/srv/x", "box")
 
     @staticmethod
-    def _decode_runner(script):
-        """Decode the base64-embedded runner script back out."""
-        import base64
+    def _heredoc_bodies(script):
+        """Every quoted-heredoc payload staged by *script*, in order."""
         import re
 
-        blobs = re.findall(r"printf %s ([A-Za-z0-9+/=]+)", script)
-        decoded = [base64.b64decode(b).decode() for b in blobs]
-        return next(d for d in decoded if d.startswith("#!/bin/bash"))
+        lines = script.splitlines()
+        bodies = []
+        i = 0
+        while i < len(lines):
+            match = re.search(r"<<'(FIR_EOF_[0-9a-f]+)'$", lines[i])
+            if match:
+                delim = match.group(1)
+                j = i + 1
+                body = []
+                while j < len(lines) and lines[j] != delim:
+                    body.append(lines[j])
+                    j += 1
+                bodies.append("\n".join(body) + "\n")
+                i = j
+            i += 1
+        return bodies
+
+    @classmethod
+    def _decode_runner(cls, script):
+        """Pull the staged runner script back out of its heredoc."""
+        return next(b for b in cls._heredoc_bodies(script) if b.startswith("#!/bin/bash"))
 
     def _runner(self):
         return self._decode_runner(self.script)
 
-    def test_carries_command_as_base64_not_heredoc(self):
-        self.assertNotIn("<<", self.script)
-        self.assertIn("base64 -d", self.script)
-        self.assertIn(remote._b64("make all\n\n"), self.script)
+    def test_carries_command_in_a_quoted_heredoc_not_base64(self):
+        """base64 -d is spelled -D on older macOS — the very hosts we target."""
+        self.assertNotIn("base64", self.script)
+        self.assertIn("make all\n\n", self._heredoc_bodies(self.script))
 
     def test_prefers_systemd_run(self):
         self.assertIn("systemd-run --user --collect --quiet --unit=fir-1-abc", self.script)
@@ -148,6 +185,15 @@ class TestDetachScript(unittest.TestCase):
     def test_fallback_double_forks_and_detaches_io(self):
         self.assertIn("( setsid /bin/bash", self.script)
         self.assertIn("</dev/null >/dev/null 2>&1 & ) &", self.script)
+
+    def test_last_resort_launcher_needs_no_setsid(self):
+        """macOS has neither systemd-run nor setsid — it must still launch."""
+        self.assertIn("command -v setsid", self.script)
+        self.assertIn("( set -m; nohup /bin/bash", self.script)
+        # `set -m` is the bit that gives the runner its own process group, so
+        # the runner's own $$ (recorded as .pid) stays a valid kill -TERM -PID
+        # target for rjob kill.
+        self.assertIn("echo nohup >", self.script)
 
     def test_writes_log_rc_and_pid_on_the_remote_box(self):
         self.assertIn("fir-1-abc.log", self.script)
@@ -186,27 +232,6 @@ class TestDetachScript(unittest.TestCase):
         self.assertFalse(remote._is_safe_job_id("../../etc/passwd"))
         self.assertFalse(remote._is_safe_job_id(""))
         self.assertFalse(remote._is_safe_job_id("a" * 100))
-
-
-class TestMissingRemoteTimeout(unittest.TestCase):
-    """Every rexec call runs under an argv-level `timeout -k`, so a host
-    without GNU coreutils fails all of them with a bare 127 that reads like
-    the user's own command failing. The hint that explains it must not depend
-    on which login shell the remote host happens to run.
-    """
-
-    def test_bash_wording(self):
-        self.assertTrue(remote._missing_remote_timeout(127, "bash: timeout: command not found\n"))
-
-    def test_zsh_wording(self):
-        # macOS defaults to zsh, which puts the name last.
-        self.assertTrue(remote._missing_remote_timeout(127, "zsh:1: command not found: timeout\n"))
-
-    def test_the_users_own_missing_command_is_not_a_timeout_hint(self):
-        self.assertFalse(remote._missing_remote_timeout(127, "bash: cargo: command not found\n"))
-
-    def test_only_127_qualifies(self):
-        self.assertFalse(remote._missing_remote_timeout(1, "zsh:1: command not found: timeout\n"))
 
 
 class TestClassify(unittest.TestCase):
@@ -679,7 +704,11 @@ class TestToolPlumbing(unittest.TestCase):
         self.assertEqual(5, env["stdout_bytes"])
         self.assertTrue(env["connect_reused"])
         self.assertIn("make all", captured["stdin"])
-        self.assertEqual(["timeout", "-k", "5", "30", "bash", "-l", "-s"], captured["argv"][-7:])
+        # No GNU `timeout` in the argv — the bound now travels inside the
+        # payload, which is what makes a Mac (no coreutils) work at all.
+        self.assertEqual(["bash", "-s"], captured["argv"][-2:])
+        self.assertNotIn("timeout", captured["argv"])
+        self.assertIn("sleep 30\n", captured["stdin"])
         self.assertGreater(captured["timeout"], 30)
 
     def test_rexec_nonzero_is_signal_not_an_error(self):
@@ -715,16 +744,20 @@ class TestToolPlumbing(unittest.TestCase):
         self.assertEqual("systemd", env["launcher"])
         self.assertIn(env["job_id"], env["log_path"])
 
-    def test_missing_remote_timeout_binary_is_named_not_left_as_a_bare_127(self):
-        """The wrapper is argv-level, so a host without coreutils fails here."""
+    def test_missing_timeout_binary_is_now_the_users_problem_not_ours(self):
+        """We no longer run GNU `timeout`, so a 127 about it is user signal.
+
+        Emitting an infrastructure hint here would misattribute the user's
+        own failing command to the transport.
+        """
         err = "bash: line 1: timeout: command not found\n"
         with mock.patch.object(remote, "_run_local", return_value=(127, "", err, False)):
-            result = remote.rexec({"host": "box", "command": "ls"}, self.ctx)
+            result = remote.rexec({"host": "box", "command": "timeout 5 ls"}, self.ctx)
         env = _payload(result)
         self.assertEqual("nonzero_exit", env["outcome"])
-        self.assertIn("coreutils", env["hint"])
+        self.assertNotIn("hint", env)
 
-    def test_ordinary_command_not_found_gets_no_coreutils_hint(self):
+    def test_command_not_found_is_plain_nonzero_signal(self):
         err = "bash: line 1: frobnicate: command not found\n"
         with mock.patch.object(remote, "_run_local", return_value=(127, "", err, False)):
             env = _payload(remote.rexec({"host": "box", "command": "frobnicate"}, self.ctx))
@@ -881,16 +914,18 @@ class TestToolPlumbing(unittest.TestCase):
         self.assertEqual("auth_failed", _payload(result)["outcome"])
 
     def test_sub_second_timeout_never_disables_the_remote_timeout(self):
-        """`timeout ... 0` means NO limit to GNU timeout — never emit a bare 0."""
+        """A sub-second bound must floor to 1s, not degrade to "no limit"."""
         captured = {}
 
         def fake_run(argv, stdin_data, timeout_s):
             captured["argv"] = argv
+            captured["stdin"] = stdin_data
             return 124, "", "", True
 
         with mock.patch.object(remote, "_run_local", fake_run):
             result = remote.rexec({"host": "box", "command": "true", "timeout_s": 0.4}, self.ctx)
-        self.assertEqual(["timeout", "-k", "5", "1", "bash", "-l", "-s"], captured["argv"][-7:])
+        self.assertEqual(["bash", "-s"], captured["argv"][-2:])
+        self.assertIn("sleep 1\n", captured["stdin"])
         # The envelope reports the bound that was actually applied, not the
         # sub-second value that would have meant "no limit".
         self.assertEqual(1, _payload(result)["timeout_s"])
@@ -900,6 +935,209 @@ class TestToolPlumbing(unittest.TestCase):
             env = _payload(remote.rexec({"host": "box", "command": "x", "detach": True}, self.ctx))
         self.assertTrue(env["log_path"].startswith("~/.cache/fir/rjobs/"), env["log_path"])
         self.assertNotIn("$HOME", env["log_path"])
+
+
+class TestTimeoutWrapper(unittest.TestCase):
+    """The portable remote bound — what replaced GNU `timeout -k`."""
+
+    def setUp(self):
+        self.wrapper = remote._timeout_wrapper("echo hi\n", 30, grace=5)
+
+    def test_invokes_no_timeout_binary(self):
+        """The whole point: macOS has no `timeout`, and Homebrew calls it gtimeout."""
+        self.assertNotIn("timeout -k", self.wrapper)
+        self.assertNotIn("gtimeout", self.wrapper)
+
+    def test_runs_the_staged_script_under_a_login_shell(self):
+        self.assertIn('bash -l "$__fir_t"', self.wrapper)
+        self.assertIn("echo hi\n", remote._timeout_wrapper("echo hi\n", 5))
+
+    def test_user_text_is_never_re_split_by_a_shell(self):
+        hostile = "echo \"it's\" $HOME `id` \\; # 'unbalanced\n"
+        wrapper = remote._timeout_wrapper(hostile, 5)
+        self.assertIn(hostile, wrapper)
+
+    def test_children_read_from_devnull_so_they_cannot_eat_the_payload(self):
+        """The wrapper's own script is still arriving on stdin as it forks."""
+        self.assertIn('bash -l "$__fir_t" </dev/null', self.wrapper)
+        self.assertIn("} </dev/null 2>/dev/null &", self.wrapper)
+
+    def test_watchdog_signals_the_group_term_then_kill_after_grace(self):
+        self.assertIn("set -m", self.wrapper)
+        self.assertIn("  sleep 30\n", self.wrapper)
+        self.assertIn('kill -TERM -"$__fir_c" || kill -TERM "$__fir_c"', self.wrapper)
+        self.assertIn('kill -KILL -"$__fir_c" || kill -KILL "$__fir_c"', self.wrapper)
+        self.assertLess(self.wrapper.index("kill -TERM -"), self.wrapper.index("kill -KILL -"))
+
+    def test_expiry_reports_124(self):
+        self.assertIn("__fir_rc=124", self.wrapper)
+
+    def test_a_signal_at_the_wrapper_is_forwarded_to_the_group(self):
+        """sshd tearing the session down must not orphan the command.
+
+        This is *not* the local-timeout case: when the local side gives up,
+        the remote wrapper is usually never signalled (no pty means no HUP,
+        and the ssh mux holds the channel open), and the watchdog is what
+        bounds it — exactly as GNU `timeout` behaved.
+        """
+        self.assertIn("trap __fir_abort TERM HUP INT", self.wrapper)
+        self.assertIn("__fir_abort() {", self.wrapper)
+        self.assertLess(self.wrapper.index("__fir_abort() {"), self.wrapper.index("trap __fir"))
+
+    def test_temp_files_are_cleaned_on_every_exit_path(self):
+        self.assertIn('__fir_cleanup() { rm -f "$__fir_t" "$__fir_k"; }', self.wrapper)
+        # staging failure, abort-by-signal, normal exit
+        self.assertEqual(4, self.wrapper.count("__fir_cleanup"))
+
+    def test_a_short_stage_is_caught_by_an_exact_byte_count(self):
+        """`-s` (non-empty) would happily run a script truncated by ENOSPC."""
+        wrapper = remote._timeout_wrapper("echo hi\n", 30)
+        self.assertIn('__fir_n=$(wc -c < "$__fir_t"', wrapper)
+        self.assertIn('[ "$__fir_n" = "8" ]', wrapper)
+        self.assertIn("refusing to run a truncated script", wrapper)
+
+    def test_byte_count_covers_the_newline_we_append(self):
+        self.assertIn('[ "$__fir_n" = "8" ]', remote._timeout_wrapper("echo hi", 30))
+
+    def test_grace_period_is_the_configured_one(self):
+        self.assertIn("  sleep 5\n", remote._timeout_wrapper("true\n", 30, grace=5))
+        self.assertIn("  sleep 9\n", remote._timeout_wrapper("true\n", 30, grace=9))
+
+
+def _bash() -> str:
+    import shutil
+
+    return shutil.which("bash") or "/bin/bash"
+
+
+class TestWrapperExecution(unittest.TestCase):
+    """Run the wrapper for real under local bash — no ssh, no network.
+
+    This is the honest test of the macOS bug: `timeout` on PATH is poisoned
+    so that any call to it fails loudly, which is exactly what a host without
+    GNU coreutils looks like.
+    """
+
+    def setUp(self):
+        import tempfile
+
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        bindir = os.path.join(self.tmp.name, "bin")
+        os.makedirs(bindir)
+        for name in ("timeout", "gtimeout"):
+            stub = os.path.join(bindir, name)
+            with open(stub, "w") as fh:
+                fh.write("#!/bin/sh\necho 'poisoned: no GNU timeout here' >&2\nexit 127\n")
+            os.chmod(stub, 0o700)
+        self.env = dict(os.environ)
+        self.env["PATH"] = bindir + os.pathsep + self.env.get("PATH", "")
+        self.env["TMPDIR"] = self.tmp.name
+
+    def _run(self, script, timeout_s, grace=1, local_timeout=60):
+        payload = remote._timeout_wrapper(script, timeout_s, grace=grace)
+        with mock.patch.dict(os.environ, self.env, clear=True):
+            return remote._run_local([_bash(), "-s"], payload, local_timeout)
+
+    def test_normal_command_works_on_a_host_without_gnu_timeout(self):
+        rc, out, err, timed_out = self._run("echo hello\necho oops >&2\n", 30)
+        self.assertEqual(0, rc, err)
+        self.assertFalse(timed_out)
+        self.assertIn("hello", out)
+        self.assertIn("oops", err)
+        self.assertNotIn("poisoned", err)
+
+    def test_login_shell_semantics_are_preserved(self):
+        rc, out, _err, _t = self._run("shopt -q login_shell && echo login-shell\n", 30)
+        self.assertEqual(0, rc)
+        self.assertIn("login-shell", out)
+
+    def test_exit_code_is_the_commands_own(self):
+        rc, _out, _err, _t = self._run("exit 7\n", 30)
+        self.assertEqual(7, rc)
+
+    def test_death_by_signal_keeps_128_plus_signal(self):
+        rc, _out, _err, _t = self._run("kill -9 $$\n", 30)
+        self.assertEqual(137, rc)
+
+    def test_staged_script_is_removed_afterwards(self):
+        self._run("true\n", 30)
+        leftover = [n for n in os.listdir(self.tmp.name) if n.startswith("fir-remote.")]
+        self.assertEqual([], leftover)
+
+    def test_a_truncated_stage_refuses_to_run_the_script(self):
+        """ENOSPC mid-heredoc leaves a partial script — the dangerous kind."""
+        payload = remote._timeout_wrapper("echo SHOULD-NOT-RUN\n", 30, grace=1)
+        count = str(len("echo SHOULD-NOT-RUN\n"))
+        self.assertIn(f'= "{count}" ]', payload)
+        # Simulate a short write by claiming one more byte than was staged.
+        tampered = payload.replace(f'= "{count}" ]', f'= "{int(count) + 1}" ]')
+        with mock.patch.dict(os.environ, self.env, clear=True):
+            rc, out, err, _t = remote._run_local([_bash(), "-s"], tampered, 30)
+        self.assertEqual(127, rc)
+        self.assertNotIn("SHOULD-NOT-RUN", out)
+        self.assertIn("refusing to run a truncated script", err)
+
+    def test_the_staging_guard_counts_bytes_not_characters(self):
+        script = "echo héllo — ünicode\n"
+        rc, out, _err, _t = self._run(script, 30)
+        self.assertEqual(0, rc)
+        self.assertIn("héllo — ünicode", out)
+
+        script = "sleep 300 &\necho PID:$!\necho partial\necho perr >&2\nsleep 300\n"
+        rc, out, err, _t = self._run(script, 1, grace=1)
+        self.assertEqual(124, rc)
+        self.assertIn("partial", out)
+        self.assertIn("perr", err)
+        # A job-control shell would print "Terminated: 15" into the user's
+        # stderr here; the wrapper hides its own job notices.
+        self.assertNotIn("Terminated", err)
+        pid = int(next(ln for ln in out.splitlines() if ln.startswith("PID:")).split(":")[1])
+        self._assert_gone(pid)
+
+    def test_a_term_at_the_wrapper_kills_the_group_and_exits_124(self):
+        """The trap path: sshd tearing the session down, not a local timeout."""
+        import select
+
+        payload = remote._timeout_wrapper("sleep 300 &\necho PID:$!\nsleep 300\n", 300, grace=1)
+        with mock.patch.dict(os.environ, self.env, clear=True):
+            proc = subprocess.Popen(
+                [_bash(), "-s"],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                start_new_session=True,
+            )
+        self.addCleanup(proc.kill)
+        stdin, stdout, stderr = proc.stdin, proc.stdout, proc.stderr
+        if stdin is None or stdout is None or stderr is None:
+            raise AssertionError("subprocess pipes were not created")
+        self.addCleanup(stderr.close)
+        self.addCleanup(stdout.close)
+        stdin.write(payload)
+        stdin.close()
+        ready, _, _ = select.select([stdout], [], [], 20)
+        self.assertTrue(ready, "wrapper produced no output within 20s")
+        pid = int(stdout.readline().split(":")[1])
+        proc.terminate()  # the wrapper itself, in its own session
+        self.assertEqual(124, proc.wait(timeout=30))
+        self._assert_gone(pid)
+
+    def _assert_gone(self, pid):
+        """A backgrounded grandchild must die with the group, not linger."""
+        import time as _time
+
+        deadline = _time.time() + 20
+        while _time.time() < deadline:
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                return
+            except PermissionError:  # reparented and reused — good enough
+                return
+            _time.sleep(0.02)
+        self.fail(f"pid {pid} survived the timeout kill — orphaned process group")
 
 
 def _localhost_ssh_works() -> bool:

@@ -26,11 +26,15 @@ Transport rules (the whole point — see docs in each builder):
 2. The ssh flags are owned here, not by the model — BatchMode, ConnectTimeout,
    ServerAliveInterval, and a ControlMaster mux socket so repeated calls skip
    the 150-500ms handshake. The mux degrades gracefully when the socket dies.
-3. The remote side runs under GNU ``timeout -k``, which is what makes a
-   runaway command bounded and its process *group* signalled. That is a hard
-   requirement on the remote host (coreutils; present on Linux, absent on a
-   stock macOS/BSD without it) — the wrapper is argv-level, so a host lacking
-   it fails every call with 127. ``_ssh_exec`` recognises that and says so.
+3. The remote side is bounded by a **self-contained bash wrapper** shipped in
+   the same stdin payload (``_timeout_wrapper``), not by GNU ``timeout``.
+   macOS has no ``timeout`` binary (coreutils-only, and Homebrew names it
+   ``gtimeout``), so an argv-level ``timeout -k N`` made every call to every
+   Mac fail with 127. The wrapper reproduces what ``timeout -k`` gave us —
+   the command runs in its own process *group* (``set -m``), a watchdog
+   signals the whole group TERM-then-KILL, and expiry exits 124 — using
+   nothing but bash builtins, ``mktemp`` and ``sleep``. No probing, no extra
+   round trip, no per-host shim to install.
 4. Host configuration lives in ``~/.ssh/config``. There is no fir-side host
    registry; the tools accept whatever ``ssh`` accepts.
 
@@ -41,7 +45,6 @@ a bare string and never empty-on-failure: an empty tool result serialises to
 
 from __future__ import annotations
 
-import base64
 import concurrent.futures
 import glob
 import hashlib
@@ -75,22 +78,20 @@ _HEAD_FRACTION = 0.6
 _RJOBS_DISPLAY = "~/.cache/fir/rjobs"
 _RJOBS_DIR = "$HOME" + _RJOBS_DISPLAY[1:]
 
-#: Grace period between TERM and KILL for the remote ``timeout`` wrapper.
+#: Grace period between TERM and KILL for the remote timeout wrapper.
 _TIMEOUT_KILL_GRACE = 5
 
 #: Extra seconds the local subprocess timeout gets over the remote one, so the
-#: remote ``timeout`` normally wins and we can report a clean exit code 124.
+#: remote wrapper normally wins and we can report a clean exit code 124.
 _LOCAL_TIMEOUT_SLACK = 15
 
 #: Sentinel exit codes emitted by our own remote preamble scripts.
 _RC_NO_TMUX = 97
 _RC_NO_JOB = 96
 
-#: GNU ``timeout`` reports this when it had to kill the command.
+#: GNU ``timeout`` reports this when it had to kill the command; our own
+#: portable wrapper reproduces it so the outcome mapping is unchanged.
 _RC_TIMEOUT = 124
-
-#: POSIX shells report this when the command does not exist.
-_RC_NOT_FOUND = 127
 
 #: ControlMaster socket template. ``%C`` is ssh's hash of the connection.
 _CONTROL_PATH = "~/.ssh/fir-cm-%C"
@@ -220,15 +221,125 @@ def _build_script(command: str, cwd: str | None = None) -> str:
     return preamble + command + "\n"
 
 
-def _b64(text: str) -> str:
-    """Base64 of *text* — the only safe way to carry arbitrary bytes through
-    a shell without inventing a heredoc delimiter that might collide."""
-    return base64.b64encode(text.encode("utf-8")).decode("ascii")
+def _heredoc_delimiter(content: str) -> str:
+    """A delimiter guaranteed not to appear as a line of *content*.
+
+    A heredoc ends at a line consisting solely of the delimiter, so the only
+    way to corrupt the payload is a collision. Rather than trust 64 random
+    bits, we check and re-roll — the guarantee becomes deterministic, which
+    is what lets us ship arbitrary user text with no escaping at all.
+    """
+    lines = {line.strip() for line in content.splitlines()}
+    while True:
+        delim = "FIR_EOF_" + secrets.token_hex(8)
+        if delim not in lines:
+            return delim
 
 
 def _write_file_cmd(path_expr: str, content: str) -> str:
-    """Shell fragment writing *content* to *path_expr* with zero quoting risk."""
-    return f"printf %s {_b64(content)} | base64 -d > {path_expr}"
+    """Shell fragment writing *content* to *path_expr* with zero quoting risk.
+
+    A **quoted** heredoc (``<<'DELIM'``) disables every expansion, so the
+    bytes land verbatim: no shell re-splitting, no ``$var`` interpolation, no
+    backslash mangling. Deliberately not base64 — ``base64 -d`` is spelled
+    ``-D`` on older macOS, and this has to work on the hosts that lack GNU
+    coreutils in the first place.
+    """
+    delim = _heredoc_delimiter(content)
+    body = content if content.endswith("\n") else content + "\n"
+    return f"cat > {path_expr} <<'{delim}'\n{body}{delim}"
+
+
+def _timeout_wrapper(script: str, timeout_s: float, grace: int = _TIMEOUT_KILL_GRACE) -> str:
+    """Wrap *script* in a portable, self-contained remote timeout harness.
+
+    This is the whole macOS fix. It replaces ``ssh host timeout -k G N bash
+    -l -s`` — which 127s on every host without GNU coreutils — with a payload
+    that needs only bash, ``mktemp`` and ``sleep``. The remote argv shrinks to
+    ``bash -s``, so nothing depends on the login shell (zsh on macOS) either.
+
+    The guarantees it has to reproduce, and how:
+
+    * **user text is never re-interpreted** — the script is staged to a temp
+      file through a quoted heredoc inside the same stdin stream;
+    * **login shell** — it is then run as ``bash -l <file>``, so ``/etc/profile``
+      and ``~/.bash_profile`` still put ``~/.local/bin`` on PATH;
+    * **process group** — ``set -m`` (job control, identical in bash 3.2 and
+      5.x) makes the child a group leader, so the watchdog can signal the
+      *group* and leave no orphans. The ``|| kill <pid>`` fallbacks cover a
+      bash built without job control;
+    * **TERM then KILL** — the watchdog touches a flag, TERMs the group,
+      waits *grace*, then KILLs it;
+    * **exit 124 on expiry**, and otherwise the child's own status —
+      including 128+signal when it dies by a signal of its own;
+    * **no orphan when the wrapper itself is signalled** — a TERM/HUP/INT
+      delivered to the wrapper (sshd tearing the session down, someone
+      killing it) is forwarded to the group, which GNU ``timeout`` also did
+      and a naive backgrounding job would not. Note what this does *not*
+      cover: when the local side gives up first (``_LOCAL_TIMEOUT_SLACK``)
+      the remote process is usually never signalled at all — without a pty
+      sshd sends no HUP, and the ControlMaster mux keeps the channel open —
+      so the watchdog is the real backstop there, bounded by ``timeout_s``.
+      GNU ``timeout`` behaved identically; it could not see a dead client
+      either;
+    * **the temp files are removed on every exit path**, and a stage that
+      lands short of its exact byte count (ENOSPC mid-heredoc) refuses to run
+      rather than execute a truncated script.
+
+    Two deliberate design notes. Children get ``</dev/null`` because the
+    wrapper's *own* script is still arriving on stdin — a child inheriting it
+    would eat the rest of the wrapper. And the wrapper's stderr is swapped to
+    ``/dev/null`` before ``wait`` (the child keeps the real one on fd 3),
+    because a job-control shell otherwise prints ``Terminated: 15`` job
+    notices into the user's stderr on every timeout.
+
+    Known race, shared with GNU ``timeout``: a command that exits in the same
+    instant the watchdog fires is reported as a timeout.
+    """
+    seconds = max(1, int(timeout_s))
+    body = script if script.endswith("\n") else script + "\n"
+    # Exact byte count, not merely non-empty: a heredoc that hits ENOSPC
+    # mid-write leaves a *truncated* script, and a truncated script is the
+    # dangerous kind of partial — `rm -rf /a/b` cut down to `rm -rf /a`.
+    staged_bytes = len(body.encode("utf-8"))
+    return (
+        "# fir remote.py — portable timeout wrapper; needs no GNU `timeout`\n"
+        "exec 3>&2\n"
+        '__fir_t=$(mktemp "${TMPDIR:-/tmp}/fir-remote.XXXXXX") || exit 127\n'
+        '__fir_k="$__fir_t.killed"\n'
+        '__fir_cleanup() { rm -f "$__fir_t" "$__fir_k"; }\n'
+        "__fir_abort() {\n"
+        '  kill -TERM -"$__fir_w" 2>/dev/null || kill -TERM "$__fir_w" 2>/dev/null\n'
+        '  kill -TERM -"$__fir_c" 2>/dev/null || kill -TERM "$__fir_c" 2>/dev/null\n'
+        f"  sleep {grace}\n"
+        '  kill -KILL -"$__fir_c" 2>/dev/null || kill -KILL "$__fir_c" 2>/dev/null\n'
+        "  __fir_cleanup\n"
+        f"  exit {_RC_TIMEOUT}\n"
+        "}\n" + _write_file_cmd('"$__fir_t"', script) + "\n"
+        f'__fir_n=$(wc -c < "$__fir_t" 2>/dev/null | tr -cd \'0-9\')\n'
+        f'[ "$__fir_n" = "{staged_bytes}" ] || {{ echo "fir remote: staged only'
+        f" $__fir_n of {staged_bytes} script bytes - refusing to run a truncated"
+        ' script" >&3; __fir_cleanup; exit 127; }\n'
+        "set -m\n"
+        'bash -l "$__fir_t" </dev/null 2>&3 &\n'
+        "__fir_c=$!\n"
+        "{\n"
+        f"  sleep {seconds}\n"
+        '  : > "$__fir_k"\n'
+        '  kill -TERM -"$__fir_c" || kill -TERM "$__fir_c"\n'
+        f"  sleep {grace}\n"
+        '  kill -KILL -"$__fir_c" || kill -KILL "$__fir_c"\n'
+        "} </dev/null 2>/dev/null &\n"
+        "__fir_w=$!\n"
+        "trap __fir_abort TERM HUP INT\n"
+        "exec 2>/dev/null\n"
+        'wait "$__fir_c"\n'
+        "__fir_rc=$?\n"
+        'kill -TERM -"$__fir_w" || kill -TERM "$__fir_w"\n'
+        f'[ -f "$__fir_k" ] && __fir_rc={_RC_TIMEOUT}\n'
+        "__fir_cleanup\n"
+        'exit "$__fir_rc"\n'
+    )
 
 
 def _num(params: dict, key: str, default: float, tool: str) -> float:
@@ -260,13 +371,20 @@ def _is_safe_job_id(job_id: str) -> bool:
 def _detach_script(job_id: str, command: str, cwd: str | None, host: str) -> str:
     """Outer script that stages and launches a detached remote job.
 
-    The launched job must survive the ssh channel closing. Two things matter:
+    The launched job must survive the ssh channel closing. Three tiers:
 
     * ``systemd-run --user --collect`` is the good path — the job gets its own
       transient unit, reaped on exit.
-    * The fallback must *double-fork*: a plain ``setsid nohup ... &`` launched
-      from a tool call still shares the foreground process group's fate on
-      some hosts. ``( setsid ... & ) &`` detaches session *and* parentage.
+    * ``setsid`` next, where it exists (Linux/util-linux).
+    * macOS has neither, so the last tier is ``set -m`` + ``nohup``: job
+      control gives the runner its own process group (which is what
+      ``rjob kill``'s ``kill -TERM -$PID`` needs, since the runner records its
+      own ``$$`` as the group leader) and ``nohup`` shields it from the HUP
+      that arrives when the ssh session goes away.
+
+    Every tier **double-forks** — ``( ... & ) &`` — because a plain background
+    launch from a tool call still shares the foreground group's fate on some
+    hosts; this detaches parentage as well.
 
     Either way stdout/stderr go to a file, not to the ssh channel — otherwise
     ssh would block waiting for EOF on an inherited pipe and ``detach`` would
@@ -313,9 +431,15 @@ def _detach_script(job_id: str, command: str, cwd: str | None, host: str) -> str
         f"systemd-run --user --collect --quiet --unit={job_id} "
         f'-- /bin/bash "$D/{job_id}.runner" >/dev/null 2>&1; then\n'
         f'  echo systemd > "$D/{job_id}.launcher"\n'
-        "else\n"
+        "elif command -v setsid >/dev/null 2>&1; then\n"
         f'  ( setsid /bin/bash "$D/{job_id}.runner" </dev/null >/dev/null 2>&1 & ) &\n'
         f'  echo fork > "$D/{job_id}.launcher"\n'
+        "else\n"
+        # macOS has no setsid. `set -m` in the subshell is what gives the
+        # runner its own process group, so `rjob kill` can still signal the
+        # group rather than just the runner.
+        f'  ( set -m; nohup /bin/bash "$D/{job_id}.runner" </dev/null >/dev/null 2>&1 & ) &\n'
+        f'  echo nohup > "$D/{job_id}.launcher"\n'
         "fi\n"
         f'cat "$D/{job_id}.launcher"\n'
     )
@@ -492,22 +616,6 @@ def _run_local(argv: list[str], stdin_data: str | None, timeout_s: float):
         return _RC_TIMEOUT, out or "", err or "", True
 
 
-def _missing_remote_timeout(rc: int, err: str) -> bool:
-    """Report whether the remote host simply has no GNU ``timeout``.
-
-    Every call runs under an argv-level ``timeout -k`` wrapper, so a host
-    without coreutils fails *all* of them with 127 — which otherwise reads as
-    the user's own command not existing. The remote login shell decides the
-    wording, and they disagree: bash says ``bash: timeout: command not
-    found``, zsh says ``zsh:1: command not found: timeout``. Match on the
-    pieces all of them share rather than on one shell's word order.
-    """
-    if rc != _RC_NOT_FOUND:
-        return False
-    low = err.lower()
-    return "timeout" in low and "not found" in low
-
-
 def _ssh_exec(
     host: str,
     script: str,
@@ -517,20 +625,22 @@ def _ssh_exec(
 ) -> dict[str, Any]:
     """Ship *script* to *host* over ssh stdin and return a full envelope.
 
-    The remote side runs under ``timeout -k``, which puts the command in its
-    own process group and signals the *group* — so a timed-out command does
-    not leave orphans behind. The local timeout is deliberately looser so the
-    remote one normally wins and we can report the clean 124.
+    The script travels inside ``_timeout_wrapper``, which bounds it on the
+    remote side and signals its whole process *group* on expiry — so a
+    timed-out command leaves no orphans, and no GNU ``timeout`` binary has to
+    exist over there. The local timeout is deliberately looser so the remote
+    wrapper normally wins and we can report the clean 124.
     """
     reused = _connection_reused(host)
-    # GNU timeout reads a duration of 0 as "no limit", so a sub-second
-    # timeout_s must floor to 1 rather than silently disabling the bound.
-    remote_seconds = str(max(1, int(timeout_s)))
-    argv = _ssh_argv(
-        host, ["timeout", "-k", str(_TIMEOUT_KILL_GRACE), remote_seconds, "bash", "-l", "-s"]
-    )
+    # A sub-second timeout_s must still bound the command: the wrapper floors
+    # it to one second rather than degrade to "no limit".
+    remote_seconds = max(1, int(timeout_s))
+    payload = _timeout_wrapper(script, remote_seconds)
+    # Just `bash -s`: the remote login shell (zsh on macOS) only has to find
+    # bash, and the wrapper — not an argv-level binary — provides the bound.
+    argv = _ssh_argv(host, ["bash", "-s"])
     started = time.time()
-    rc, out, err, local_timed_out = _run_local(argv, script, timeout_s + _LOCAL_TIMEOUT_SLACK)
+    rc, out, err, local_timed_out = _run_local(argv, payload, timeout_s + _LOCAL_TIMEOUT_SLACK)
     duration_ms = int((time.time() - started) * 1000)
 
     extra: dict[str, Any] = {}
@@ -541,14 +651,9 @@ def _ssh_exec(
         )
         # The *effective* bound, i.e. after the floor-to-1 clamp — reporting
         # the raw request would tell the model a limit that was not applied.
-        extra["timeout_s"] = int(remote_seconds)
+        extra["timeout_s"] = remote_seconds
     else:
         outcome = _classify(rc, err)
-        if outcome == _OUTCOME_NONZERO and _missing_remote_timeout(rc, err):
-            # The timeout wrapper is argv-level, so a remote host without GNU
-            # coreutils fails every call here — and 127 with a bare
-            # "command not found" reads as the user's command failing.
-            extra["hint"] = "remote host lacks GNU `timeout` (coreutils); install it there"
     return _envelope(
         outcome,
         host,
@@ -783,9 +888,10 @@ _REXEC_DESCRIPTION = (
     "(explicitly 0 when empty — success with no output is signal, not "
     "silence), duration_ms, connect_reused.\n\n"
     "detach=True returns a job_id immediately and runs the command under a "
-    "transient systemd unit (or a double-forked setsid) on the remote box, "
-    "with output and exit code landing in files there. Poll it with `rjob`. "
-    "Use detach for anything longer than a couple of minutes.\n\n" + _BOUNDARY_NOTE
+    "transient systemd unit (or a detached, double-forked process group) on "
+    "the remote box, with output and exit code landing in files there. Poll "
+    "it with `rjob`. Use detach for anything longer than a couple of "
+    "minutes.\n\n" + _BOUNDARY_NOTE
 )
 
 _REXEC_PARAMETERS: dict[str, Any] = {
