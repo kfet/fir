@@ -26,15 +26,18 @@ Transport rules (the whole point — see docs in each builder):
 2. The ssh flags are owned here, not by the model — BatchMode, ConnectTimeout,
    ServerAliveInterval, and a ControlMaster mux socket so repeated calls skip
    the 150-500ms handshake. The mux degrades gracefully when the socket dies.
-3. The remote side is bounded by a **self-contained bash wrapper** shipped in
-   the same stdin payload (``_timeout_wrapper``), not by GNU ``timeout``.
-   macOS has no ``timeout`` binary (coreutils-only, and Homebrew names it
-   ``gtimeout``), so an argv-level ``timeout -k N`` made every call to every
-   Mac fail with 127. The wrapper reproduces what ``timeout -k`` gave us —
-   the command runs in its own process *group* (``set -m``), a watchdog
-   signals the whole group TERM-then-KILL, and expiry exits 124 — using
-   nothing but bash builtins, ``mktemp`` and ``sleep``. No probing, no extra
-   round trip, no per-host shim to install.
+3. The remote side is bounded by a **one-line bash supervisor passed as the
+   ssh command**, not by GNU ``timeout``. macOS has no ``timeout`` binary
+   (coreutils-only, and Homebrew names it ``gtimeout``), so an argv-level
+   ``timeout -k N`` made every call to every Mac fail with 127. The
+   supervisor (``_REMOTE_SUPERVISOR``) backgrounds ``bash -l -s`` under job
+   control so it leads its own process *group* and — because job control
+   also stops the shell from redirecting an async command's stdin to
+   /dev/null — still reads the user's script straight off the ssh channel.
+   A watchdog signals the group TERM-then-KILL; expiry reports 124. Nothing
+   is staged, nothing is encoded, and it needs only bash and ``sleep``.
+   Because the child reads stdin from a background process group, ``-T`` is
+   not optional: with a tty that read takes SIGTTIN and nothing runs.
 4. Host configuration lives in ``~/.ssh/config``. There is no fir-side host
    registry; the tools accept whatever ``ssh`` accepts.
 
@@ -129,6 +132,10 @@ def _ssh_flags() -> list[str]:
     ConnectTimeout bounds an unreachable host; ServerAliveInterval kills a
     silently dropped Tailscale link; the ControlMaster trio reuses one TCP +
     crypto handshake across the many small calls this extension encourages.
+
+    Deliberately no ``-T`` here: these flags are shared with scp, where ``-T``
+    is an entirely different option that disables remote filename checking.
+    ssh's tty suppression belongs to ``_ssh_argv``.
     """
     return [
         "-o",
@@ -158,13 +165,116 @@ def _ssh_argv(host: str, remote_argv: list[str]) -> list[str]:
     *remote_argv* is passed after ``--`` so a host name that looks like a flag
     cannot be misparsed. Note the caller never embeds a shell command here —
     the script travels on stdin.
+
+    ``-T`` is load-bearing, not cosmetic: ``_REMOTE_SUPERVISOR`` runs the
+    user's script as a background job so it leads its own process group, and a
+    background job reading from a *tty* takes SIGTTIN and stops. Against a host
+    with ``RequestTTY yes`` (or under ``-tt``) the call otherwise returns 149
+    having run nothing — measured, not theorised. A command-line ``-T`` beats
+    the config, so the child's stdin is always a pipe.
     """
-    return ["ssh", *_ssh_flags(), host, "--", *remote_argv]
+    return ["ssh", "-T", *_ssh_flags(), host, "--", *remote_argv]
 
 
 def _scp_argv(sources: list[str], dest: str) -> list[str]:
     """scp argv sharing the same connection flags (and hence the same mux)."""
     return ["scp", *_ssh_flags(), "-p", "-r", *sources, dest]
+
+
+#: The remote bound, as **one line** of bash run as the ssh command. This is
+#: what replaced ``timeout -k <grace> <secs> bash -l -s``, which 127'd on every
+#: host without GNU coreutils — i.e. every Mac.
+#:
+#: How it keeps each guarantee ``timeout -k`` used to give us:
+#:
+#: * ``set -m`` turns on job control, which does two things at once. The
+#:   obvious one: the backgrounded child becomes a process **group** leader, so
+#:   the watchdog signals the *group* and grandchildren cannot orphan. The
+#:   non-obvious one: POSIX redirects an async command's stdin to /dev/null
+#:   *only when job control is off*, so with ``set -m`` the child keeps the ssh
+#:   channel and reads the user's script directly — no staging, no temp file,
+#:   no encoding. That is why the user's script still arrives verbatim on
+#:   stdin, exactly as it did before this bound existed.
+#: * The watchdog sleeps, TERMs the group, waits the grace, then KILLs it. It
+#:   runs under job control too, so killing *its* group takes its ``sleep``
+#:   with it.
+#: * ``$SECONDS`` decides the 124: reaching the bound is the definition of a
+#:   timeout, and it needs no flag file. (A command that exits in the same
+#:   instant is misreported — the identical race GNU ``timeout`` has.)
+#: * The trap forwards a TERM/HUP/INT *delivered to the supervisor* — sshd
+#:   tearing the session down, a manual kill — to the group. It does NOT fire
+#:   when the local side merely gives up: without a pty sshd sends no HUP and
+#:   the ControlMaster mux holds the channel open, so the watchdog is the
+#:   backstop there, bounded by ``timeout_s``. GNU ``timeout`` was no better.
+#: * ``exec 2>/dev/null`` runs *after* the child is forked, so the child keeps
+#:   the real stderr while the supervisor's own job-control chatter
+#:   (``Terminated: 15``) never reaches the user.
+#:
+#: Two hard constraints on the text itself, both load-bearing: **no newline**
+#: and **no single quote**, so that one ``shlex.quote`` makes it survive being
+#: re-parsed by whatever login shell the host has — zsh on macOS, even csh.
+#: The bound and the grace arrive as positional parameters, so this string is
+#: a constant: there is exactly one quoting question and it is answered once.
+def _oneline(statements: list[str]) -> str:
+    """Join shell statements onto one line, respecting ``&`` as a terminator.
+
+    A naive ``"; ".join`` emits ``cmd &;`` — a syntax error, because ``&``
+    already terminates the statement. Getting this wrong fails every call, so
+    the rule lives here rather than in the reader's head.
+    """
+    return " ".join(st if st.endswith("&") else st + ";" for st in (s.strip() for s in statements))
+
+
+_REMOTE_SUPERVISOR = _oneline(
+    [
+        "__fir_n=$1",
+        "__fir_g=$2",
+        "set -m",
+        # Forked before `exec 2>/dev/null`, so it inherits the real stderr.
+        "bash -l -s &",
+        "__fir_c=$!",
+        "{ sleep $__fir_n"
+        "; kill -TERM -$__fir_c 2>/dev/null || kill -TERM $__fir_c 2>/dev/null"
+        "; sleep $__fir_g"
+        "; kill -KILL -$__fir_c 2>/dev/null || kill -KILL $__fir_c 2>/dev/null"
+        "; } </dev/null 2>/dev/null &",
+        "__fir_w=$!",
+        # $1/$2 inside a function are the *function's* args, hence __fir_g.
+        "__fir_abort() { kill -TERM -$__fir_w 2>/dev/null"
+        "; kill -TERM -$__fir_c 2>/dev/null || kill -TERM $__fir_c 2>/dev/null"
+        "; sleep $__fir_g"
+        "; kill -KILL -$__fir_c 2>/dev/null || kill -KILL $__fir_c 2>/dev/null"
+        f"; exit {_RC_TIMEOUT}; }}",
+        "trap __fir_abort TERM HUP INT",
+        "exec 2>/dev/null",
+        "wait $__fir_c",
+        "__fir_rc=$?",
+        # Sampled before the kill so a slow signal cannot invent a timeout.
+        "__fir_e=$SECONDS",
+        "kill -TERM -$__fir_w 2>/dev/null || kill -TERM $__fir_w 2>/dev/null",
+        f"[ $__fir_e -ge $__fir_n ] && __fir_rc={_RC_TIMEOUT}",
+        "exit $__fir_rc",
+    ]
+)
+
+
+def _supervisor_argv(seconds: int, grace: int) -> list[str]:
+    """Remote argv running the user's stdin script under the bound.
+
+    ``shlex.quote`` here is deliberate and load-bearing: ssh joins its argv
+    with spaces and the *remote* login shell re-splits the result, so the
+    supervisor has to arrive already quoted for one round of shell parsing.
+    This is the one place in the extension where a quote is written on
+    purpose — and it wraps a constant, never user text.
+    """
+    return [
+        "bash",
+        "-c",
+        shlex.quote(_REMOTE_SUPERVISOR),
+        "fir-remote",
+        str(seconds),
+        str(grace),
+    ]
 
 
 # Cache of host -> resolved ControlPath, so reuse detection costs one cheap
@@ -248,98 +358,6 @@ def _write_file_cmd(path_expr: str, content: str) -> str:
     delim = _heredoc_delimiter(content)
     body = content if content.endswith("\n") else content + "\n"
     return f"cat > {path_expr} <<'{delim}'\n{body}{delim}"
-
-
-def _timeout_wrapper(script: str, timeout_s: float, grace: int = _TIMEOUT_KILL_GRACE) -> str:
-    """Wrap *script* in a portable, self-contained remote timeout harness.
-
-    This is the whole macOS fix. It replaces ``ssh host timeout -k G N bash
-    -l -s`` — which 127s on every host without GNU coreutils — with a payload
-    that needs only bash, ``mktemp`` and ``sleep``. The remote argv shrinks to
-    ``bash -s``, so nothing depends on the login shell (zsh on macOS) either.
-
-    The guarantees it has to reproduce, and how:
-
-    * **user text is never re-interpreted** — the script is staged to a temp
-      file through a quoted heredoc inside the same stdin stream;
-    * **login shell** — it is then run as ``bash -l <file>``, so ``/etc/profile``
-      and ``~/.bash_profile`` still put ``~/.local/bin`` on PATH;
-    * **process group** — ``set -m`` (job control, identical in bash 3.2 and
-      5.x) makes the child a group leader, so the watchdog can signal the
-      *group* and leave no orphans. The ``|| kill <pid>`` fallbacks cover a
-      bash built without job control;
-    * **TERM then KILL** — the watchdog touches a flag, TERMs the group,
-      waits *grace*, then KILLs it;
-    * **exit 124 on expiry**, and otherwise the child's own status —
-      including 128+signal when it dies by a signal of its own;
-    * **no orphan when the wrapper itself is signalled** — a TERM/HUP/INT
-      delivered to the wrapper (sshd tearing the session down, someone
-      killing it) is forwarded to the group, which GNU ``timeout`` also did
-      and a naive backgrounding job would not. Note what this does *not*
-      cover: when the local side gives up first (``_LOCAL_TIMEOUT_SLACK``)
-      the remote process is usually never signalled at all — without a pty
-      sshd sends no HUP, and the ControlMaster mux keeps the channel open —
-      so the watchdog is the real backstop there, bounded by ``timeout_s``.
-      GNU ``timeout`` behaved identically; it could not see a dead client
-      either;
-    * **the temp files are removed on every exit path**, and a stage that
-      lands short of its exact byte count (ENOSPC mid-heredoc) refuses to run
-      rather than execute a truncated script.
-
-    Two deliberate design notes. Children get ``</dev/null`` because the
-    wrapper's *own* script is still arriving on stdin — a child inheriting it
-    would eat the rest of the wrapper. And the wrapper's stderr is swapped to
-    ``/dev/null`` before ``wait`` (the child keeps the real one on fd 3),
-    because a job-control shell otherwise prints ``Terminated: 15`` job
-    notices into the user's stderr on every timeout.
-
-    Known race, shared with GNU ``timeout``: a command that exits in the same
-    instant the watchdog fires is reported as a timeout.
-    """
-    seconds = max(1, int(timeout_s))
-    body = script if script.endswith("\n") else script + "\n"
-    # Exact byte count, not merely non-empty: a heredoc that hits ENOSPC
-    # mid-write leaves a *truncated* script, and a truncated script is the
-    # dangerous kind of partial — `rm -rf /a/b` cut down to `rm -rf /a`.
-    staged_bytes = len(body.encode("utf-8"))
-    return (
-        "# fir remote.py — portable timeout wrapper; needs no GNU `timeout`\n"
-        "exec 3>&2\n"
-        '__fir_t=$(mktemp "${TMPDIR:-/tmp}/fir-remote.XXXXXX") || exit 127\n'
-        '__fir_k="$__fir_t.killed"\n'
-        '__fir_cleanup() { rm -f "$__fir_t" "$__fir_k"; }\n'
-        "__fir_abort() {\n"
-        '  kill -TERM -"$__fir_w" 2>/dev/null || kill -TERM "$__fir_w" 2>/dev/null\n'
-        '  kill -TERM -"$__fir_c" 2>/dev/null || kill -TERM "$__fir_c" 2>/dev/null\n'
-        f"  sleep {grace}\n"
-        '  kill -KILL -"$__fir_c" 2>/dev/null || kill -KILL "$__fir_c" 2>/dev/null\n'
-        "  __fir_cleanup\n"
-        f"  exit {_RC_TIMEOUT}\n"
-        "}\n" + _write_file_cmd('"$__fir_t"', script) + "\n"
-        f'__fir_n=$(wc -c < "$__fir_t" 2>/dev/null | tr -cd \'0-9\')\n'
-        f'[ "$__fir_n" = "{staged_bytes}" ] || {{ echo "fir remote: staged only'
-        f" $__fir_n of {staged_bytes} script bytes - refusing to run a truncated"
-        ' script" >&3; __fir_cleanup; exit 127; }\n'
-        "set -m\n"
-        'bash -l "$__fir_t" </dev/null 2>&3 &\n'
-        "__fir_c=$!\n"
-        "{\n"
-        f"  sleep {seconds}\n"
-        '  : > "$__fir_k"\n'
-        '  kill -TERM -"$__fir_c" || kill -TERM "$__fir_c"\n'
-        f"  sleep {grace}\n"
-        '  kill -KILL -"$__fir_c" || kill -KILL "$__fir_c"\n'
-        "} </dev/null 2>/dev/null &\n"
-        "__fir_w=$!\n"
-        "trap __fir_abort TERM HUP INT\n"
-        "exec 2>/dev/null\n"
-        'wait "$__fir_c"\n'
-        "__fir_rc=$?\n"
-        'kill -TERM -"$__fir_w" || kill -TERM "$__fir_w"\n'
-        f'[ -f "$__fir_k" ] && __fir_rc={_RC_TIMEOUT}\n'
-        "__fir_cleanup\n"
-        'exit "$__fir_rc"\n'
-    )
 
 
 def _num(params: dict, key: str, default: float, tool: str) -> float:
@@ -625,22 +643,20 @@ def _ssh_exec(
 ) -> dict[str, Any]:
     """Ship *script* to *host* over ssh stdin and return a full envelope.
 
-    The script travels inside ``_timeout_wrapper``, which bounds it on the
-    remote side and signals its whole process *group* on expiry — so a
-    timed-out command leaves no orphans, and no GNU ``timeout`` binary has to
-    exist over there. The local timeout is deliberately looser so the remote
-    wrapper normally wins and we can report the clean 124.
+    The script goes on stdin **verbatim** — no framing, no encoding — and is
+    read there by the ``bash -l -s`` that ``_REMOTE_SUPERVISOR`` backgrounds.
+    The supervisor bounds it and signals its whole process *group* on expiry,
+    so a timed-out command leaves no orphans and no GNU ``timeout`` binary has
+    to exist over there. The local timeout is deliberately looser so the
+    remote bound normally wins and we can report the clean 124.
     """
     reused = _connection_reused(host)
-    # A sub-second timeout_s must still bound the command: the wrapper floors
-    # it to one second rather than degrade to "no limit".
+    # A sub-second timeout_s must still bound the command: floor it to one
+    # second rather than degrade to "no limit".
     remote_seconds = max(1, int(timeout_s))
-    payload = _timeout_wrapper(script, remote_seconds)
-    # Just `bash -s`: the remote login shell (zsh on macOS) only has to find
-    # bash, and the wrapper — not an argv-level binary — provides the bound.
-    argv = _ssh_argv(host, ["bash", "-s"])
+    argv = _ssh_argv(host, _supervisor_argv(remote_seconds, _TIMEOUT_KILL_GRACE))
     started = time.time()
-    rc, out, err, local_timed_out = _run_local(argv, payload, timeout_s + _LOCAL_TIMEOUT_SLACK)
+    rc, out, err, local_timed_out = _run_local(argv, script, timeout_s + _LOCAL_TIMEOUT_SLACK)
     duration_ms = int((time.time() - started) * 1000)
 
     extra: dict[str, Any] = {}

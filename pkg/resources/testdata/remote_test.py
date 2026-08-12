@@ -703,12 +703,14 @@ class TestToolPlumbing(unittest.TestCase):
         self.assertEqual("done\n", env["stdout"])
         self.assertEqual(5, env["stdout_bytes"])
         self.assertTrue(env["connect_reused"])
-        self.assertIn("make all", captured["stdin"])
-        # No GNU `timeout` in the argv — the bound now travels inside the
-        # payload, which is what makes a Mac (no coreutils) work at all.
-        self.assertEqual(["bash", "-s"], captured["argv"][-2:])
+        # The user's script is the ENTIRE stdin payload — no framing, no
+        # encoding, byte-for-byte what the caller wrote.
+        self.assertEqual(remote._build_script("make all", None), captured["stdin"])
+        # No GNU `timeout` in the argv — the bound is a bash supervisor, which
+        # is what makes a Mac (no coreutils) work at all.
         self.assertNotIn("timeout", captured["argv"])
-        self.assertIn("sleep 30\n", captured["stdin"])
+        self.assertEqual(["fir-remote", "30", "5"], captured["argv"][-3:])
+        self.assertIn("bash -l -s &", captured["argv"][-4])
         self.assertGreater(captured["timeout"], 30)
 
     def test_rexec_nonzero_is_signal_not_an_error(self):
@@ -924,8 +926,7 @@ class TestToolPlumbing(unittest.TestCase):
 
         with mock.patch.object(remote, "_run_local", fake_run):
             result = remote.rexec({"host": "box", "command": "true", "timeout_s": 0.4}, self.ctx)
-        self.assertEqual(["bash", "-s"], captured["argv"][-2:])
-        self.assertIn("sleep 1\n", captured["stdin"])
+        self.assertEqual(["fir-remote", "1", "5"], captured["argv"][-3:])
         # The envelope reports the bound that was actually applied, not the
         # sub-second value that would have meant "no limit".
         self.assertEqual(1, _payload(result)["timeout_s"])
@@ -937,71 +938,116 @@ class TestToolPlumbing(unittest.TestCase):
         self.assertNotIn("$HOME", env["log_path"])
 
 
-class TestTimeoutWrapper(unittest.TestCase):
-    """The portable remote bound — what replaced GNU `timeout -k`."""
+class TestRemoteSupervisor(unittest.TestCase):
+    """The one-line remote bound that replaced GNU `timeout -k`."""
 
     def setUp(self):
-        self.wrapper = remote._timeout_wrapper("echo hi\n", 30, grace=5)
+        self.sup = remote._REMOTE_SUPERVISOR
 
     def test_invokes_no_timeout_binary(self):
-        """The whole point: macOS has no `timeout`, and Homebrew calls it gtimeout."""
-        self.assertNotIn("timeout -k", self.wrapper)
-        self.assertNotIn("gtimeout", self.wrapper)
+        """The whole point: macOS has no `timeout`, Homebrew calls it gtimeout."""
+        self.assertNotIn("timeout", self.sup)
+        self.assertNotIn("gtimeout", self.sup)
 
-    def test_runs_the_staged_script_under_a_login_shell(self):
-        self.assertIn('bash -l "$__fir_t"', self.wrapper)
-        self.assertIn("echo hi\n", remote._timeout_wrapper("echo hi\n", 5))
+    def test_is_one_line_and_free_of_single_quotes(self):
+        """Both are load-bearing: it must survive one pass of ANY login shell.
 
-    def test_user_text_is_never_re_split_by_a_shell(self):
-        hostile = "echo \"it's\" $HOME `id` \\; # 'unbalanced\n"
-        wrapper = remote._timeout_wrapper(hostile, 5)
-        self.assertIn(hostile, wrapper)
+        A newline breaks csh's quoting; a single quote would force shlex into
+        the `'"'"'` seam form, which is exactly the nested-quoting shape this
+        extension exists to never emit.
+        """
+        self.assertNotIn("\n", self.sup)
+        self.assertNotIn("'", self.sup)
 
-    def test_children_read_from_devnull_so_they_cannot_eat_the_payload(self):
-        """The wrapper's own script is still arriving on stdin as it forks."""
-        self.assertIn('bash -l "$__fir_t" </dev/null', self.wrapper)
-        self.assertIn("} </dev/null 2>/dev/null &", self.wrapper)
+    def test_is_valid_bash(self):
+        """A syntax error here fails every call to every host."""
+        proc = subprocess.run(
+            [_bash(), "-n", "-c", self.sup, "fir-remote", "5", "2"],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(0, proc.returncode, proc.stderr)
+
+    def test_ampersand_is_not_followed_by_a_semicolon(self):
+        """`cmd &;` is a syntax error — the joiner has to know that."""
+        self.assertNotIn("&;", self.sup)
+        self.assertEqual("a & b;", remote._oneline(["a &", "b"]))
+
+    def test_reads_the_user_script_from_the_inherited_stdin(self):
+        """No staging: `bash -l -s` reads the ssh channel directly.
+
+        `set -m` is what allows it — POSIX only redirects an async command's
+        stdin to /dev/null when job control is OFF.
+        """
+        self.assertIn("set -m", self.sup)
+        self.assertIn("bash -l -s &", self.sup)
+        self.assertLess(self.sup.index("set -m"), self.sup.index("bash -l -s &"))
+        self.assertNotIn("mktemp", self.sup)
+        self.assertNotIn("cat >", self.sup)
 
     def test_watchdog_signals_the_group_term_then_kill_after_grace(self):
-        self.assertIn("set -m", self.wrapper)
-        self.assertIn("  sleep 30\n", self.wrapper)
-        self.assertIn('kill -TERM -"$__fir_c" || kill -TERM "$__fir_c"', self.wrapper)
-        self.assertIn('kill -KILL -"$__fir_c" || kill -KILL "$__fir_c"', self.wrapper)
-        self.assertLess(self.wrapper.index("kill -TERM -"), self.wrapper.index("kill -KILL -"))
+        self.assertIn("kill -TERM -$__fir_c", self.sup)
+        self.assertIn("kill -KILL -$__fir_c", self.sup)
+        self.assertLess(
+            self.sup.index("kill -TERM -$__fir_c"), self.sup.index("kill -KILL -$__fir_c")
+        )
+        # single-pid fallbacks for a bash built without job control
+        self.assertIn("|| kill -TERM $__fir_c", self.sup)
+        self.assertIn("|| kill -KILL $__fir_c", self.sup)
 
-    def test_expiry_reports_124(self):
-        self.assertIn("__fir_rc=124", self.wrapper)
+    def test_watchdog_runs_detached_from_stdin(self):
+        """Otherwise it competes with the child for the user's script."""
+        self.assertIn("} </dev/null 2>/dev/null &", self.sup)
 
-    def test_a_signal_at_the_wrapper_is_forwarded_to_the_group(self):
+    def test_expiry_is_decided_by_elapsed_seconds_and_reports_124(self):
+        self.assertIn("__fir_e=$SECONDS", self.sup)
+        self.assertIn("[ $__fir_e -ge $__fir_n ] && __fir_rc=124", self.sup)
+
+    def test_elapsed_is_sampled_before_the_watchdog_kill(self):
+        """Sampling after could let a slow signal invent a timeout."""
+        # rindex: the abort handler also kills the watchdog, earlier in the text.
+        self.assertLess(self.sup.index("__fir_e=$SECONDS"), self.sup.rindex("kill -TERM -$__fir_w"))
+
+    def test_a_signal_at_the_supervisor_is_forwarded_to_the_group(self):
         """sshd tearing the session down must not orphan the command.
 
         This is *not* the local-timeout case: when the local side gives up,
-        the remote wrapper is usually never signalled (no pty means no HUP,
-        and the ssh mux holds the channel open), and the watchdog is what
-        bounds it — exactly as GNU `timeout` behaved.
+        the remote is usually never signalled (no pty means no HUP, and the
+        ssh mux holds the channel open), and the watchdog is what bounds it —
+        exactly as GNU `timeout` behaved.
         """
-        self.assertIn("trap __fir_abort TERM HUP INT", self.wrapper)
-        self.assertIn("__fir_abort() {", self.wrapper)
-        self.assertLess(self.wrapper.index("__fir_abort() {"), self.wrapper.index("trap __fir"))
+        self.assertIn("trap __fir_abort TERM HUP INT", self.sup)
+        self.assertLess(self.sup.index("__fir_abort()"), self.sup.index("trap __fir_abort"))
 
-    def test_temp_files_are_cleaned_on_every_exit_path(self):
-        self.assertIn('__fir_cleanup() { rm -f "$__fir_t" "$__fir_k"; }', self.wrapper)
-        # staging failure, abort-by-signal, normal exit
-        self.assertEqual(4, self.wrapper.count("__fir_cleanup"))
+    def test_abort_uses_the_saved_grace_not_a_positional(self):
+        """Inside a function $2 is the *function's* arg — a classic footgun."""
+        abort = self.sup[self.sup.index("__fir_abort()") : self.sup.index("trap __fir_abort")]
+        self.assertIn("sleep $__fir_g", abort)
+        self.assertNotIn("$2", abort)
 
-    def test_a_short_stage_is_caught_by_an_exact_byte_count(self):
-        """`-s` (non-empty) would happily run a script truncated by ENOSPC."""
-        wrapper = remote._timeout_wrapper("echo hi\n", 30)
-        self.assertIn('__fir_n=$(wc -c < "$__fir_t"', wrapper)
-        self.assertIn('[ "$__fir_n" = "8" ]', wrapper)
-        self.assertIn("refusing to run a truncated script", wrapper)
+    def test_child_keeps_the_real_stderr(self):
+        """`exec 2>/dev/null` must come after the fork, or output is lost."""
+        self.assertLess(self.sup.index("bash -l -s &"), self.sup.index("exec 2>/dev/null"))
 
-    def test_byte_count_covers_the_newline_we_append(self):
-        self.assertIn('[ "$__fir_n" = "8" ]', remote._timeout_wrapper("echo hi", 30))
+    def test_argv_carries_the_bound_as_positional_params(self):
+        argv = remote._supervisor_argv(30, 5)
+        self.assertEqual(["bash", "-c"], argv[:2])
+        self.assertEqual(["fir-remote", "30", "5"], argv[3:])
+        self.assertIn("__fir_n=$1", argv[2])
 
-    def test_grace_period_is_the_configured_one(self):
-        self.assertIn("  sleep 5\n", remote._timeout_wrapper("true\n", 30, grace=5))
-        self.assertIn("  sleep 9\n", remote._timeout_wrapper("true\n", 30, grace=9))
+    def test_argv_quotes_the_supervisor_for_the_remote_shell(self):
+        """ssh joins argv with spaces and the remote login shell re-splits."""
+        argv = remote._supervisor_argv(30, 5)
+        self.assertTrue(argv[2].startswith("'") and argv[2].endswith("'"), argv[2][:40])
+        self.assertEqual(remote._REMOTE_SUPERVISOR, argv[2][1:-1])
+
+    def test_ssh_argv_disables_the_tty(self):
+        """A background job reading a tty takes SIGTTIN and runs nothing (149)."""
+        self.assertIn("-T", remote._ssh_argv("box", ["bash"]))
+
+    def test_scp_never_gets_dash_t(self):
+        """scp -T is a different option entirely — it disables name checking."""
+        self.assertNotIn("-T", remote._scp_argv(["a"], "box:b"))
 
 
 def _bash() -> str:
@@ -1010,12 +1056,12 @@ def _bash() -> str:
     return shutil.which("bash") or "/bin/bash"
 
 
-class TestWrapperExecution(unittest.TestCase):
-    """Run the wrapper for real under local bash — no ssh, no network.
+class TestSupervisorExecution(unittest.TestCase):
+    """Run the supervisor for real under local bash — no ssh, no network.
 
-    This is the honest test of the macOS bug: `timeout` on PATH is poisoned
-    so that any call to it fails loudly, which is exactly what a host without
-    GNU coreutils looks like.
+    This is the honest test of the macOS bug: `timeout` on PATH is poisoned so
+    that any call to it fails loudly, which is what a host without GNU
+    coreutils looks like.
     """
 
     def setUp(self):
@@ -1032,12 +1078,17 @@ class TestWrapperExecution(unittest.TestCase):
             os.chmod(stub, 0o700)
         self.env = dict(os.environ)
         self.env["PATH"] = bindir + os.pathsep + self.env.get("PATH", "")
-        self.env["TMPDIR"] = self.tmp.name
+
+    def _argv(self, timeout_s, grace):
+        return [_bash(), *remote._supervisor_argv(timeout_s, grace)[1:]]
 
     def _run(self, script, timeout_s, grace=1, local_timeout=60):
-        payload = remote._timeout_wrapper(script, timeout_s, grace=grace)
+        # argv[2] is quoted for a remote shell; running it locally through
+        # subprocess (no shell) means we pass the unquoted original.
+        argv = self._argv(timeout_s, grace)
+        argv[2] = remote._REMOTE_SUPERVISOR
         with mock.patch.dict(os.environ, self.env, clear=True):
-            return remote._run_local([_bash(), "-s"], payload, local_timeout)
+            return remote._run_local(argv, script, local_timeout)
 
     def test_normal_command_works_on_a_host_without_gnu_timeout(self):
         rc, out, err, timed_out = self._run("echo hello\necho oops >&2\n", 30)
@@ -1052,6 +1103,19 @@ class TestWrapperExecution(unittest.TestCase):
         self.assertEqual(0, rc)
         self.assertIn("login-shell", out)
 
+    def test_dollar_zero_is_unchanged_from_before_the_bound_existed(self):
+        """The script is still the stdin of a `bash -l -s`, not a staged file."""
+        rc, out, _err, _t = self._run('echo "[$0]"\n', 30)
+        self.assertEqual(0, rc)
+        self.assertEqual("[bash]", out.strip())
+
+    def test_hostile_quoting_survives_verbatim(self):
+        script = "echo \"it's fine\"; printf '%s\\n' 'a b'  # 'unbalanced\n"
+        rc, out, _err, _t = self._run(script, 30)
+        self.assertEqual(0, rc)
+        self.assertIn("it's fine", out)
+        self.assertIn("a b", out)
+
     def test_exit_code_is_the_commands_own(self):
         rc, _out, _err, _t = self._run("exit 7\n", 30)
         self.assertEqual(7, rc)
@@ -1060,49 +1124,32 @@ class TestWrapperExecution(unittest.TestCase):
         rc, _out, _err, _t = self._run("kill -9 $$\n", 30)
         self.assertEqual(137, rc)
 
-    def test_staged_script_is_removed_afterwards(self):
+    def test_nothing_is_staged_on_disk(self):
         self._run("true\n", 30)
-        leftover = [n for n in os.listdir(self.tmp.name) if n.startswith("fir-remote.")]
+        leftover = [n for n in os.listdir(self.tmp.name) if n != "bin"]
         self.assertEqual([], leftover)
 
-    def test_a_truncated_stage_refuses_to_run_the_script(self):
-        """ENOSPC mid-heredoc leaves a partial script — the dangerous kind."""
-        payload = remote._timeout_wrapper("echo SHOULD-NOT-RUN\n", 30, grace=1)
-        count = str(len("echo SHOULD-NOT-RUN\n"))
-        self.assertIn(f'= "{count}" ]', payload)
-        # Simulate a short write by claiming one more byte than was staged.
-        tampered = payload.replace(f'= "{count}" ]', f'= "{int(count) + 1}" ]')
-        with mock.patch.dict(os.environ, self.env, clear=True):
-            rc, out, err, _t = remote._run_local([_bash(), "-s"], tampered, 30)
-        self.assertEqual(127, rc)
-        self.assertNotIn("SHOULD-NOT-RUN", out)
-        self.assertIn("refusing to run a truncated script", err)
-
-    def test_the_staging_guard_counts_bytes_not_characters(self):
-        script = "echo héllo — ünicode\n"
-        rc, out, _err, _t = self._run(script, 30)
-        self.assertEqual(0, rc)
-        self.assertIn("héllo — ünicode", out)
-
+    def test_expiry_kills_the_whole_process_group_and_reports_124(self):
         script = "sleep 300 &\necho PID:$!\necho partial\necho perr >&2\nsleep 300\n"
         rc, out, err, _t = self._run(script, 1, grace=1)
         self.assertEqual(124, rc)
         self.assertIn("partial", out)
         self.assertIn("perr", err)
         # A job-control shell would print "Terminated: 15" into the user's
-        # stderr here; the wrapper hides its own job notices.
+        # stderr here; the supervisor hides its own job notices.
         self.assertNotIn("Terminated", err)
         pid = int(next(ln for ln in out.splitlines() if ln.startswith("PID:")).split(":")[1])
         self._assert_gone(pid)
 
-    def test_a_term_at_the_wrapper_kills_the_group_and_exits_124(self):
+    def test_a_term_at_the_supervisor_kills_the_group_and_exits_124(self):
         """The trap path: sshd tearing the session down, not a local timeout."""
         import select
 
-        payload = remote._timeout_wrapper("sleep 300 &\necho PID:$!\nsleep 300\n", 300, grace=1)
+        argv = self._argv(300, 1)
+        argv[2] = remote._REMOTE_SUPERVISOR
         with mock.patch.dict(os.environ, self.env, clear=True):
             proc = subprocess.Popen(
-                [_bash(), "-s"],
+                argv,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -1115,12 +1162,12 @@ class TestWrapperExecution(unittest.TestCase):
             raise AssertionError("subprocess pipes were not created")
         self.addCleanup(stderr.close)
         self.addCleanup(stdout.close)
-        stdin.write(payload)
+        stdin.write("sleep 300 &\necho PID:$!\nsleep 300\n")
         stdin.close()
         ready, _, _ = select.select([stdout], [], [], 20)
-        self.assertTrue(ready, "wrapper produced no output within 20s")
+        self.assertTrue(ready, "supervisor produced no output within 20s")
         pid = int(stdout.readline().split(":")[1])
-        proc.terminate()  # the wrapper itself, in its own session
+        proc.terminate()  # the supervisor itself, in its own session
         self.assertEqual(124, proc.wait(timeout=30))
         self._assert_gone(pid)
 
