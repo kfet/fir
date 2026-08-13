@@ -24,15 +24,28 @@ import (
 
 // inMemoryDial returns a dialFn that connects to a pre-built MCP server via
 // an in-memory transport. The server is started in a background goroutine.
+//
+// Every connection is wrapped in a breakableTransport and registered against
+// the server, so severServerConnections can sever them later. The wrapper is
+// transparent until something actually severs it.
 func inMemoryDial(t *testing.T, server *sdk.Server) func(string, ServerConfig) (sdk.Transport, error) {
 	t.Helper()
+	conns := connsForServer(server)
 	return func(_ string, _ ServerConfig) (sdk.Transport, error) {
 		serverTransport, clientTransport := sdk.NewInMemoryTransports()
 		go func() {
 			_ = server.Run(context.Background(), serverTransport)
 		}()
-		return clientTransport, nil
+		return &breakableTransport{inner: clientTransport, conns: conns}, nil
 	}
+}
+
+// breakableInMemoryDial is inMemoryDial plus the handle that severs every
+// connection it has handed out, for tests that prefer to sever explicitly
+// rather than go through severServerConnections.
+func breakableInMemoryDial(t *testing.T, server *sdk.Server) (func(string, ServerConfig) (sdk.Transport, error), *breakableConns) {
+	t.Helper()
+	return inMemoryDial(t, server), connsForServer(server)
 }
 
 // startAndWait is a test helper that wires OnToolsChanged, calls Start(),
@@ -255,9 +268,7 @@ func TestManager_RootsAdvertised(t *testing.T) {
 	server := sdk.NewServer(&sdk.Implementation{Name: "roots-test", Version: "0"}, nil)
 	server.AddTool(
 		&sdk.Tool{Name: "noop", InputSchema: json.RawMessage(`{"type":"object","properties":{}}`)},
-		func(_ context.Context, _ *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
-			return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: ""}}}, nil
-		},
+		rootsEchoTool,
 	)
 
 	const wantURI = "file:///testroot"
@@ -269,18 +280,12 @@ func TestManager_RootsAdvertised(t *testing.T) {
 	startAndWait(t, mgr, ctx)
 	defer mgr.Close()
 
-	// Retrieve the active server-side session and ask the client for its roots.
-	var ss *sdk.ServerSession
-	for s := range server.Sessions() {
-		ss = s
-		break
-	}
-	require.NotNil(t, ss, "server must have an active session")
-
-	result, err := ss.ListRoots(ctx, nil)
-	require.NoError(t, err)
-	require.Len(t, result.Roots, 1, "expected exactly one root")
-	assert.Equal(t, wantURI, result.Roots[0].URI)
+	// Under protocol 2026-07-28 a server may not initiate roots/list; it must
+	// ask for roots via MRTR (SEP-2322) while serving a tool call. The client
+	// SDK fulfils the request and retries the call transparently.
+	roots := callRootsEcho(t, ctx, mgr)
+	require.Len(t, roots, 1, "expected exactly one root")
+	assert.Equal(t, wantURI, roots[0])
 }
 
 // TestManager_RootsDefaultToCWD verifies that when no roots are configured,
@@ -289,9 +294,7 @@ func TestManager_RootsDefaultToCWD(t *testing.T) {
 	server := sdk.NewServer(&sdk.Implementation{Name: "roots-default", Version: "0"}, nil)
 	server.AddTool(
 		&sdk.Tool{Name: "noop", InputSchema: json.RawMessage(`{"type":"object","properties":{}}`)},
-		func(_ context.Context, _ *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
-			return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: ""}}}, nil
-		},
+		rootsEchoTool,
 	)
 
 	// No roots in config → Manager should default to CWD.
@@ -302,17 +305,9 @@ func TestManager_RootsDefaultToCWD(t *testing.T) {
 	startAndWait(t, mgr, ctx)
 	defer mgr.Close()
 
-	var ss *sdk.ServerSession
-	for s := range server.Sessions() {
-		ss = s
-		break
-	}
-	require.NotNil(t, ss)
-
-	result, err := ss.ListRoots(ctx, nil)
-	require.NoError(t, err)
-	require.Len(t, result.Roots, 1, "expected exactly one default root")
-	assert.True(t, strings.HasPrefix(result.Roots[0].URI, "file:///"), "root URI must be a file:// URI")
+	roots := callRootsEcho(t, ctx, mgr)
+	require.Len(t, roots, 1, "expected exactly one default root")
+	assert.True(t, strings.HasPrefix(roots[0], "file:///"), "root URI must be a file:// URI")
 }
 
 // TestCommandTransport_EnvInheritsParent verifies that commandTransport merges
@@ -355,7 +350,16 @@ func TestCommandTransport_EmptyCommand(t *testing.T) {
 // with the updated aggregate tool list.
 func TestManager_ToolListChanged(t *testing.T) {
 	server := sdk.NewServer(&sdk.Implementation{Name: "test", Version: "0"}, nil)
-	// Server starts with no tools.
+	// The server must expose the "tools" capability at discovery time: under
+	// protocol 2026-07-28 the client opts into change notifications with a
+	// single subscriptions/listen call issued during connect, and the server
+	// only honours subscriptions for capabilities it advertised there.
+	server.AddTool(
+		&sdk.Tool{Name: "first_tool", InputSchema: json.RawMessage(`{"type":"object","properties":{}}`)},
+		func(_ context.Context, _ *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+			return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: "first"}}}, nil
+		},
+	)
 
 	mgr := NewManager(map[string]ServerConfig{"srv": {}}, false)
 	mgr.dialFn = inMemoryDial(t, server)
@@ -367,10 +371,11 @@ func TestManager_ToolListChanged(t *testing.T) {
 
 	mgr.Start(context.Background())
 
-	// Wait for initial connection (server has no tools yet).
+	// Wait for initial connection.
 	select {
 	case tools := <-changed:
-		assert.Empty(t, tools, "expect no tools before any are added (no resources/prompts capability)")
+		require.Len(t, tools, 1)
+		assert.Equal(t, "mcp__srv__first_tool", tools[0].Name)
 	case <-time.After(5 * time.Second):
 		t.Fatal("timeout waiting for initial connection")
 	}
@@ -385,8 +390,9 @@ func TestManager_ToolListChanged(t *testing.T) {
 
 	select {
 	case newTools := <-changed:
-		require.Len(t, newTools, 1) // 1 MCP tool (no resources/prompts capability)
-		assert.Equal(t, "mcp__srv__new_tool", newTools[0].Name)
+		require.Len(t, newTools, 2) // 2 MCP tools (no resources/prompts capability)
+		names := []string{newTools[0].Name, newTools[1].Name}
+		assert.Contains(t, names, "mcp__srv__new_tool")
 	case <-time.After(5 * time.Second):
 		t.Fatal("timeout waiting for tool list change notification")
 	}
@@ -460,10 +466,16 @@ func (h *chanHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
 func (h *chanHandler) WithGroup(string) slog.Handler      { return h }
 
 // TestManager_LoggingHandler verifies that log messages emitted by an MCP
-// server are routed through slog at the correct level. We temporarily replace
-// the default slog logger with a chanHandler, start the manager with
-// verbose=true, then send a warning log from the server session and assert
-// that it arrives in slog with slog.LevelWarn.
+// server are routed through slog at the correct level.
+//
+// The handler is exercised directly rather than over the wire. Protocol
+// version 2026-07-28 deprecated logging (SEP-2577) and made the requested log
+// level a per-request _meta value (io.modelcontextprotocol/logLevel) instead
+// of session state: the go-sdk client does not populate that key, and the
+// legacy logging/setLevel state a server records is reset by the next request
+// on the session. Server-emitted log notifications are therefore not
+// deliverable against a 2026-07-28 server, so only fir-side routing is
+// asserted here.
 func TestManager_LoggingHandler(t *testing.T) {
 	// Capture slog records via a buffered channel.
 	ch := make(chan slog.Record, 10)
@@ -471,55 +483,26 @@ func TestManager_LoggingHandler(t *testing.T) {
 	slog.SetDefault(slog.New(&chanHandler{ch: ch}))
 	t.Cleanup(func() { slog.SetDefault(origLogger) })
 
-	server := sdk.NewServer(&sdk.Implementation{Name: "log-test", Version: "0"}, nil)
-	server.AddTool(
-		&sdk.Tool{Name: "noop", InputSchema: json.RawMessage(`{"type":"object","properties":{}}`)},
-		func(_ context.Context, _ *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
-			return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: ""}}}, nil
-		},
-	)
-
-	// verbose=true → client requests "debug" log level from server.
+	// verbose=true → client requests "debug" log level from servers.
 	mgr := NewManager(map[string]ServerConfig{"s": {}}, true)
-	mgr.dialFn = inMemoryDial(t, server)
+	handler := mgr.clientOptions("s").LoggingMessageHandler
+	require.NotNil(t, handler, "manager must install a logging handler")
 
-	ctx := context.Background()
-	startAndWait(t, mgr, ctx)
-	defer mgr.Close()
+	handler(context.Background(), &sdk.LoggingMessageRequest{
+		Params: &sdk.LoggingMessageParams{
+			Level:  "warning",
+			Logger: "test-logger",
+			Data:   "hello from server",
+		},
+	})
 
-	// Get the server-side session and send a warning log notification to the client.
-	var ss *sdk.ServerSession
-	for s := range server.Sessions() {
-		ss = s
-		break
+	select {
+	case rec := <-ch:
+		assert.Equal(t, slog.LevelWarn, rec.Level, "MCP 'warning' must map to slog.LevelWarn")
+		assert.Equal(t, "MCP server log", rec.Message)
+	case <-time.After(3 * time.Second):
+		t.Fatal("timeout waiting for MCP server log message in slog")
 	}
-	require.NotNil(t, ss, "server must have an active session")
-
-	require.NoError(t, ss.Log(ctx, &sdk.LoggingMessageParams{
-		Level:  "warning",
-		Logger: "test-logger",
-		Data:   "hello from server",
-	}))
-
-	// Wait for the server-log notification to arrive in slog. Other unrelated
-	// records (e.g. a transient "MCP re-list tools error" from startup races
-	// observed under CI load) may arrive on the same channel — skip past them.
-	deadline := time.After(3 * time.Second)
-	var rec slog.Record
-	found := false
-	for !found {
-		select {
-		case rec = <-ch:
-			if rec.Message == "MCP server log" {
-				found = true
-			}
-		case <-deadline:
-			t.Fatal("timeout waiting for MCP server log message in slog")
-		}
-	}
-
-	assert.Equal(t, slog.LevelWarn, rec.Level, "MCP 'warning' must map to slog.LevelWarn")
-	assert.Equal(t, "MCP server log", rec.Message)
 }
 
 // TestManager_LoggingLevelVerbose verifies that loggingLevel() returns "debug"
@@ -806,7 +789,8 @@ func TestManager_OnServerConnecting_InitialAndReconnect(t *testing.T) {
 		})
 
 	mgr := NewManager(map[string]ServerConfig{"srv": {}}, false)
-	mgr.dialFn = inMemoryDial(t, server)
+	dial, conns := breakableInMemoryDial(t, server)
+	mgr.dialFn = dial
 
 	connectingCh, _, _ := drainServerEvents(mgr)
 
@@ -821,15 +805,8 @@ func TestManager_OnServerConnecting_InitialAndReconnect(t *testing.T) {
 		t.Fatal("timeout waiting for initial onServerConnecting")
 	}
 
-	// Force a server-initiated disconnect; reconnect cycle should fire
-	// connecting again.
-	var ss *sdk.ServerSession
-	for s := range server.Sessions() {
-		ss = s
-		break
-	}
-	require.NotNil(t, ss, "server must have an active session")
-	require.NoError(t, ss.Close())
+	// Force a disconnect; the reconnect cycle should fire connecting again.
+	conns.breakAll()
 
 	select {
 	case name := <-connectingCh:
@@ -890,7 +867,15 @@ func TestManager_ServerEvents_BufferedUntilConsumerAttaches(t *testing.T) {
 }
 
 // TestManager_OnServerDisconnected fires the disconnected callback when
-// the server-side session is closed unexpectedly.
+// the connection to the server dies unexpectedly.
+//
+// The stimulus is a severed transport (breakableTransport) rather than
+// ss.Close(): under go-sdk v1.7.0, sdk.ServerSession.Close deadlocks while a
+// SEP-2575 subscriptions/listen stream is in flight, and fir opens one on
+// every connect. See https://github.com/modelcontextprotocol/go-sdk/issues/1160
+// — once that is fixed upstream this can go back to ss.Close(). Severing the
+// connection is an equivalent stimulus for the path under test: fir sees a
+// peer that vanished either way.
 func TestManager_OnServerDisconnected(t *testing.T) {
 	server := sdk.NewServer(&sdk.Implementation{Name: "test", Version: "0"}, nil)
 	server.AddTool(&sdk.Tool{Name: "ping", InputSchema: emptySchema},
@@ -899,9 +884,9 @@ func TestManager_OnServerDisconnected(t *testing.T) {
 		})
 
 	// Succeed once, then fail forever — handleSessionEnd must surface a
-	// non-benign waitErr (the SDK reports the abrupt server-close as such).
+	// non-benign waitErr (the SDK reports the abrupt disconnect as such).
 	var dialCount atomic.Int32
-	realDial := inMemoryDial(t, server)
+	realDial, conns := breakableInMemoryDial(t, server)
 	mgr := NewManager(map[string]ServerConfig{"srv": {}}, false)
 	mgr.dialFn = func(_ string, cfg ServerConfig) (sdk.Transport, error) {
 		if dialCount.Add(1) == 1 {
@@ -915,13 +900,7 @@ func TestManager_OnServerDisconnected(t *testing.T) {
 	startAndWait(t, mgr, context.Background())
 	defer mgr.Close()
 
-	var ss *sdk.ServerSession
-	for s := range server.Sessions() {
-		ss = s
-		break
-	}
-	require.NotNil(t, ss, "server must have an active session")
-	require.NoError(t, ss.Close())
+	conns.breakAll()
 
 	select {
 	case ev := <-discCh:
@@ -934,6 +913,61 @@ func TestManager_OnServerDisconnected(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("timeout waiting for ServerDisconnected event")
 	}
+}
+
+// TestManager_OnServerDisconnected_BenignOnServerShutdown covers the benign
+// half of handleSessionEnd: when a session ends WITHOUT a fault (session.Wait()
+// returns nil, as it does after an orderly server-side close), fir must surface
+// the disconnect event with no error attached — the server simply went away,
+// the user did not lose anything to a fault.
+//
+// handleSessionEnd is invoked directly rather than over the wire. Under go-sdk
+// v1.7.0 there is NO way to shut a server down cleanly while fir's SEP-2575
+// subscriptions/listen stream is in flight — both ServerSession.Close() and
+// cancelling Server.Run's context block forever
+// (https://github.com/modelcontextprotocol/go-sdk/issues/1160), and the only
+// available stimulus, severing the transport, always yields a NON-benign
+// waitErr. So the benign branch is unreachable over the wire on this protocol
+// version. This is a deliberate, narrow coverage substitution: restore a wire
+// test here once #1160 is fixed upstream.
+func TestManager_OnServerDisconnected_BenignOnServerShutdown(t *testing.T) {
+	server := sdk.NewServer(&sdk.Implementation{Name: "test", Version: "0"}, nil)
+	server.AddTool(&sdk.Tool{Name: "ping", InputSchema: emptySchema},
+		func(_ context.Context, _ *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+			return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: "ok"}}}, nil
+		})
+
+	mgr := NewManager(map[string]ServerConfig{"srv": {}}, false)
+	mgr.dialFn = inMemoryDial(t, server)
+
+	_, _, discCh := drainServerEvents(mgr)
+
+	// Connect and install WITHOUT calling Start, so no reconnect loop exists.
+	// A live loop would be parked in session.Wait() on this same session and
+	// would race its own handleSessionEnd (with a real error) against the
+	// deterministic one below.
+	ctx := context.Background()
+	session, tools, caps, err := mgr.dialAndInitialize(ctx, "srv", ServerConfig{})
+	require.NoError(t, err)
+	mgr.installReconnectedSession(context.Background(), "srv", session, tools, caps)
+	defer mgr.Close()
+
+	// A nil waitErr is what a clean, fault-free session end looks like.
+	mgr.handleSessionEnd("srv", session, nil)
+
+	select {
+	case ev := <-discCh:
+		assert.Equal(t, "srv", ev.name)
+		assert.NoError(t, ev.err, "a fault-free session end must not surface an error")
+	case <-time.After(3 * time.Second):
+		t.Fatal("timeout waiting for ServerDisconnected event")
+	}
+
+	// The entry's recorded error must be cleared too, so the UI stops showing
+	// a stale fault from a previous cycle.
+	mgr.withEntry("srv", func(e *serverEntry) {
+		assert.NoError(t, e.err)
+	})
 }
 
 // TestManager_OnServerDisconnected_NotFiredOnClose verifies that a clean
@@ -999,7 +1033,7 @@ func TestManager_OnServerReady_FiresOnReconnect(t *testing.T) {
 	}
 
 	// Force disconnect; reconnect should fire ready again.
-	closeServerSession(t, server)
+	severServerConnections(t, server)
 
 	select {
 	case ev := <-readyCh:
@@ -1044,14 +1078,11 @@ func TestManager_Status_AfterServerDisconnect(t *testing.T) {
 	assert.True(t, statuses[0].Connected)
 	assert.NoError(t, statuses[0].Error)
 
-	// Close the server-side session to simulate a server-initiated disconnect.
-	var ss *sdk.ServerSession
-	for s := range server.Sessions() {
-		ss = s
-		break
-	}
-	require.NotNil(t, ss, "server must have an active session")
-	require.NoError(t, ss.Close())
+	// Sever the connection to simulate a server-initiated disconnect. Not
+	// ss.Close(): that deadlocks under go-sdk v1.7.0 while the SEP-2575
+	// subscriptions/listen stream fir opens at connect is in flight —
+	// https://github.com/modelcontextprotocol/go-sdk/issues/1160
+	severServerConnections(t, server)
 
 	// Auto-reconnect's dialFn is rigged to fail, so the session stays down.
 	// Status should stably reflect that.

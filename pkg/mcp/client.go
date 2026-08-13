@@ -905,6 +905,21 @@ func (m *Manager) reconnectLoop(ctx context.Context, name string) {
 // on the next generation, and (for non-benign waitErrs) records the error.
 // Resets the dial-attempt counter so reconnect backoff starts at zero.
 func (m *Manager) handleSessionEnd(name string, session *sdk.ClientSession, waitErr error) {
+	// Release the dead session's SDK-side resources. The transport is already
+	// gone, but ClientSession.Close is the ONLY thing that cancels the
+	// SEP-2575 subscriptions/listen context: that context is derived from
+	// context.Background() inside go-sdk's Client.Connect, so it does not
+	// unwind when the connection dies. Without this, protocol 2026-07-28
+	// strands one mcp.callSubscriptionsListen goroutine per reconnect, for
+	// the life of the process. Close is idempotent and safe on a dead session.
+	//
+	// This runs before the entry update below, so a CallTool arriving during
+	// the close still briefly sees the old session — which was already dead
+	// either way.
+	if err := session.Close(); err != nil {
+		firlog.Debug("MCP: closing ended session", "server", name, "err", err)
+	}
+
 	var (
 		stillCurrent  bool
 		disconnectErr error
@@ -996,7 +1011,7 @@ func (m *Manager) tryReconnect(ctx context.Context, name string) bool {
 		return false
 	}
 
-	m.installReconnectedSession(name, sess, tools, caps)
+	m.installReconnectedSession(ctx, name, sess, tools, caps)
 	firlog.Info("mcp reconnected", "server", name, "tools", len(tools))
 	return true
 }
@@ -1004,9 +1019,35 @@ func (m *Manager) tryReconnect(ctx context.Context, name string) bool {
 // installReconnectedSession atomically installs a freshly dialled session,
 // closes the entry's ready chan to wake waiters, clears any previous error,
 // and fires onToolsChanged.
-func (m *Manager) installReconnectedSession(name string, sess *sdk.ClientSession, tools []agent.AgentTool, caps *sdk.ServerCapabilities) {
-	var ready chan struct{}
-	m.withEntry(name, func(e *serverEntry) {
+func (m *Manager) installReconnectedSession(ctx context.Context, name string, sess *sdk.ClientSession, tools []agent.AgentTool, caps *sdk.ServerCapabilities) {
+	// A dial can complete after the loop that started it has been retired, and
+	// the freshly dialled session must then be closed rather than installed —
+	// nobody else will ever close it, and a stranded session keeps its
+	// SEP-2575 subscriptions/listen goroutine alive for the life of the
+	// process. Three ways that happens, all checked under the entry lock:
+	//
+	//   - Close: it closes m.done BEFORE snapshotting the entries' sessions,
+	//     and the snapshot takes this same lock — so either we install first
+	//     and the snapshot sees us, or the snapshot ran and we see done.
+	//   - Reload (config changed / server disconnected): cancels this loop's
+	//     ctx while holding the lock, then closes the old session and may
+	//     start a fresh loop. ctx.Err() tells us we are the stale loop.
+	//   - Reload (server removed): the entry is gone entirely, so withEntry
+	//     reports false.
+	var (
+		ready     chan struct{}
+		installed bool
+	)
+	found := m.withEntry(name, func(e *serverEntry) {
+		if ctx.Err() != nil {
+			return
+		}
+		select {
+		case <-m.done:
+			return
+		default:
+		}
+		installed = true
 		e.session = sess
 		e.tools = tools
 		e.caps = caps
@@ -1022,6 +1063,12 @@ func (m *Manager) installReconnectedSession(name string, sess *sdk.ClientSession
 		}
 		ready = e.ready
 	})
+	if !found || !installed {
+		if err := sess.Close(); err != nil {
+			firlog.Debug("MCP: closing session dialled by a retired reconnect loop", "server", name, "err", err)
+		}
+		return
+	}
 	close(ready)
 	if notify := m.loadOnToolsChanged(); notify != nil {
 		notify(m.allTools())

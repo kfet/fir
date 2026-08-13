@@ -59,23 +59,35 @@ func TestElicitMessage(t *testing.T) {
 // requests from a server tool to the configured ElicitationFn.
 func TestManager_ElicitationFn(t *testing.T) {
 	// Server exposes a "collect_name" tool that triggers form elicitation.
+	//
+	// Protocol 2026-07-28 forbids a server from initiating elicitation/create
+	// while serving a request; it must ask via a Multi Round-Trip Request
+	// (SEP-2322). The client SDK's MRTR middleware answers it through the
+	// ElicitationHandler and retries tools/call with inputResponses attached,
+	// so this handler runs twice.
 	server := sdk.NewServer(&sdk.Implementation{Name: "elicit-srv", Version: "0"}, nil)
 	server.AddTool(
 		&sdk.Tool{Name: "collect_name", InputSchema: json.RawMessage(`{"type":"object","properties":{}}`)},
-		func(ctx context.Context, req *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
-			res, err := req.Session.Elicit(ctx, &sdk.ElicitParams{
-				Message: "What is your name?",
-				RequestedSchema: map[string]any{
-					"type": "object",
-					"properties": map[string]any{
-						"name": map[string]any{"type": "string"},
-					},
-				},
-			})
-			if err != nil {
+		func(_ context.Context, req *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+			resp, ok := req.Params.InputResponses[elicitInputKey]
+			if !ok {
+				return &sdk.CallToolResult{
+					InputRequests: sdk.InputRequestMap{elicitInputKey: &sdk.ElicitParams{
+						Message: "What is your name?",
+						RequestedSchema: map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"name": map[string]any{"type": "string"},
+							},
+						},
+					}},
+				}, nil
+			}
+			res, ok := resp.(*sdk.ElicitResult)
+			if !ok {
 				return &sdk.CallToolResult{
 					IsError: true,
-					Content: []sdk.Content{&sdk.TextContent{Text: err.Error()}},
+					Content: []sdk.Content{&sdk.TextContent{Text: "unexpected input response type"}},
 				}, nil
 			}
 			return &sdk.CallToolResult{
@@ -131,12 +143,21 @@ func TestManager_ElicitationFn_Default(t *testing.T) {
 	server := sdk.NewServer(&sdk.Implementation{Name: "elicit-srv2", Version: "0"}, nil)
 	server.AddTool(
 		&sdk.Tool{Name: "ask", InputSchema: json.RawMessage(`{"type":"object","properties":{}}`)},
-		func(ctx context.Context, req *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
-			res, err := req.Session.Elicit(ctx, &sdk.ElicitParams{Message: "confirm?"})
-			if err != nil {
+		func(_ context.Context, req *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+			// MRTR (SEP-2322), as in TestManager_ElicitationFn above.
+			resp, ok := req.Params.InputResponses[elicitInputKey]
+			if !ok {
+				return &sdk.CallToolResult{
+					InputRequests: sdk.InputRequestMap{
+						elicitInputKey: &sdk.ElicitParams{Message: "confirm?"},
+					},
+				}, nil
+			}
+			res, ok := resp.(*sdk.ElicitResult)
+			if !ok {
 				return &sdk.CallToolResult{
 					IsError: true,
-					Content: []sdk.Content{&sdk.TextContent{Text: err.Error()}},
+					Content: []sdk.Content{&sdk.TextContent{Text: "unexpected input response type"}},
 				}, nil
 			}
 			return &sdk.CallToolResult{
