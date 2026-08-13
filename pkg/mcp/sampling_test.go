@@ -92,26 +92,55 @@ func TestSamplingStopReason(t *testing.T) {
 // sampling/createMessage request, the Manager's SamplingFn is called and its
 // response is returned to the server.
 func TestManager_SamplingFn(t *testing.T) {
-	// Build a server that exposes a "ping_llm" tool which internally calls
-	// sampling/createMessage.
+	// Build a server that exposes a "ping_llm" tool which asks the client for
+	// sampling.
+	//
+	// Protocol 2026-07-28 forbids a server from initiating
+	// sampling/createMessage while serving a request; it must ask via a Multi
+	// Round-Trip Request (SEP-2322). The client SDK's MRTR middleware answers
+	// it through the CreateMessageHandler and retries tools/call with
+	// inputResponses attached, so this handler runs twice.
 	server := sdk.NewServer(&sdk.Implementation{Name: "sample-srv", Version: "0"}, nil)
 	server.AddTool(
 		&sdk.Tool{Name: "ping_llm", InputSchema: json.RawMessage(`{"type":"object","properties":{}}`)},
-		func(ctx context.Context, req *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
-			// Request sampling from the client.
-			result, err := req.Session.CreateMessage(ctx, &sdk.CreateMessageParams{
-				MaxTokens: 100,
-				Messages: []*sdk.SamplingMessage{
-					{Role: "user", Content: &sdk.TextContent{Text: "ping"}},
-				},
-			})
-			if err != nil {
+		func(_ context.Context, req *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+			resp, ok := req.Params.InputResponses[samplingInputKey]
+			if !ok {
 				return &sdk.CallToolResult{
-					IsError: true,
-					Content: []sdk.Content{&sdk.TextContent{Text: err.Error()}},
+					InputRequests: sdk.InputRequestMap{
+						samplingInputKey: &sdk.CreateMessageParams{
+							MaxTokens: 100,
+							Messages: []*sdk.SamplingMessage{
+								{Role: "user", Content: &sdk.TextContent{Text: "ping"}},
+							},
+						},
+					},
 				}, nil
 			}
-			tc, _ := result.Content.(*sdk.TextContent)
+			// go-sdk fulfils a *CreateMessageParams input request via
+			// CreateMessageWithTools, so the response is the with-tools
+			// shape even though fir registers the basic CreateMessageHandler
+			// (the SDK down/up-converts around fir's SamplingFn).
+			result, ok := resp.(*sdk.CreateMessageWithToolsResult)
+			if !ok {
+				return &sdk.CallToolResult{
+					IsError: true,
+					Content: []sdk.Content{&sdk.TextContent{Text: "unexpected input response type"}},
+				}, nil
+			}
+			if len(result.Content) != 1 {
+				return &sdk.CallToolResult{
+					IsError: true,
+					Content: []sdk.Content{&sdk.TextContent{Text: "expected exactly one content block"}},
+				}, nil
+			}
+			tc, ok := result.Content[0].(*sdk.TextContent)
+			if !ok {
+				return &sdk.CallToolResult{
+					IsError: true,
+					Content: []sdk.Content{&sdk.TextContent{Text: "sampling result was not text"}},
+				}, nil
+			}
 			return &sdk.CallToolResult{
 				Content: []sdk.Content{&sdk.TextContent{Text: tc.Text}},
 			}, nil

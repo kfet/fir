@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Fixed
+- **fir leaked a goroutine on every MCP reconnect under protocol 2026-07-28.** Each connect opens a SEP-2575 `subscriptions/listen` stream, and go-sdk derives that stream's context from `context.Background()` inside `Client.Connect` — so it does not unwind when the connection dies; only `ClientSession.Close` cancels it. `handleSessionEnd` dropped the dead session without closing it, stranding one `mcp.callSubscriptionsListen` goroutine per reconnect for the life of the process, so a long-running fir against a flaky MCP server accumulated them indefinitely. It now closes the session it is retiring. Separately, `installReconnectedSession` could store a session dialled concurrently with `Manager.Close()` — after Close had already snapshotted the sessions to close — stranding that session and its listen goroutine too; it now tests the shutdown signal under the entry lock (Close closes `done` before snapshotting, making the handoff airtight) and closes the session instead of installing it. Both are covered by `go.uber.org/goleak` regression tests.
+
+### Changed
+- **`github.com/modelcontextprotocol/go-sdk` v1.6.1 → v1.7.0 (MCP protocol 2026-07-28).** No production behaviour change beyond the leak fixes above. Test-side rework for the new protocol: servers may no longer initiate `roots/list`, `elicitation/create` or `sampling/createMessage` mid-request and must ask via Multi Round-Trip Requests (SEP-2322), so the roots, elicitation and sampling tests now go through `InputRequests`/`InputResponses`; `tools/list_changed` requires the client to opt in via one `subscriptions/listen` at connect, which a server honours only for capabilities it advertised at discovery. SEP-2577 deprecated logging and made the level a per-request `_meta` value, so a 2026-07-28 server cannot deliver `logging/message` notifications — `TestManager_LoggingHandler` is deliberately narrowed to assert fir-side level mapping only.
+
 ## [0.97.0] - 2026-08-09
 
 ### Fixed

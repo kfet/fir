@@ -33,15 +33,20 @@ func shortenReconnectDelays(t *testing.T) {
 	})
 }
 
-// closeServerSession closes the active server-side session, which causes the
-// client's session.Wait() to return and triggers the auto-reconnect path.
-func closeServerSession(t *testing.T, server *sdk.Server) {
+// severServerConnections severs the client's connection to server, which makes
+// the client's session.Wait() return and triggers the auto-reconnect path.
+//
+// It severs rather than calling ServerSession.Close() because under go-sdk
+// v1.7.0 the latter deadlocks while a SEP-2575 subscriptions/listen stream is
+// in flight, and fir opens one on every connect:
+// https://github.com/modelcontextprotocol/go-sdk/issues/1160
+// When that is fixed upstream, this can go back to a clean ss.Close().
+//
+// Connections dialed AFTER this call are unaffected, so reconnect tests can
+// re-dial normally.
+func severServerConnections(t *testing.T, server *sdk.Server) {
 	t.Helper()
-	for s := range server.Sessions() {
-		require.NoError(t, s.Close())
-		return
-	}
-	t.Fatal("server has no active sessions")
+	connsForServer(server).breakAll()
 }
 
 func makePingServer() *sdk.Server {
@@ -79,7 +84,7 @@ func TestManager_AutoReconnect_AfterServerDisconnect(t *testing.T) {
 	requireNotifWithin(t, notifs, time.Second)
 
 	// Force a server-side disconnect.
-	closeServerSession(t, server)
+	severServerConnections(t, server)
 
 	// Auto-reconnect should restore the session without /reload.
 	require.Eventually(t, func() bool {
@@ -150,7 +155,7 @@ func TestManager_OnDemandReconnect_KicksLoop(t *testing.T) {
 	require.True(t, mgr.hasSession("srv"))
 
 	// Force disconnect; loop will dial (fails), then sleep ~500ms.
-	closeServerSession(t, server)
+	severServerConnections(t, server)
 
 	// Wait until the loop is in the backoff sleep (session has been
 	// cleared and dial #2 has happened).
@@ -192,7 +197,7 @@ func TestManager_OnDemand_RespectsContext(t *testing.T) {
 	require.NoError(t, mgr.WaitReady(context.Background()))
 	defer mgr.Close()
 
-	closeServerSession(t, server)
+	severServerConnections(t, server)
 
 	// Wait for session to drop.
 	require.Eventually(t, func() bool { return !mgr.hasSession("srv") },
@@ -254,7 +259,7 @@ func TestManager_ConcurrentCallTool_SingleFlight(t *testing.T) {
 	defer mgr.Close()
 	require.Equal(t, int32(1), dialCount.Load())
 
-	closeServerSession(t, server)
+	severServerConnections(t, server)
 
 	// Wait until the loop has tried-and-failed the first reconnect (so
 	// it's now sleeping in backoff and session is nil).
@@ -311,7 +316,7 @@ func TestManager_Close_CancelsReconnect(t *testing.T) {
 	mgr.Start(context.Background())
 	require.NoError(t, mgr.WaitReady(context.Background()))
 
-	closeServerSession(t, server)
+	severServerConnections(t, server)
 	require.Eventually(t, func() bool { return !mgr.hasSession("srv") },
 		2*time.Second, 5*time.Millisecond)
 
@@ -354,7 +359,7 @@ func TestManager_ReconnectBackoff_SurfacesErrAfterThreshold(t *testing.T) {
 	require.NoError(t, mgr.WaitReady(context.Background()))
 	defer mgr.Close()
 
-	closeServerSession(t, server)
+	severServerConnections(t, server)
 
 	// After enough failed reconnects, the err should surface in Status().
 	require.Eventually(t, func() bool {
@@ -466,11 +471,26 @@ func TestManager_StreamableTransport_AutoReconnect(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "pong", result.Content[0].(*sdk.TextContent).Text)
 
-	// Force the server to terminate its current session. The client's
-	// session.Wait() returns and the auto-reconnect loop kicks in.
+	// Force the server to terminate its sessions. The client's session.Wait()
+	// returns and the auto-reconnect loop kicks in.
+	//
+	// ALL sessions must be closed, not just the first: under protocol
+	// 2026-07-28 a streamable-HTTP client holds two server sessions (the main
+	// one plus the SEP-2575 subscriptions/listen stream fir opens at connect).
+	// Closing only one leaves the client happily connected on the other and no
+	// reconnect ever happens.
+	//
+	// ServerSession.Close is safe here — unlike the in-memory tests, the
+	// listen stream is a separate HTTP request and so is not an in-flight
+	// request on the session being closed. See
+	// https://github.com/modelcontextprotocol/go-sdk/issues/1160
+	var sessions []*sdk.ServerSession
 	for s := range server.Sessions() {
+		sessions = append(sessions, s)
+	}
+	require.NotEmpty(t, sessions, "server must have at least one active session")
+	for _, s := range sessions {
 		require.NoError(t, s.Close())
-		break
 	}
 
 	// Auto-reconnect should restore the session over a fresh streamable
@@ -546,7 +566,7 @@ func TestManager_ReconnectWarning_DoesNotLeakToDefaultSlog(t *testing.T) {
 	require.NoError(t, mgr.WaitReady(context.Background()))
 	defer mgr.Close()
 
-	closeServerSession(t, server)
+	severServerConnections(t, server)
 
 	// Wait until the err has surfaced — i.e. the reconnect loop has run
 	// past reconnectErrSurfaceThreshold and exercised the slog.Warn path
