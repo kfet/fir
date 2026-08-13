@@ -63,7 +63,7 @@ from typing import Any
 try:
     import fcntl
 except ImportError:  # pragma: no cover - non-POSIX (fir targets unix)
-    fcntl = None  # ty: ignore[invalid-assignment]
+    fcntl = None
 
 import fir_ext
 
