@@ -28,15 +28,15 @@ type breakableTransport struct {
 }
 
 type breakableConns struct {
-	mu     sync.Mutex
-	broken bool
-	conns  []*breakableConnection
+	mu    sync.Mutex
+	conns []*breakableConnection
 }
 
-// breakAll severs every connection handed out by the transport.
+// breakAll severs every connection handed out by the transport. Connections
+// dialled afterwards are unaffected — that is what lets the reconnect tests
+// sever a live connection and still watch the client come back.
 func (b *breakableConns) breakAll() {
 	b.mu.Lock()
-	b.broken = true
 	conns := append([]*breakableConnection(nil), b.conns...)
 	b.conns = nil
 	b.mu.Unlock()
@@ -146,4 +146,12 @@ func connsForServer(server *sdk.Server) *breakableConns {
 		severRegistry.m[server] = c
 	}
 	return c
+}
+
+// forgetServerConns drops a server's registry entry, so the map does not
+// retain every server the test binary ever built.
+func forgetServerConns(server *sdk.Server) {
+	severRegistry.mu.Lock()
+	defer severRegistry.mu.Unlock()
+	delete(severRegistry.m, server)
 }

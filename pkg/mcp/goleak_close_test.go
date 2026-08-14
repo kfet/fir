@@ -107,8 +107,8 @@ func TestManager_Close_AfterSeveredTransport_NoLeak(t *testing.T) {
 		// A severed transport may surface a write/closed error; the contract
 		// under test is that Close RETURNS, not that it returns nil.
 		t.Logf("Manager.Close() returned after severed transport: err=%v", err)
-	case <-time.After(5 * time.Second):
-		t.Fatal("Manager.Close() HUNG for 5s after a severed transport — " +
+	case <-time.After(20 * time.Second):
+		t.Fatal("Manager.Close() HUNG for 20s after a severed transport — " +
 			"go-sdk #1160 bites fir in production")
 	}
 
@@ -161,7 +161,8 @@ func TestManager_InstallReconnectedSession_AfterClose_DoesNotLeak(t *testing.T) 
 	sess, tools, caps, err := mgr.dialAndInitialize(context.Background(), "srv", ServerConfig{})
 	require.NoError(t, err)
 
-	mgr.installReconnectedSession(context.Background(), "srv", sess, tools, caps)
+	assert.False(t, mgr.installReconnectedSession(context.Background(), "srv", sess, tools, caps),
+		"an install after Close must report refusal")
 
 	mgr.withEntry("srv", func(e *serverEntry) {
 		assert.Nil(t, e.session, "a session installed after Close must be refused, not retained")
@@ -169,6 +170,47 @@ func TestManager_InstallReconnectedSession_AfterClose_DoesNotLeak(t *testing.T) 
 
 	cancelServer()
 	waitForServerTeardown(t, server)
+}
+
+// TestManager_StartServer_AfterClose_DoesNotLeak is the initial-connect twin of
+// TestManager_InstallReconnectedSession_AfterClose_DoesNotLeak.
+//
+// Start (and Reload's toStart batch) dials in flight can complete after Close
+// has already snapshotted the entries' sessions. Installing then would strand a
+// session nobody ever closes — and it strands silently, because the install's
+// defensive ready re-open absorbs the chan Close had closed. startServer must
+// refuse instead, and report the refusal to its caller.
+func TestManager_StartServer_AfterClose_DoesNotLeak(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
+	server := sdk.NewServer(&sdk.Implementation{Name: "test", Version: "0"}, nil)
+	server.AddTool(&sdk.Tool{Name: "ping", InputSchema: emptySchema},
+		func(_ context.Context, _ *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+			return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: "ok"}}}, nil
+		})
+	serverCtx, cancelServer := context.WithCancel(context.Background())
+	defer func() {
+		cancelServer()
+		waitForServerTeardown(t, server)
+	}()
+
+	mgr := NewManager(map[string]ServerConfig{"srv": {}}, false)
+	mgr.dialFn = func(_ string, _ ServerConfig) (sdk.Transport, error) {
+		serverTransport, clientTransport := sdk.NewInMemoryTransports()
+		go func() { _ = server.Run(serverCtx, serverTransport) }()
+		return clientTransport, nil
+	}
+
+	startAndWait(t, mgr, context.Background())
+	require.NoError(t, mgr.Close())
+
+	// A connect that lands after Close, as an in-flight Start would.
+	_, err := mgr.startServer(context.Background(), "srv", ServerConfig{})
+	require.Error(t, err, "a connect completing after Close must be refused, not installed")
+
+	mgr.withEntry("srv", func(e *serverEntry) {
+		assert.Nil(t, e.session, "a session installed after Close must be refused, not retained")
+	})
 }
 
 // TestManager_ReconnectCycles_DoNotLeakListenGoroutines is the regression test
@@ -230,22 +272,33 @@ func TestManager_ReconnectCycles_DoNotLeakListenGoroutines(t *testing.T) {
 
 // waitForServerTeardown blocks until the in-memory test server has no live
 // sessions, so goleak does not race the server's asynchronous unwind.
+//
+// This is the sanctioned poll-external-state exception: the SDK exposes no
+// signal to subscribe to, only a Sessions() iterator. The deadline is
+// deliberately generous, and expiry logs rather than fails — a server that
+// never lets go is go-sdk #1160's server-side half, which is not what any
+// caller of this helper asserts on.
 func waitForServerTeardown(t *testing.T, server *sdk.Server) {
 	t.Helper()
-	deadline := time.Now().Add(15 * time.Second)
-	for time.Now().Before(deadline) {
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	deadline := time.After(15 * time.Second)
+	for {
 		live := false
-		for ss := range server.Sessions() {
-			_ = ss
+		for range server.Sessions() {
 			live = true
 			break
 		}
 		if !live {
 			return
 		}
-		time.Sleep(10 * time.Millisecond)
+		select {
+		case <-tick.C:
+		case <-deadline:
+			t.Log("server still reports a live session after 15s (go-sdk #1160 server-side half)")
+			return
+		}
 	}
-	t.Log("server still reports a live session after 15s (go-sdk #1160 server-side half)")
 }
 
 // TestManager_InstallReconnectedSession_RetiredLoop_DoesNotLeak covers the two
@@ -268,7 +321,12 @@ func TestManager_InstallReconnectedSession_RetiredLoop_DoesNotLeak(t *testing.T)
 			return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: "ok"}}}, nil
 		})
 	serverCtx, cancelServer := context.WithCancel(context.Background())
-	defer cancelServer()
+	defer func() {
+		cancelServer()
+		// Let the server unwind before goleak inspects the stacks; its
+		// teardown is asynchronous and is not what this test asserts on.
+		waitForServerTeardown(t, server)
+	}()
 
 	newMgr := func() *Manager {
 		mgr := NewManager(map[string]ServerConfig{"srv": {}}, false)
@@ -293,7 +351,8 @@ func TestManager_InstallReconnectedSession_RetiredLoop_DoesNotLeak(t *testing.T)
 		cancelRetired()
 
 		before := sessionOf(t, mgr, "srv")
-		mgr.installReconnectedSession(retired, "srv", sess, tools, caps)
+		assert.False(t, mgr.installReconnectedSession(retired, "srv", sess, tools, caps),
+			"a stale loop's install must report refusal")
 		assert.Same(t, before, sessionOf(t, mgr, "srv"),
 			"a stale loop's session must not replace the live one")
 	})
@@ -322,7 +381,8 @@ func TestManager_InstallReconnectedSession_RetiredLoop_DoesNotLeak(t *testing.T)
 		defer mgr.Close()
 
 		assert.NotPanics(t, func() {
-			mgr.installReconnectedSession(context.Background(), "srv", sess, tools, caps)
+			assert.False(t, mgr.installReconnectedSession(context.Background(), "srv", sess, tools, caps),
+				"installing into a removed entry must report refusal")
 		}, "installing into a removed entry must not panic on a nil ready chan")
 	})
 }

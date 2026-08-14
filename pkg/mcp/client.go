@@ -705,23 +705,13 @@ func (m *Manager) startServer(ctx context.Context, name string, cfg ServerConfig
 	if err != nil {
 		return nil, err
 	}
-	var ready chan struct{}
-	m.withEntry(name, func(e *serverEntry) {
-		e.session = session
-		e.tools = tools
-		e.caps = caps
-		e.err = nil
-		e.attempt = 0
-		// Ensure ready is open so we can close it to signal "session
-		// installed". If it was already closed (re-entry from Reload after
-		// a previous successful connect), allocate a fresh chan first.
-		select {
-		case <-e.ready:
-			e.ready = make(chan struct{})
-		default:
-		}
-		ready = e.ready
-	})
+	ready, ok := m.installSession(ctx, name, session, tools, caps)
+	if !ok {
+		// Close (or a Reload that removed this server) got here first, and
+		// already snapshotted the sessions it would close. installSession has
+		// closed this one; returning it would strand it.
+		return nil, fmt.Errorf("mcp %s: connect completed after shutdown", name)
+	}
 	close(ready)
 	firlog.Info("mcp connected", "server", name, "tools", len(tools))
 
@@ -878,7 +868,7 @@ func (m *Manager) startReconnectLoop(name string) {
 // one, with exponential backoff between failed dials. It exits only when
 // loopCtx is cancelled (Close, Reload-stop, or config-change).
 func (m *Manager) reconnectLoop(ctx context.Context, name string) {
-	for ctx.Err() == nil {
+	for !m.reconnectLoopRetired(ctx, name) {
 		// Wait for the current session (if any) to terminate.
 		var session *sdk.ClientSession
 		m.withEntry(name, func(e *serverEntry) { session = e.session })
@@ -886,18 +876,34 @@ func (m *Manager) reconnectLoop(ctx context.Context, name string) {
 			waitErr := session.Wait()
 			m.handleSessionEnd(name, session, waitErr)
 		}
-		if ctx.Err() != nil {
-			return
-		}
 		// Reconnect. tryReconnect blocks (backoff + dial). It returns true
-		// on success; false on either dial failure (we retry immediately)
-		// or ctx cancellation (we exit).
-		for ctx.Err() == nil {
+		// on success; false on dial failure (we retry immediately), on ctx
+		// cancellation, or when the freshly dialled session was refused
+		// because this loop has been retired — the retirement checks below
+		// then end the loop instead of spinning on it.
+		for !m.reconnectLoopRetired(ctx, name) {
 			if m.tryReconnect(ctx, name) {
 				break
 			}
 		}
 	}
+}
+
+// reconnectLoopRetired reports whether this reconnect loop should stop: its
+// context was cancelled (Reload replaced or removed the server), the manager
+// is shutting down, or the entry it serves is gone. Checking all three keeps
+// a loop whose install was refused from immediately redialling in a tight
+// loop.
+func (m *Manager) reconnectLoopRetired(ctx context.Context, name string) bool {
+	if ctx.Err() != nil {
+		return true
+	}
+	select {
+	case <-m.done:
+		return true
+	default:
+	}
+	return !m.withEntry(name, func(*serverEntry) {})
 }
 
 // handleSessionEnd is called when session.Wait() returns. It clears the
@@ -1011,29 +1017,34 @@ func (m *Manager) tryReconnect(ctx context.Context, name string) bool {
 		return false
 	}
 
-	m.installReconnectedSession(ctx, name, sess, tools, caps)
+	if !m.installReconnectedSession(ctx, name, sess, tools, caps) {
+		// Refused: this loop has been retired and the session was closed.
+		// Do not claim a reconnect that did not happen.
+		return false
+	}
 	firlog.Info("mcp reconnected", "server", name, "tools", len(tools))
 	return true
 }
 
-// installReconnectedSession atomically installs a freshly dialled session,
-// closes the entry's ready chan to wake waiters, clears any previous error,
-// and fires onToolsChanged.
-func (m *Manager) installReconnectedSession(ctx context.Context, name string, sess *sdk.ClientSession, tools []agent.AgentTool, caps *sdk.ServerCapabilities) {
-	// A dial can complete after the loop that started it has been retired, and
-	// the freshly dialled session must then be closed rather than installed —
-	// nobody else will ever close it, and a stranded session keeps its
-	// SEP-2575 subscriptions/listen goroutine alive for the life of the
-	// process. Three ways that happens, all checked under the entry lock:
-	//
-	//   - Close: it closes m.done BEFORE snapshotting the entries' sessions,
-	//     and the snapshot takes this same lock — so either we install first
-	//     and the snapshot sees us, or the snapshot ran and we see done.
-	//   - Reload (config changed / server disconnected): cancels this loop's
-	//     ctx while holding the lock, then closes the old session and may
-	//     start a fresh loop. ctx.Err() tells us we are the stale loop.
-	//   - Reload (server removed): the entry is gone entirely, so withEntry
-	//     reports false.
+// installSession stores a freshly dialled session into the entry under its
+// lock and returns the ready chan the caller must close to wake waiters.
+//
+// It reports false — having closed the session itself — when the session must
+// not be installed, because nobody else would ever close it and a stranded
+// session keeps its SEP-2575 subscriptions/listen goroutine alive for the life
+// of the process (go-sdk derives that stream's ctx from context.Background()
+// inside Client.Connect, so only ClientSession.Close cancels it). Three ways
+// that happens, all checked under the entry lock:
+//
+//   - Close: it closes m.done BEFORE snapshotting the entries' sessions, and
+//     the snapshot takes this same lock — so either we install first and the
+//     snapshot sees us, or the snapshot ran and we see done.
+//   - Reload (config changed / server disconnected): cancels the dialling
+//     ctx while holding the lock, then closes the old session and may start a
+//     fresh loop. ctx.Err() tells us we are the stale caller.
+//   - Reload (server removed): the entry is gone entirely, so withEntry
+//     reports false.
+func (m *Manager) installSession(ctx context.Context, name string, sess *sdk.ClientSession, tools []agent.AgentTool, caps *sdk.ServerCapabilities) (chan struct{}, bool) {
 	var (
 		ready     chan struct{}
 		installed bool
@@ -1053,9 +1064,9 @@ func (m *Manager) installReconnectedSession(ctx context.Context, name string, se
 		e.caps = caps
 		e.err = nil
 		e.attempt = 0
-		// Defensive: ensure ready is open before we close it to signal
-		// "session installed". The reconnect loop's handleSessionEnd
-		// always assigns a fresh open chan, so this is normally a no-op.
+		// Ensure ready is open before the caller closes it to signal
+		// "session installed". It is already closed on re-entry from Reload
+		// after a previous successful connect.
 		select {
 		case <-e.ready:
 			e.ready = make(chan struct{})
@@ -1065,15 +1076,29 @@ func (m *Manager) installReconnectedSession(ctx context.Context, name string, se
 	})
 	if !found || !installed {
 		if err := sess.Close(); err != nil {
-			firlog.Debug("MCP: closing session dialled by a retired reconnect loop", "server", name, "err", err)
+			firlog.Debug("MCP: closing session that could no longer be installed", "server", name, "err", err)
 		}
-		return
+		return nil, false
+	}
+	return ready, true
+}
+
+// installReconnectedSession atomically installs a freshly dialled session,
+// closes the entry's ready chan to wake waiters, clears any previous error,
+// and fires onToolsChanged. Reports whether the session was installed; when it
+// was not, the session has been closed and the caller must not treat the
+// reconnect as successful.
+func (m *Manager) installReconnectedSession(ctx context.Context, name string, sess *sdk.ClientSession, tools []agent.AgentTool, caps *sdk.ServerCapabilities) bool {
+	ready, ok := m.installSession(ctx, name, sess, tools, caps)
+	if !ok {
+		return false
 	}
 	close(ready)
 	if notify := m.loadOnToolsChanged(); notify != nil {
 		notify(m.allTools())
 	}
 	m.emitServerEvent(ServerEvent{Kind: ServerReady, Name: name})
+	return true
 }
 
 // reconnectBackoff returns the sleep duration before reconnect attempt N

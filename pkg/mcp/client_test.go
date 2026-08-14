@@ -31,6 +31,7 @@ import (
 func inMemoryDial(t *testing.T, server *sdk.Server) func(string, ServerConfig) (sdk.Transport, error) {
 	t.Helper()
 	conns := connsForServer(server)
+	t.Cleanup(func() { forgetServerConns(server) })
 	return func(_ string, _ ServerConfig) (sdk.Transport, error) {
 		serverTransport, clientTransport := sdk.NewInMemoryTransports()
 		go func() {
