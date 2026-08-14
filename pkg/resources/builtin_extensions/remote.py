@@ -89,6 +89,9 @@ _RC_NO_JOB = 96
 #: GNU ``timeout`` reports this when it had to kill the command.
 _RC_TIMEOUT = 124
 
+#: POSIX shells report this when the command does not exist.
+_RC_NOT_FOUND = 127
+
 #: ControlMaster socket template. ``%C`` is ssh's hash of the connection.
 _CONTROL_PATH = "~/.ssh/fir-cm-%C"
 
@@ -489,6 +492,22 @@ def _run_local(argv: list[str], stdin_data: str | None, timeout_s: float):
         return _RC_TIMEOUT, out or "", err or "", True
 
 
+def _missing_remote_timeout(rc: int, err: str) -> bool:
+    """Report whether the remote host simply has no GNU ``timeout``.
+
+    Every call runs under an argv-level ``timeout -k`` wrapper, so a host
+    without coreutils fails *all* of them with 127 — which otherwise reads as
+    the user's own command not existing. The remote login shell decides the
+    wording, and they disagree: bash says ``bash: timeout: command not
+    found``, zsh says ``zsh:1: command not found: timeout``. Match on the
+    pieces all of them share rather than on one shell's word order.
+    """
+    if rc != _RC_NOT_FOUND:
+        return False
+    low = err.lower()
+    return "timeout" in low and "not found" in low
+
+
 def _ssh_exec(
     host: str,
     script: str,
@@ -525,7 +544,7 @@ def _ssh_exec(
         extra["timeout_s"] = int(remote_seconds)
     else:
         outcome = _classify(rc, err)
-        if outcome == _OUTCOME_NONZERO and "timeout: " in err and "not found" in err:
+        if outcome == _OUTCOME_NONZERO and _missing_remote_timeout(rc, err):
             # The timeout wrapper is argv-level, so a remote host without GNU
             # coreutils fails every call here — and 127 with a bare
             # "command not found" reads as the user's command failing.

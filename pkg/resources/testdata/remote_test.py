@@ -188,6 +188,27 @@ class TestDetachScript(unittest.TestCase):
         self.assertFalse(remote._is_safe_job_id("a" * 100))
 
 
+class TestMissingRemoteTimeout(unittest.TestCase):
+    """Every rexec call runs under an argv-level `timeout -k`, so a host
+    without GNU coreutils fails all of them with a bare 127 that reads like
+    the user's own command failing. The hint that explains it must not depend
+    on which login shell the remote host happens to run.
+    """
+
+    def test_bash_wording(self):
+        self.assertTrue(remote._missing_remote_timeout(127, "bash: timeout: command not found\n"))
+
+    def test_zsh_wording(self):
+        # macOS defaults to zsh, which puts the name last.
+        self.assertTrue(remote._missing_remote_timeout(127, "zsh:1: command not found: timeout\n"))
+
+    def test_the_users_own_missing_command_is_not_a_timeout_hint(self):
+        self.assertFalse(remote._missing_remote_timeout(127, "bash: cargo: command not found\n"))
+
+    def test_only_127_qualifies(self):
+        self.assertFalse(remote._missing_remote_timeout(1, "zsh:1: command not found: timeout\n"))
+
+
 class TestClassify(unittest.TestCase):
     def test_ok(self):
         self.assertEqual("ok", remote._classify(0, ""))

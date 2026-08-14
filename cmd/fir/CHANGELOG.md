@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- **`rexec` against a macOS host blamed the user's command for a missing `timeout`.** Every call runs under an argv-level GNU `timeout -k` wrapper, so a host without coreutils fails *all* of them with exit 127 — the envelope carries a coreutils hint to explain that, but it only recognised bash's wording (`bash: timeout: command not found`). macOS defaults to zsh, which puts the name last (`zsh:1: command not found: timeout`), so the hint never fired there and the failure read as the user's own command not existing. Detection now keys on exit 127 plus the words every shell shares, in `_missing_remote_timeout`.
+
 ## [0.98.1] - 2026-08-14
 
 ### Fixed
