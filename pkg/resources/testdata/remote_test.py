@@ -6,9 +6,11 @@ real ssh round trip to localhost and skips cleanly when that is unavailable.
 """
 
 import json
+import math
 import os
 import subprocess
 import sys
+import time
 import unittest
 from unittest import mock
 
@@ -765,6 +767,31 @@ class TestToolPlumbing(unittest.TestCase):
             env = _payload(remote.rexec({"host": "box", "command": "frobnicate"}, self.ctx))
         self.assertNotIn("hint", env)
 
+    def test_a_silent_timeout_explains_that_the_bound_covers_login_shell_startup(self):
+        """A 124 with both streams empty is undiagnosable without help.
+
+        It looks the same whether the command hung, printed nothing by design,
+        or never started because the bound expired during profile sourcing.
+        """
+        with mock.patch.object(remote, "_run_local", return_value=(124, "", "", False)):
+            env = _payload(
+                remote.rexec({"host": "box", "command": "make all", "timeout_s": 1}, self.ctx)
+            )
+        self.assertEqual("timeout", env["outcome"])
+        self.assertIn("login shell", env["hint"])
+        self.assertIn("raise timeout_s", env["hint"])
+
+    def test_a_timeout_that_produced_output_is_not_second_guessed(self):
+        """Partial output is the diagnosis; a hint would only add noise."""
+        with mock.patch.object(
+            remote, "_run_local", return_value=(124, "building...\n", "", False)
+        ):
+            env = _payload(
+                remote.rexec({"host": "box", "command": "make all", "timeout_s": 1}, self.ctx)
+            )
+        self.assertEqual("timeout", env["outcome"])
+        self.assertNotIn("hint", env)
+
     def test_rjob_status_parses_state(self):
         out = "META:{}\nPID:5\nSTATE:done\nRC:0\nLOGBYTES:3\n---LOG---\nok\n"
         with mock.patch.object(remote, "_run_local", return_value=(0, out, "", False)):
@@ -1078,6 +1105,28 @@ class TestSupervisorExecution(unittest.TestCase):
             os.chmod(stub, 0o700)
         self.env = dict(os.environ)
         self.env["PATH"] = bindir + os.pathsep + self.env.get("PATH", "")
+        # The child is `bash -l` — a *login* shell — so it sources /etc/profile
+        # and then the first of ~/.bash_profile, ~/.bash_login, ~/.profile that
+        # exists. The bound's clock covers all of that, so the developer's own
+        # dotfiles would otherwise be charged against every expiry test here.
+        # An empty HOME removes the one variance source we control.
+        self.home = os.path.join(self.tmp.name, "home")
+        os.makedirs(self.home)
+        self.env["HOME"] = self.home
+
+    def _startup_cost(self) -> float:
+        """Seconds this machine needs before the child runs stdin's first line.
+
+        Measured, never assumed: the cost is the login shell's profile
+        sourcing, which is environment-specific (a GitHub runner's
+        /etc/profile.d is much fatter than a Raspberry Pi's) and inflates
+        under load — the same load that inflates any fixed bound we might
+        hardcode. Measuring keeps the two in proportion.
+        """
+        start = time.time()
+        rc, _out, err, _t = self._run("true\n", 30)
+        self.assertEqual(0, rc, err)
+        return time.time() - start
 
     def _argv(self, timeout_s, grace):
         return [_bash(), *remote._supervisor_argv(timeout_s, grace)[1:]]
@@ -1126,12 +1175,23 @@ class TestSupervisorExecution(unittest.TestCase):
 
     def test_nothing_is_staged_on_disk(self):
         self._run("true\n", 30)
-        leftover = [n for n in os.listdir(self.tmp.name) if n != "bin"]
+        # Ignore this class's own fixtures (the poisoned-PATH bin, the empty
+        # login HOME) — the assertion is about the supervisor staging nothing.
+        fixtures = {"bin", "home"}
+        leftover = [n for n in os.listdir(self.tmp.name) if n not in fixtures]
         self.assertEqual([], leftover)
 
     def test_expiry_kills_the_whole_process_group_and_reports_124(self):
+        # The bound covers the child's login-shell startup — as `timeout -k`
+        # always did — so a hardcoded 1s bound races /etc/profile and can
+        # expire before the script's first line. That is exactly what reddened
+        # CI for v0.98.2: rc was a correct 124 but stdout was legitimately
+        # empty, because the child was still sourcing profile. Scale the bound
+        # to the startup this machine actually pays, so load inflates the
+        # measurement and the bound together instead of tipping the balance.
+        bound = max(2, math.ceil(self._startup_cost() * 4))
         script = "sleep 300 &\necho PID:$!\necho partial\necho perr >&2\nsleep 300\n"
-        rc, out, err, _t = self._run(script, 1, grace=1)
+        rc, out, err, _t = self._run(script, bound, grace=1)
         self.assertEqual(124, rc)
         self.assertIn("partial", out)
         self.assertIn("perr", err)
@@ -1140,6 +1200,29 @@ class TestSupervisorExecution(unittest.TestCase):
         self.assertNotIn("Terminated", err)
         pid = int(next(ln for ln in out.splitlines() if ln.startswith("PID:")).split(":")[1])
         self._assert_gone(pid)
+
+    def test_a_bound_expiring_during_login_shell_startup_reports_an_honest_124(self):
+        """The v0.98.2 CI failure, pinned as a contract instead of a mystery.
+
+        When the bound expires while `bash -l` is still sourcing its profile,
+        the command never runs and there is genuinely nothing to report: a
+        clean 124 with empty streams is the *correct* answer, not lost output.
+        (Data already written into a pipe cannot be destroyed by killing the
+        writer — the kernel holds it until the reader drains it — so an empty
+        stdout here can only mean the writes never happened.)
+
+        Deliberately load-monotonic: heavier load makes the profile slower,
+        which makes this assertion *more* certain, never flakier. It also
+        fails loudly if anyone re-tightens the sibling test's bound back
+        underneath the startup cost.
+        """
+        with open(os.path.join(self.home, ".profile"), "w") as fh:
+            fh.write("sleep 3\n")
+        rc, out, err, timed_out = self._run("echo never-runs\n", 1, grace=1)
+        self.assertEqual(124, rc)
+        self.assertEqual("", out)
+        self.assertFalse(timed_out)
+        self.assertNotIn("Terminated", err)
 
     def test_a_term_at_the_supervisor_kills_the_group_and_exits_124(self):
         """The trap path: sshd tearing the session down, not a local timeout."""

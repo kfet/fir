@@ -662,12 +662,27 @@ def _ssh_exec(
     extra: dict[str, Any] = {}
     if local_timed_out or rc == _RC_TIMEOUT:
         outcome, rc = _OUTCOME_TIMEOUT, _RC_TIMEOUT
+        # Sampled before the synthetic message below fills `err` in.
+        silent = not out.strip() and not err.strip()
         err = err or (
             f"remote command exceeded timeout_s={remote_seconds}; its process group was signalled"
         )
         # The *effective* bound, i.e. after the floor-to-1 clamp — reporting
         # the raw request would tell the model a limit that was not applied.
         extra["timeout_s"] = remote_seconds
+        if silent:
+            # A 124 with nothing on either stream is undiagnosable on its own:
+            # it looks identical whether the command hung, printed nothing by
+            # design, or never started. The bound covers the child's *login
+            # shell startup* too — it always did, `timeout -k` included — so a
+            # very small timeout_s against a host with a fat /etc/profile can
+            # expire before the command's first line ever runs. State only
+            # what is true, so this stays honest for `sleep 999` as well.
+            extra["hint"] = (
+                "no output arrived before timeout_s expired; the bound also covers the "
+                "remote login shell's startup, so a very small timeout_s can expire "
+                "before the command runs — raise timeout_s if output was expected"
+            )
     else:
         outcome = _classify(rc, err)
     return _envelope(
