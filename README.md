@@ -2,13 +2,18 @@
 
 A fast, portable AI coding agent. Single binary, no runtime dependencies.
 
-`fir` is a Go implementation of [pi](https://github.com/badlogic/pi-mono) by
-[Mario Zechner](https://github.com/badlogic) and closely tracks it upstream.
+`fir` originated as Go implementation of [pi](https://github.com/badlogic/pi-mono) by
+[Mario Zechner](https://github.com/badlogic) and initally closely tracked it upstream.
+
+It took about two weeks of using Pi on a Claude Max subscription to become self-hosted,
+i.e. for the fir agent to become usable enough to drive its own implementation.
 
 The motivation for this port is size and portability, specifically I was aiming
-for an efficient minimal agent running on a Raspberry Pi Zero W.
+for an efficient minimal agent running on a Raspberry Pi Zero W 1.1.
 
-One additional feature is the native ACP mode: run fir as an [Agent Client Protocol](https://github.com/coder/acp-go-sdk) server (`--mode acp`) for coding editor integrations such as Zed; communicates via newline-delimited JSON-RPC 2.0 over stdio.
+Additionally I found the lack of MCP and ACP support personally very limiting,
+since MCP is extremely useful in my work, and good ACP support is required to use an
+agent in my editor of choice - [Zed](https://zed.dev).
 
 ## Features
 
@@ -51,37 +56,6 @@ mirror — no authentication required. To install a specific version:
 curl -fsSL https://raw.githubusercontent.com/kfet/fir-dist/main/install.sh | VERSION=0.30.0 sh
 ```
 
-### Go install
-
-Requires [Go 1.24+](https://go.dev/dl/).
-
-```bash
-go install github.com/kfet/fir/cmd/fir@latest
-```
-
-For private repos, set `GOPRIVATE` and use SSH:
-```bash
-GOPRIVATE=github.com/kfet/fir go install github.com/kfet/fir/cmd/fir@latest
-```
-
-### Build from source
-
-```bash
-git clone https://github.com/kfet/fir.git
-cd fir
-make install    # installs to $GOPATH/bin
-```
-
-### macOS Gatekeeper Note
-
-If you download the pre-compiled binary on macOS (via the install script or GitHub Releases), macOS may block it with the error: *"Apple could not verify 'fir-darwin-arm64' is free of malware"*.
-
-To fix this, remove the quarantine attribute from the downloaded binary:
-
-```bash
-xattr -d com.apple.quarantine $(which fir)
-```
-
 ### Shell completion
 
 Bash and zsh completion are installed automatically by Homebrew and the
@@ -98,7 +72,7 @@ The completion handles every flag and subcommand and dynamically completes
 ## Usage
 
 ```bash
-# Interactive mode
+# Interactive mode; inside the TUI type /help for in-session help
 fir
 
 # Non-interactive (process and exit)
@@ -118,6 +92,10 @@ fir --thinking high "Design a distributed cache"
 
 # List available models
 fir --list-models gemini
+
+# ...And more - checkout the help of the CLI options
+fir --help
+
 ```
 
 ## Configuration
@@ -224,34 +202,6 @@ make clean          # remove build artifacts
 | Raspberry Pi Zero 2W | linux   | arm64  | ARMv8 quad-core            |
 | Linux x86_64         | linux   | amd64  |                            |
 
-## Project structure
-
-```
-cmd/fir/          CLI entry point
-pkg/
-  agent/         Core agent loop
-  ai/            LLM providers, streaming, model registry
-  core/          Tools, sessions, prompt templates
-  extension/     Extension system (stdio JSON-RPC, external processes)
-  modes/         Output modes (interactive, print, ACP)
-  tui/           Terminal UI (markdown rendering, themes)
-```
-
-> **No API stability guarantee.** fir is a `v0.x` application, not a library.
-> The `pkg/` tree is importable but is shaped for fir's own internal use:
-> exported types, signatures, and package layout can and do change between
-> releases with no deprecation cycle and no semver guarantee. If you import
-> anything under `pkg/`, pin an exact version and expect to do work on upgrade —
-> import at your own risk. The stable, supported way to build on fir is the
-> [extension surface](#extensions), not importing these packages.
-
-## Built with pi and fir
-
-The initial port was built using the original
-[pi](https://github.com/badlogic/pi-mono) coding agent. Once enough of the
-codebase was functional, development switched to self-hosting: fir now
-continues its own development.
-
 ## Contributing & security
 
 fir is primarily a personal project published in the open. Bug fixes,
@@ -278,27 +228,4 @@ To regenerate the notices file locally:
 make notices          # writes THIRD_PARTY_NOTICES.md
 make check-licenses   # fails on forbidden/restricted licenses
 ```
-
-## Release distribution
-
-Every tag push publishes the same set of artefacts (binaries, `LICENSE`,
-`THIRD_PARTY_NOTICES.md`, `checksums.txt`) to **two** GitHub Releases:
-
-1. [`kfet/fir`](https://github.com/kfet/fir/releases) — the source repo.
-2. [`kfet/fir-dist`](https://github.com/kfet/fir-dist/releases) — a public,
-   binaries-only mirror. Same tag, same assets, same checksums.
-
-Consumers (`install.sh`, the self-updater, the Homebrew formula, and the
-`licensesURL` embedded in the binary) read from `kfet/fir-dist` so they
-work without GitHub authentication regardless of the source repo's
-visibility.
-
-### Required repo secret
-
-The release workflow uses `FIR_DIST_TOKEN` to push to `kfet/fir-dist`.
-Create a fine-grained Personal Access Token scoped to that repo with
-**Contents: Read and write**, and store it as a repository secret named
-`FIR_DIST_TOKEN` on `kfet/fir`. Without this secret the mirror step is
-skipped with a warning and the source-repo release still succeeds.
-
 
