@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+- **Retired the `hack/` directory.** It was a Kubernetes-ism — a junk-drawer name with no admission criteria, which is how a release-pipeline template and an unrelated one-off debug script ended up as its only two occupants. The `go-licenses` template moved to `release/notices.tpl`, alongside the existing `homebrew/` release inputs (`make notices` and `.github/workflows/release.yml` are otherwise unchanged).
+- **`hack/verify-orphan-toolcall.sh` is now a real e2e test** (`tests/e2e/acp_orphan_test.go`). The script hand-rolled the whole harness — a `sed`-derived session-dir slug, a hardcoded `bin/fir` path, `sleep`-separated JSON-RPC on stdin and a Python stdout parser — and nothing ran it: not the Makefile, not CI, not `make all`. The coverage it was the only thing asserting was therefore rotting silently, because `pkg/session/store/orphan_test.go` stops at the store layer and the ACP suite never loaded an orphaned transcript. The port reuses the existing `runFirWithDelay` harness and the real `store.SessionDirForCwd` instead of duplicating the slug format, and pins the contract one layer up: the actual binary, over a real `session/load`, replays a synthesized `failed` tool result for *both* parallel orphans, persists neither, and repairs the truncated final line **additively** — appending the newline that stops the next append gluing on, while leaving the partial bytes in place as inert garbage.
+
 ## [0.98.3] - 2026-08-17
 
 ### Changed

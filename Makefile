@@ -194,8 +194,8 @@ GO_LICENSES := go run github.com/google/go-licenses@v1.6.0
 
 notices: THIRD_PARTY_NOTICES.md
 
-THIRD_PARTY_NOTICES.md: go.mod go.sum hack/notices.tpl
-	$(call RUN,generate notices,$(GO_LICENSES) report ./cmd/fir --template hack/notices.tpl > $@ 2>/dev/null)
+THIRD_PARTY_NOTICES.md: go.mod go.sum release/notices.tpl
+	$(call RUN,generate notices,$(GO_LICENSES) report ./cmd/fir --template release/notices.tpl > $@ 2>/dev/null)
 
 check-licenses:
 	$(call RUN,check licenses,$(GO_LICENSES) check ./cmd/fir --disallowed_types=forbidden,restricted 2>/dev/null)
