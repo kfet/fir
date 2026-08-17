@@ -326,6 +326,56 @@ func TestEventNoResponse(t *testing.T) {
 	}
 }
 
+// An event carrying an id is a request: the host is waiting to learn that the
+// handler finished (fir does this for shutdown events, then tears the extension
+// down as soon as it acks). The reply must come after the handler returns.
+func TestEventWithIDIsAcked(t *testing.T) {
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	h := newHarness(t, func(a *App) {
+		a.On("session_shutdown", func(p json.RawMessage, ctx *Context) {
+			close(entered)
+			<-release
+		})
+	})
+	defer h.close()
+	h.send(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "init"})
+	h.readMsg()
+
+	h.send(map[string]any{"jsonrpc": "2.0", "id": 7, "method": "event/session_shutdown"})
+
+	// The ack must not arrive before the handler has finished.
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("event handler not invoked")
+	}
+	close(release)
+
+	msg := h.readMsg()
+	if msg.ID == nil || *msg.ID != 7 {
+		t.Fatalf("ack id = %v, want 7", msg.ID)
+	}
+	if msg.Error != nil {
+		t.Fatalf("ack carried an error: %v", msg.Error)
+	}
+}
+
+// An unhandled event still has to be acked, or an awaiting host waits out its
+// whole timeout for a handler that was never going to run.
+func TestEventWithIDAckedWhenUnhandled(t *testing.T) {
+	h := newHarness(t, func(a *App) {})
+	defer h.close()
+	h.send(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "init"})
+	h.readMsg()
+
+	h.send(map[string]any{"jsonrpc": "2.0", "id": 8, "method": "event/session_shutdown"})
+	msg := h.readMsg()
+	if msg.ID == nil || *msg.ID != 8 {
+		t.Fatalf("ack id = %v, want 8", msg.ID)
+	}
+}
+
 // testErr is a trivial error type.
 type testErr struct{ msg string }
 

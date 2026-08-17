@@ -324,6 +324,14 @@ func (a *App) handle(msg rpcMessage) {
 		if h, ok := a.events[name]; ok {
 			h(msg.Params, a.ctx)
 		}
+		// An event may arrive as a request when the host wants to know the
+		// handler has finished (e.g. shutdown events, where the host tears the
+		// extension down as soon as it acks). Reply once the handler returns;
+		// a missing handler acks immediately rather than leaving the host to
+		// time out.
+		if msg.ID != nil {
+			a.reply(msg.ID, map[string]any{"ok": true}, nil)
+		}
 
 	default:
 		// Unknown request → method-not-found; unknown notification → ignore.

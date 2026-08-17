@@ -74,10 +74,13 @@ while True:
         break
     method = msg.get("method", "")
     if method == "event/session_shutdown":
-        # Notification: call set_session_data back to the host.
+        # Call set_session_data back to the host, then ack if the host is
+        # awaiting this event (it arrives as a request, carrying an id).
         send({"jsonrpc": "2.0", "id": 100, "method": "set_session_data",
               "params": {"key": "shutdown_key", "value": "shutdown_value"}})
         resp = recv()   # consume the host's ok response
+        if "id" in msg:
+            send({"jsonrpc": "2.0", "id": msg["id"], "result": {"ok": True}})
     elif "id" in msg:
         # Service any other inbound request generically.
         send({"jsonrpc": "2.0", "id": msg["id"], "result": {"ok": True}})

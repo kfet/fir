@@ -174,6 +174,9 @@ _socket: socket.socket | None = None
 _accept_thread: threading.Thread | None = None
 _shutdown = threading.Event()
 
+# Statuses that, once set, no later event may overwrite. See _update_state.
+_TERMINAL_STATUSES = ("ended", "crashed")
+
 
 # ---------------------------------------------------------------------------
 # Sidecar — atomic write
@@ -212,6 +215,20 @@ def _write_sidecar() -> None:
 
 def _update_state(**kwargs: Any) -> None:
     with _state_lock:
+        # `ended` is terminal and must stick. Every event handler runs in its own
+        # worker thread (see the SDK's _run_event), so there is no ordering
+        # guarantee between them: a slow `agent_end` can land *after*
+        # `session_shutdown` and would otherwise rewrite status back to `idle`,
+        # resurrecting a session that has already exited. That is worse than a
+        # cosmetic wrong label — _read_all_sidecars treats "pid gone but status
+        # still running/idle" as `crashed`, so a clean exit gets reported as a
+        # crash. A longer shutdown grace period makes this *more* likely, not
+        # less, which is why only ordering can fix it.
+        #
+        # Non-status fields are still applied: late activity counters are
+        # harmless and remain useful after the session has ended.
+        if _state.get("status") in _TERMINAL_STATUSES:
+            kwargs.pop("status", None)
         _state.update(kwargs)
     _write_sidecar()
 

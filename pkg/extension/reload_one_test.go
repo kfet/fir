@@ -52,7 +52,7 @@ func trustExt(t *testing.T, ts *TrustStore, dir, name, path string) {
 // edits one mid-session, reloads just that one, and asserts its tools are
 // refreshed while the other extension's tools are untouched.
 func TestManager_ReloadOne_RefreshesOnlyTargetTools(t *testing.T) {
-	reloadGrace = 0
+	withShutdownAckTimeout(t, 0)
 	dir := t.TempDir()
 	pathA := writeExtScriptTool(t, dir, "ext-a", "a_tool")
 	pathB := writeExtScriptTool(t, dir, "ext-b", "b_tool")
@@ -134,7 +134,7 @@ func TestManager_ReloadOne_BuiltinRefused(t *testing.T) {
 // TestManager_ReloadOne_DeletedFileUnloads asserts that reloading an
 // extension whose file was deleted cleanly unloads it (stop-only).
 func TestManager_ReloadOne_DeletedFileUnloads(t *testing.T) {
-	reloadGrace = 5 * time.Millisecond
+	withShutdownAckTimeout(t, 5*time.Millisecond)
 	dir := t.TempDir()
 	pathC := writeExtScriptTool(t, dir, "ext-c", "c_tool")
 
@@ -182,7 +182,7 @@ func TestManager_ReloadOne_DeletedFileUnloads(t *testing.T) {
 // error rather than a silent no-op "success". The error names the extension
 // and lists the names that were discovered.
 func TestManager_ReloadOne_NotDiscoveredNotRunning(t *testing.T) {
-	reloadGrace = 0
+	withShutdownAckTimeout(t, 0)
 	dir := t.TempDir()
 	pathD := writeExtScriptTool(t, dir, "ext-d", "d_tool")
 
@@ -222,7 +222,7 @@ func TestManager_ReloadOne_NotDiscoveredNotRunning(t *testing.T) {
 // for the ordinary path: a discovered, running extension still reloads and
 // keeps its tools registered.
 func TestManager_ReloadOne_DiscoveredAndRunningStillReloads(t *testing.T) {
-	reloadGrace = 0
+	withShutdownAckTimeout(t, 0)
 	dir := t.TempDir()
 	pathE := writeExtScriptTool(t, dir, "ext-e", "e_tool")
 

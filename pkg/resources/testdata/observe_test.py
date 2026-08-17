@@ -222,6 +222,30 @@ class TestSidecar(unittest.TestCase):
         self.assertTrue(os.path.exists(path))
         self.assertEqual(self._read_sidecar()["status"], "ended")
 
+    def test_ended_is_terminal_and_survives_a_late_event(self) -> None:
+        """A late handler must not resurrect a session that has already ended.
+
+        Every event runs in its own SDK worker thread, so `agent_end` can land
+        after `session_shutdown`. If it were allowed to rewrite status back to
+        `idle`, observe would then classify the exited session as *crashed*
+        (pid gone + non-terminal status).
+        """
+        ctx = _make_ctx()
+        observe.on_session_start({"session_id": self.session_id}, ctx)
+        observe.on_session_shutdown({}, ctx)
+        self.assertEqual(self._read_sidecar()["status"], "ended")
+
+        # Out-of-order arrivals, each of which used to clobber the terminal state.
+        observe.on_agent_end({}, ctx)
+        observe.on_agent_start({}, ctx)
+        self.assertEqual(self._read_sidecar()["status"], "ended")
+
+        # Non-status fields still land — late activity counters stay useful.
+        observe.on_turn_end({}, ctx)
+        d = self._read_sidecar()
+        self.assertEqual(d["status"], "ended")
+        self.assertEqual(d["activity"]["last_event_type"], "turn_end")
+
     def test_sidecar_is_atomic(self) -> None:
         """Writes go through tmp-rename so readers never see partial JSON."""
         ctx = _make_ctx()

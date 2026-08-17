@@ -773,6 +773,36 @@ func (b *Bridge) EmitEvent(name string, data any) error {
 	return codec.WriteNotification("event/"+name, data)
 }
 
+// EmitEventAwait delivers an event as a JSON-RPC *request* and waits for the
+// extension to acknowledge it. The ack means the handler returned, so any
+// inbound calls it made (set_session_data, a sidecar write) have already landed
+// — which is what lets a caller tear the extension down immediately afterwards
+// instead of guessing at a grace period.
+//
+// The wait is a hard cap, deliberately not CallHook's activity-aware deadline:
+// an extension with a chatty background thread would reset that deadline
+// indefinitely and never ack, hanging shutdown. An extension that does not
+// answer (hung, or built against an SDK that treats events as notifications
+// only) costs exactly timeout and is then abandoned, which is no worse than the
+// fixed sleep this replaced.
+//
+// Returns nil without sending anything if the extension did not subscribe —
+// otherwise every unsubscribed extension would cost the full timeout. A
+// non-positive timeout means "do not await": the event is delivered as a plain
+// notification, exactly as EmitEvent would.
+func (b *Bridge) EmitEventAwait(ctx context.Context, name string, data any, timeout time.Duration) error {
+	if !b.subscribedEvents[name] {
+		return nil
+	}
+	if timeout <= 0 {
+		return b.EmitEvent(name, data)
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	_, err := b.CallHook(ctx, "event/"+name, data, 0)
+	return err
+}
+
 // DefaultToolCallTimeout is the host-side timeout applied to an extension's
 // tool_call hook when the tool declares no explicit Timeout (ToolSpec.Timeout
 // == 0). The wait is activity-aware (see Bridge.CallHook): a chatty extension

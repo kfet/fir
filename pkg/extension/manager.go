@@ -536,26 +536,14 @@ func (m *Manager) StopWithReason(reason, errMsg string) error {
 		payload.Error = errMsg
 	}
 
-	// Send session_end event to all extensions concurrently so slow
-	// extensions on low-powered hardware (e.g. RPi) don't serialise the
-	// shutdown path.  Also send legacy session_shutdown for compat.
-	var wg sync.WaitGroup
-	for _, mb := range bridges {
-		wg.Add(1)
-		go func(mb *managedBridge) {
-			defer wg.Done()
-			_ = mb.bridge.EmitEvent("session_end", payload)
-			_ = mb.bridge.EmitEvent("session_shutdown", nil)
-		}(mb)
-	}
-	wg.Wait()
-
-	// Brief grace period so extensions can process the shutdown event.
-	time.Sleep(250 * time.Millisecond)
+	// Deliver the shutdown events and wait for each extension to finish handling
+	// them before anything is torn down.
+	awaitShutdownEvents(bridges, payload)
 
 	// Stop all processes concurrently — each Stop already has its own
 	// SIGTERM→SIGKILL escalation with timeouts, so parallel teardown is
 	// safe and avoids O(n) sequential waits on slow hardware.
+	var wg sync.WaitGroup
 	for _, mb := range bridges {
 		mb.bridge.UnregisterAuthProviders()
 		mb.bridge.UnregisterProviders()
@@ -617,11 +605,50 @@ func (m *Manager) Reload(ctx context.Context) error {
 	return nil
 }
 
-// reloadGrace is the brief window ReloadOne waits after emitting an
-// extension's session_end before signalling its process, giving the
-// extension's dispatch loop a chance to service the event. Best-effort,
-// mirrors Stop's 250ms grace; a package var so tests can shrink it.
-var reloadGrace = 100 * time.Millisecond
+// awaitShutdownEvents delivers the shutdown events to every given bridge
+// concurrently and waits for each extension to acknowledge them, so a slow
+// handler on low-powered hardware (e.g. an RPi) finishes its work without
+// serialising the shutdown path. `session_shutdown` follows `session_end` as the
+// legacy compat name.
+//
+// The whole round — both events, every extension — shares one shutdownAckTimeout
+// budget, so a legacy extension that acks neither event delays exit once rather
+// than once per event. CallHook writes each request before waiting on it, so an
+// exhausted budget still delivers the second event; only the wait is skipped.
+//
+// The context is deliberately rooted in Background rather than a caller's:
+// teardown must still run to completion when the turn that triggered it has been
+// cancelled.
+func awaitShutdownEvents(bridges []*managedBridge, payload SessionEndPayload) {
+	ctx := context.Background()
+	if shutdownAckTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, shutdownAckTimeout)
+		defer cancel()
+	}
+
+	var wg sync.WaitGroup
+	for _, mb := range bridges {
+		wg.Add(1)
+		go func(mb *managedBridge) {
+			defer wg.Done()
+			_ = mb.bridge.EmitEventAwait(ctx, "session_end", payload, shutdownAckTimeout)
+			_ = mb.bridge.EmitEventAwait(ctx, "session_shutdown", nil, shutdownAckTimeout)
+		}(mb)
+	}
+	wg.Wait()
+}
+
+// shutdownAckTimeout bounds how long a single shutdown event (session_end,
+// session_shutdown) waits for one extension to acknowledge it. The ack means
+// the extension's handler returned, so any set_session_data or sidecar write it
+// made has already landed — see Bridge.EmitEventAwait.
+//
+// It is a hard cap, not a grace period: an extension that acks promptly costs
+// milliseconds, and only a hung or legacy (non-acking) extension pays the full
+// timeout. Extensions are awaited concurrently, so total shutdown cost does not
+// scale with extension count. A package var so tests can shrink or widen it.
+var shutdownAckTimeout = 2 * time.Second
 
 // ReloadOne reloads exactly one extension by name — the targeted counterpart
 // to Reload. An extension that created or edited another extension mid-session
@@ -693,14 +720,10 @@ func (m *Manager) ReloadOne(ctx context.Context, name string) error {
 	m.mu.Unlock()
 
 	if running != nil {
-		// Let the extension clean up before we tear it down. The grace
-		// gives its dispatch loop a brief window to service the event
-		// before the process is signalled (best-effort, like Stop).
-		_ = running.bridge.EmitEvent("session_end", SessionEndPayload{Reason: "reload"})
-		_ = running.bridge.EmitEvent("session_shutdown", nil)
-		if reloadGrace > 0 {
-			time.Sleep(reloadGrace)
-		}
+		// Let the extension clean up before we tear it down: await its shutdown
+		// handlers so any work they do is complete before the process is
+		// signalled.
+		awaitShutdownEvents([]*managedBridge{running}, SessionEndPayload{Reason: "reload"})
 
 		// Remove ONLY this extension's tools from the session's tool set.
 		// The bridge already knows its own tool names from caps.Tools; we
@@ -1156,9 +1179,10 @@ func (m *Manager) CollectSessionData() map[string]map[string]string {
 
 // ShutdownAndCollect is the /reexec equivalent of Stop+CollectSessionData.
 // It fires "session_shutdown" to every running extension so their handlers
-// can call ctx.set_session_data(...), waits for a grace period so the
-// bridge's dispatch loop can service those inbound RPC calls, and then
-// returns a snapshot of all per-extension session data.
+// can call ctx.set_session_data(...), waits for each to acknowledge that its
+// handler returned, and then returns a snapshot of all per-extension session
+// data. Because the ack lands only after the handler's inbound RPCs have been
+// serviced, the data is complete by construction rather than by grace period.
 //
 // Unlike Stop, it does NOT kill the extension processes — the caller
 // (handleReexecCommand) shuts down the TUI immediately after, and
@@ -1169,16 +1193,7 @@ func (m *Manager) ShutdownAndCollect() map[string]map[string]string {
 	bridges := append([]*managedBridge(nil), m.bridges...)
 	m.mu.Unlock()
 
-	for _, mb := range bridges {
-		_ = mb.bridge.EmitEvent("session_end", SessionEndPayload{Reason: "reexec"})
-		_ = mb.bridge.EmitEvent("session_shutdown", nil)
-	}
-
-	// Give extensions time to run their session_shutdown handlers and make
-	// the resulting set_session_data RPC calls back to us.  The bridge's
-	// Run goroutine is still alive at this point (the context has not been
-	// cancelled yet), so it can service those inbound requests.
-	time.Sleep(500 * time.Millisecond)
+	awaitShutdownEvents(bridges, SessionEndPayload{Reason: "reexec"})
 
 	return m.CollectSessionData()
 }

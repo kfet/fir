@@ -706,19 +706,31 @@ function dispatch(msg, name, subscribedEvents, ctx, authCtx, out) {
     return;
   }
 
-  // --- events ---
+  // --- events (notifications, or requests when the host wants an ack) ---
   if (method.startsWith("event/")) {
     const eventName = method.slice(6);
     const handler = _eventHandlers.get(eventName);
-    if (handler) {
-      Promise.resolve()
-        .then(() => handler(params, ctx))
-        .catch((err) => {
-          if (!String(err).includes("shutdown")) {
-            process.stderr.write(`Event handler error (${eventName}): ${err}\n`);
-          }
-        });
+    // Ack once the handler has settled — that is what an awaiting host is
+    // waiting for. Sent even when the handler rejects, so a broken handler
+    // costs the host nothing but a lost result. A missing handler acks at once
+    // rather than leaving the host hanging.
+    const ack = () => {
+      if (id != null) {
+        writeMessage(makeResponse(id, { ok: true }), out);
+      }
+    };
+    if (!handler) {
+      ack();
+      return;
     }
+    Promise.resolve()
+      .then(() => handler(params, ctx))
+      .catch((err) => {
+        if (!String(err).includes("shutdown")) {
+          process.stderr.write(`Event handler error (${eventName}): ${err}\n`);
+        }
+      })
+      .finally(ack);
     return;
   }
 

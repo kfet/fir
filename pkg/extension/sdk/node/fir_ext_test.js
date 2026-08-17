@@ -53,6 +53,19 @@ fir.providerStream("stream-prov", function* () {
 
 // --- Drive run() over in-memory streams ------------------------------------
 
+// 3. An event handler used to assert the acknowledged-event path: fir may
+// deliver an event as a request (with an id) when it needs to know the handler
+// finished — the ack must not be sent until it has.
+let shutdownHandlerDone = false;
+let releaseShutdown;
+const shutdownReleased = new Promise((r) => {
+  releaseShutdown = r;
+});
+fir.on("session_shutdown", async () => {
+  await shutdownReleased;
+  shutdownHandlerDone = true;
+});
+
 const input = new PassThrough();
 const out = new PassThrough();
 const lines = [];
@@ -134,6 +147,8 @@ async function main() {
   process.stderr.write = origWrite;
   assert.ok(/too-late.*after init/.test(warned), "post-init registration warns");
 
+  await testEventAck();
+
   input.end();
   console.log("ok - fir_ext provider surface + pi_compat mapping");
 }
@@ -200,6 +215,38 @@ function testMapHookResultToolCall() {
     null,
     "undefined result → null (no opinion)"
   );
+}
+
+// --- Acknowledged events (fir → extension as a request) --------------------
+//
+// An event with an id is a request: fir is waiting to learn the handler
+// finished, then tears the extension down. Acking early would reintroduce the
+// bug this replaced (handlers cut off mid-write), so assert the ordering, not
+// just the reply.
+async function testEventAck() {
+  send({ jsonrpc: "2.0", id: 90, method: "event/session_shutdown", params: {} });
+  await wait(20);
+  assert.ok(!byId(90), "ack must not be sent while the handler is still running");
+  assert.ok(!shutdownHandlerDone, "handler should still be pending");
+
+  releaseShutdown();
+  await wait(20);
+  const ack = byId(90);
+  assert.ok(ack, "ack sent once the handler resolved");
+  assert.ok(shutdownHandlerDone, "handler completed before the ack");
+  assert.ok(!ack.error, "ack is a result, not an error");
+
+  // An event with no handler must still ack, or an awaiting host waits out its
+  // whole timeout for a handler that was never going to run.
+  send({ jsonrpc: "2.0", id: 91, method: "event/no_such_event", params: {} });
+  await wait(20);
+  assert.ok(byId(91), "unhandled event still acked");
+
+  // A plain notification (no id) must stay silent.
+  const before = lines.length;
+  send({ jsonrpc: "2.0", method: "event/no_such_event", params: {} });
+  await wait(20);
+  assert.strictEqual(lines.length, before, "notification produced no response");
 }
 
 main()

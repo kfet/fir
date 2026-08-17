@@ -360,11 +360,35 @@ Return `null` or `{}` to show nothing.
 
 ## Events  (fir → extension, Notifications)
 
-Events are JSON-RPC **notifications** — no `id`, no response expected.  The
-method name is `event/<event_name>`.
+Events are normally JSON-RPC **notifications** — no `id`, no response expected.
+The method name is `event/<event_name>`.
 
 Subscribe by listing the **bare event name** (without the `event/` prefix) in
 the `events` array of the init response.  For hooks, use the full `hook/` name.
+
+### Acknowledged events
+
+An event may also arrive as a **request**, carrying an `id`.  fir does this when
+it needs to know the handler has *finished* — the shutdown events (`session_end`,
+`session_shutdown`) are delivered this way, because fir tears the extension down
+as soon as they are acknowledged and previously had to guess at a grace period.
+
+An extension **must reply** to an event that carries an `id`:
+
+- Reply once the handler has returned, not on receipt — the ack is what tells
+  fir the handler's work (including any outbound calls it made, such as
+  `set_session_data`) is complete.
+- Reply even if the handler raised; a broken handler should cost fir nothing
+  but a lost result.
+- Reply immediately if no handler is registered for the event, rather than
+  leaving fir to wait out its timeout.
+- The result is ignored; `{"ok": true}` is conventional.
+
+All three bundled SDKs (Python, Node, Go) do this for you — an extension author
+writes an ordinary event handler and the ack is automatic, so `demo.py` and
+friends need no changes.  An extension that speaks the protocol by hand (or is
+built against an older SDK) simply never replies: fir waits out a bounded
+timeout and proceeds, which is no worse than the fixed sleep this replaced.
 
 ### Event Reference
 

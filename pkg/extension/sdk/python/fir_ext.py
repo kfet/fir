@@ -262,13 +262,21 @@ Response (optional ``message`` shown in the TUI)::
     {"jsonrpc":"2.0","id":4,"result":{"message":"Done!"}}
 
 -------------------------------------------------------------------------------
-EVENTS  (fir → extension, Notification)
+EVENTS  (fir → extension, Notification or acknowledged request)
 -------------------------------------------------------------------------------
 
-Events are JSON-RPC **notifications** — they have no ``id`` and no response is
-expected.  The method name is ``event/<event_name>``.  Subscribe by listing the
-bare event name (without the ``event/`` prefix) in the ``events`` array of the
-init response.
+Events are normally JSON-RPC **notifications** — they have no ``id`` and no
+response is expected.  The method name is ``event/<event_name>``.  Subscribe by
+listing the bare event name (without the ``event/`` prefix) in the ``events``
+array of the init response.
+
+An event may instead arrive as a **request**, carrying an ``id``, when fir needs
+to know the handler has finished — the shutdown events (``session_end``,
+``session_shutdown``) are delivered this way, because fir tears the extension
+down as soon as they are acknowledged.  This SDK handles the ack for you: it
+replies once your handler returns (even if it raised), so a handler that writes
+a file or calls ``ctx.set_session_data`` is guaranteed to complete before fir
+stops the process.  Write an ordinary event handler and ignore the distinction.
 
 +-------------------------+------------------------------------------------+
 | Event                   | ``params`` shape                               |
@@ -3838,29 +3846,40 @@ def run(
             _track_worker(t)
             return
 
-        # --- events (async notifications, no id) ---
+        # --- events (notifications, or requests when the host wants an ack) ---
         if method.startswith("event/"):
             event_name = method[len("event/") :]
             handler = _event_handlers.get(event_name)
-            if handler is not None:
-                # Run in a worker thread so the read loop stays free to deliver
-                # responses to any ctx.xxx() outbound calls the handler makes.
-                def _run_event(h=handler, p=params):
-                    try:
-                        h(p, ctx)
-                    except RuntimeError as exc:
-                        if "shutdown" not in str(exc):
-                            import traceback
+            if handler is None:
+                # Nothing to run, but an awaiting host must not be left hanging.
+                if msg_id is not None:
+                    _write_message(_make_response(msg_id, {"ok": True}), out)
+                return
 
-                            traceback.print_exc(file=sys.stderr)
-                    except Exception:
+            # Run in a worker thread so the read loop stays free to deliver
+            # responses to any ctx.xxx() outbound calls the handler makes.
+            def _run_event(h=handler, p=params, rid=msg_id):
+                try:
+                    h(p, ctx)
+                except RuntimeError as exc:
+                    if "shutdown" not in str(exc):
                         import traceback
 
                         traceback.print_exc(file=sys.stderr)
+                except Exception:
+                    import traceback
 
-                t = threading.Thread(target=_run_event, daemon=True)
-                t.start()
-                _track_worker(t)
+                    traceback.print_exc(file=sys.stderr)
+                finally:
+                    # Ack once the handler has returned — that is what the host
+                    # is waiting for. Sent even when the handler raised, so a
+                    # broken handler costs the host nothing but a lost result.
+                    if rid is not None:
+                        _write_message(_make_response(rid, {"ok": True}), out)
+
+            t = threading.Thread(target=_run_event, daemon=True)
+            t.start()
+            _track_worker(t)
             return
 
         # --- streaming side_query deltas (notification, no id) ---
