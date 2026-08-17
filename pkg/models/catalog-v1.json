@@ -1,7 +1,52 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-08-16T01:05:00Z",
+  "generatedAt": "2026-08-17T01:04:04Z",
   "providers": {
+    "huggingface": {
+      "models": [
+        {
+          "id": "Qwen/Qwen3.8-2.4T-A95B",
+          "name": "Qwen3.8 2.4T A95B",
+          "api": "openai-completions",
+          "reasoning": true,
+          "input": [
+            "text"
+          ],
+          "cost": {
+            "input": 2.5,
+            "output": 6.25,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          },
+          "contextWindow": 262144,
+          "maxTokens": 131072,
+          "compat": {
+            "supportsDeveloperRole": false
+          }
+        }
+      ]
+    },
+    "opencode-go": {
+      "modelOverrides": {
+        "deepseek-v4-flash": {
+          "name": "DeepSeek V4 Flash",
+          "cost": {
+            "input": 0.22,
+            "output": 0.66,
+            "cacheRead": 0.007,
+            "cacheWrite": 0
+          }
+        },
+        "deepseek-v4-pro": {
+          "cost": {
+            "input": 0.66,
+            "output": 1.98,
+            "cacheRead": 0.022,
+            "cacheWrite": 0
+          }
+        }
+      }
+    },
     "openrouter": {
       "models": [
         {
@@ -34,7 +79,7 @@
           "cost": {
             "input": 0.45,
             "output": 3.2,
-            "cacheRead": 0,
+            "cacheRead": 0.05,
             "cacheWrite": 0
           },
           "contextWindow": 262144,
@@ -44,17 +89,87 @@
       "modelOverrides": {
         "deepseek/deepseek-v4-flash": {
           "cost": {
-            "input": 0.06426,
-            "output": 0.12852,
-            "cacheRead": 0.012852,
+            "input": 0.08386,
+            "output": 0.16772,
+            "cacheRead": 0.016772,
             "cacheWrite": 0
           }
+        },
+        "deepseek/deepseek-v4-pro": {
+          "name": "DeepSeek: DeepSeek V4 Pro 0423",
+          "cost": {
+            "input": 0.66,
+            "output": 1.98,
+            "cacheRead": 0.022,
+            "cacheWrite": 0
+          },
+          "maxTokens": 384000
+        },
+        "deepseek/deepseek-v4-pro-0813": {
+          "cost": {
+            "input": 0.66,
+            "output": 1.98,
+            "cacheRead": 0.022,
+            "cacheWrite": 0
+          }
+        },
+        "google/gemma-4-26b-a4b-it": {
+          "cost": {
+            "input": 0.07,
+            "output": 0.34,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          },
+          "maxTokens": 16384
+        },
+        "moonshotai/kimi-k2.6": {
+          "cost": {
+            "input": 0.95,
+            "output": 4,
+            "cacheRead": 0.16,
+            "cacheWrite": 0
+          }
+        },
+        "nvidia/nemotron-3-nano-30b-a3b": {
+          "cost": {
+            "input": 0.05,
+            "output": 0.2,
+            "cacheRead": 0.03,
+            "cacheWrite": 0
+          },
+          "maxTokens": 262144
+        },
+        "nvidia/nemotron-3.5-lightning": {
+          "cost": {
+            "input": 0.08,
+            "output": 0.2,
+            "cacheRead": 0.04,
+            "cacheWrite": 0
+          },
+          "maxTokens": 131072
         },
         "qwen/qwen-plus-2025-07-28:thinking": {
           "cost": {
             "input": 0.26,
             "output": 0.78,
             "cacheRead": 0,
+            "cacheWrite": 0
+          }
+        },
+        "qwen/qwen3-30b-a3b": {
+          "cost": {
+            "input": 0.13,
+            "output": 0.52,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          },
+          "maxTokens": 8192
+        },
+        "qwen/qwen3-vl-235b-a22b-instruct": {
+          "cost": {
+            "input": 0.21,
+            "output": 1.9,
+            "cacheRead": 0.1,
             "cacheWrite": 0
           }
         },
@@ -67,6 +182,14 @@
           },
           "maxTokens": 65536
         },
+        "qwen/qwen3.6-35b-a3b": {
+          "cost": {
+            "input": 0.14,
+            "output": 1,
+            "cacheRead": 0.05,
+            "cacheWrite": 0
+          }
+        },
         "tencent/hy3-preview": {
           "cost": {
             "input": 0.18,
@@ -75,37 +198,41 @@
             "cacheWrite": 0
           }
         },
-        "z-ai/glm-5.2": {
+        "z-ai/glm-4.6": {
           "cost": {
-            "input": 0.462,
-            "output": 1.452,
-            "cacheRead": 0.0858,
+            "input": 0.5,
+            "output": 2,
+            "cacheRead": 0.1,
             "cacheWrite": 0
           }
         },
+        "z-ai/glm-5.2": {
+          "cost": {
+            "input": 0.76,
+            "output": 2.42,
+            "cacheRead": 0.14,
+            "cacheWrite": 0
+          },
+          "maxTokens": 262144
+        },
         "~deepseek/deepseek-v4-flash-latest": {
           "cost": {
-            "input": 0.0675,
-            "output": 0.135,
-            "cacheRead": 0.0135,
+            "input": 0.0603,
+            "output": 0.1206,
+            "cacheRead": 0.01206,
             "cacheWrite": 0
           },
           "maxTokens": 262144
         }
       }
     },
-    "poe": {
+    "vercel-ai-gateway": {
       "models": [
         {
-          "id": "qwen3.8-27b-el",
-          "name": "Qwen3.8-27B-EL",
-          "api": "openai-completions",
-          "reasoning": false,
-          "reasoningEffortValues": [
-            "low",
-            "medium",
-            "xhigh"
-          ],
+          "id": "alibaba/qwen3.8-27b",
+          "name": "Qwen3.8 27B",
+          "api": "anthropic-messages",
+          "reasoning": true,
           "input": [
             "text",
             "image"
@@ -116,10 +243,37 @@
             "cacheRead": 0,
             "cacheWrite": 0
           },
-          "contextWindow": 256000,
-          "maxTokens": 8192
+          "contextWindow": 262144,
+          "maxTokens": 262133
+        },
+        {
+          "id": "nvidia/nemotron-3.5-lightning",
+          "name": "Nemotron 3.5 Lightning 30B",
+          "api": "anthropic-messages",
+          "reasoning": true,
+          "input": [
+            "text"
+          ],
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          },
+          "contextWindow": 262144,
+          "maxTokens": 131072
         }
-      ]
+      ],
+      "modelOverrides": {
+        "alibaba/qwen3.8-2.4t-a95b": {
+          "cost": {
+            "input": 2,
+            "output": 6,
+            "cacheRead": 0.2,
+            "cacheWrite": 0
+          }
+        }
+      }
     }
   }
 }
