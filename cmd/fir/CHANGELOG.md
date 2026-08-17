@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [0.98.3] - 2026-08-17
+
+### Changed
+- **Model catalog regenerated** at release time: new upstream models picked up (`gpt-5.6-luna` / `-sol` / `-terra` on Bedrock, Qwen3.8 family including `Qwen3.8-2.4T-A95B` and `qwen3.8-27b`, `nemotron-3.5-lightning`, `dots-3-note-preview`), plus routine pricing/limit refresh.
+
 ## [0.98.2] - 2026-08-15
 
 ### Fixed
