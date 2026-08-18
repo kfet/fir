@@ -1225,7 +1225,7 @@ func (m *InteractiveMode) handleReloadCommand() {
 		return
 	}
 
-	m.showStatus("Reloading extensions, skills, themes, and MCP servers...")
+	m.showStatus("Reloading extensions, skills, themes, MCP servers, and provider auth...")
 
 	// Reload session (re-reads settings.json, skills, system prompt).
 	if err := m.session.Reload(); err != nil {
@@ -1253,13 +1253,14 @@ func (m *InteractiveMode) handleReloadCommand() {
 		}
 	}
 
-	// Re-read the model catalog from disk (models.json + models.d/ fragments)
-	// so newly added models appear without restarting.
+	// Re-read provider credentials and the model catalog from disk (auth.json,
+	// models.json + models.d/ fragments) so providers authenticated after
+	// startup and newly added models appear without restarting.
 	m.session.ModelRegistryRef().Refresh()
 
 	m.setupAutocomplete()
 	m.rebuildChatFromMessages()
-	m.showStatus("Reloaded extensions, skills, themes, MCP servers, models")
+	m.showStatus("Reloaded extensions, skills, themes, MCP servers, provider auth, models")
 }
 
 // handleMCPReloadCommand performs an MCP-only reload without the full session reload.
@@ -2185,7 +2186,7 @@ func (m *InteractiveMode) buildHelpLines() []string {
   /export         - Export session to HTML file
   /share          - Share session as a secret GitHub gist
   /changelog      - Show changelog entries
-  /reload         - Reload extensions, skills, themes, and MCP servers
+  /reload         - Reload extensions, skills, themes, MCP servers, and provider auth
   /skills         - List loaded skills (/skills <name> for details, /skills install <name> to install)
   /mcp            - Show MCP servers (/mcp <name> for details, /mcp reload to reload configs)
   /reexec [path] - Re-exec into specified or current binary (%s), preserving the session

@@ -515,7 +515,8 @@ func NewModelRegistry(authStorage *auth.AuthStorage, modelsJsonPath string) *Mod
 	return r
 }
 
-// Refresh reloads models from disk (built-in + catalog overlay + custom from
+// Refresh reloads provider credentials from the shared auth storage and
+// reloads models from disk (built-in + catalog overlay + custom from
 // models.json).
 func (r *ModelRegistry) Refresh() {
 	// Serialise rebuilds. Readers never block on the (slow) build, but two
@@ -524,6 +525,14 @@ func (r *ModelRegistry) Refresh() {
 	// which build started with the fresher state.
 	r.refreshMu.Lock()
 	defer r.refreshMu.Unlock()
+
+	// Re-read provider credentials from the shared auth storage before
+	// rebuilding. A provider authenticated after this session started (via
+	// `fir login`, a sibling fir session, or another tool writing the same
+	// auth.json) is otherwise invisible: the in-memory credential map is only
+	// populated at construction, so HasAuth/GetAvailable would keep reporting
+	// the startup state until the process restarts.
+	r.authStorage.Reload()
 
 	// Reset the API provider registry so dynamic registrations are rebuilt.
 	ai.DefaultRegistry.ResetApiProviders()

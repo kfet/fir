@@ -62,7 +62,7 @@ func newCommandRegistry() *commandRegistry {
 	r.register(slashCommand{"export", "Export session to an HTML file (usage: /export [path])", cmdExport})
 	r.register(slashCommand{"login", "Login with OAuth provider (usage: /login [provider-id])", cmdLogin})
 	r.register(slashCommand{"logout", "Log out from provider (usage: /logout [provider-id|all])", cmdLogout})
-	r.register(slashCommand{"reload", "Reload extensions, skills, themes, and MCP servers", cmdReload})
+	r.register(slashCommand{"reload", "Reload extensions, skills, themes, MCP servers, and provider auth", cmdReload})
 	r.register(slashCommand{"skills", "List loaded skills (/skills <name> for details, /skills install <name> to install)", cmdSkills})
 	r.register(slashCommand{"mcp", "Show MCP servers summary; /mcp <name> for details; /mcp reload to reload configs", cmdMCP})
 	return r
@@ -486,9 +486,10 @@ func cmdReload(ctx *commandContext, _ string) {
 		ctx.sendMessage(fmt.Sprintf("MCP reload failed: %v", err))
 	}
 	entry.mcpStatus = mcp.StatusFunc(entry.mcpManager)
-	// Re-read the model catalog from disk (models.json + models.d/ fragments)
-	// so newly added models become visible to subsequent set_model / new
-	// sessions without restarting the agent process.
+	// Re-read provider credentials and the model catalog from disk (auth.json,
+	// models.json + models.d/ fragments) so providers authenticated after
+	// startup and newly added models become visible to subsequent set_model /
+	// new sessions without restarting the agent process.
 	if entry.modelRegistry != nil {
 		entry.modelRegistry.Refresh()
 	}
