@@ -61,7 +61,8 @@ the maintenance cost falls on one person.
 
 - fir is Go. Before submitting, make sure the Go build and tests pass:
   `go build ./... && go vet ./... && go test ./...` (or `make all`, which also
-  runs the Python SDK tests, cross-compiles, and checks licenses).
+  runs the Python SDK tests, cross-compiles, checks licenses, and enforces the
+  coverage gate — see `.covignore`).
 - Keep the diff minimal and focused on one thing.
 - There is **no API stability guarantee** for the `pkg/` tree — it is v0.x and
   internal-shaped even though it is importable. See the README note before

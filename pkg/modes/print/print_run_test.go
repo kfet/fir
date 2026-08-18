@@ -230,3 +230,78 @@ func TestRun_JSONMode_EventsEmittedDuringRun(t *testing.T) {
 		t.Errorf("expected empty stdout in JSON mode with no events, got %q", out)
 	}
 }
+
+// TestRun_InitialPromptError verifies that a failing initial prompt is
+// wrapped and returned rather than swallowed. The test session has no model
+// selected, so Prompt fails deterministically without any network I/O.
+func TestRun_InitialPromptError(t *testing.T) {
+	sess := newPrintTestSession(t)
+
+	err := printmode.Run(sess, printmode.Options{
+		Mode:           printmode.ModeText,
+		InitialMessage: "hello",
+	})
+	if err == nil {
+		t.Fatal("expected an error from the initial prompt")
+	}
+	if !strings.Contains(err.Error(), "initial prompt failed") {
+		t.Errorf("expected the error to be wrapped as an initial-prompt failure, got: %v", err)
+	}
+}
+
+// TestRun_InitialPromptWithImagesError covers the image-attachment branch:
+// InitialImages must be threaded into PromptOptions before Prompt is called.
+func TestRun_InitialPromptWithImagesError(t *testing.T) {
+	sess := newPrintTestSession(t)
+
+	err := printmode.Run(sess, printmode.Options{
+		Mode:           printmode.ModeText,
+		InitialMessage: "describe this",
+		InitialImages:  []ai.ImageContent{{Data: "iVBORw0KGgo=", MimeType: "image/png"}},
+	})
+	if err == nil {
+		t.Fatal("expected an error from the initial prompt")
+	}
+	if !strings.Contains(err.Error(), "initial prompt failed") {
+		t.Errorf("expected the error to be wrapped as an initial-prompt failure, got: %v", err)
+	}
+}
+
+// TestRun_FollowUpPromptError verifies that a failure on one of the follow-up
+// Messages aborts the run with a wrapped error.
+func TestRun_FollowUpPromptError(t *testing.T) {
+	sess := newPrintTestSession(t)
+
+	err := printmode.Run(sess, printmode.Options{
+		Mode:     printmode.ModeText,
+		Messages: []string{"second"},
+	})
+	if err == nil {
+		t.Fatal("expected an error from the follow-up prompt")
+	}
+	if !strings.Contains(err.Error(), "prompt failed") {
+		t.Errorf("expected a wrapped prompt failure, got: %v", err)
+	}
+}
+
+// TestRun_TextMode_LastMessageNotAssistant verifies that Run exits quietly when
+// the transcript ends on a non-assistant message (e.g. the user's own turn),
+// rather than panicking on a nil assistant view.
+func TestRun_TextMode_LastMessageNotAssistant(t *testing.T) {
+	sess := newPrintTestSession(t)
+
+	sess.Agent.ReplaceMessages([]agent.AgentMessage{
+		agent.NewAgentMessage(ai.NewUserMsg("just a user turn", 1000)),
+	})
+
+	var runErr error
+	out := captureStdout(t, func() {
+		runErr = printmode.Run(sess, printmode.Options{Mode: printmode.ModeText})
+	})
+	if runErr != nil {
+		t.Fatalf("expected nil error, got: %v", runErr)
+	}
+	if strings.TrimSpace(out) != "" {
+		t.Errorf("expected no stdout output, got %q", out)
+	}
+}

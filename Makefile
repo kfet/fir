@@ -1,4 +1,4 @@
-.PHONY: build build-all install install-completions test test-e2e test-cover test-race test-live vet fmt clean pgo generate-models check-uv lint-python test-python test-python-sdk test-python-ext test-python-schedule test-python-tmuxspinner test-go-sdk install-uv publish deploy tidy check-size notices check-licenses check-secrets _all_parallel $(CROSS_TARGETS)
+.PHONY: build build-all install install-completions test test-e2e test-cover coverage open_coverage test-race test-live vet fmt clean pgo generate-models check-uv lint-python test-python test-python-sdk test-python-ext test-python-schedule test-python-tmuxspinner test-go-sdk install-uv publish deploy tidy check-size notices check-licenses check-secrets _all_parallel $(CROSS_TARGETS)
 
 # Output directory for all build artifacts
 BINDIR    := bin
@@ -56,7 +56,7 @@ build: tidy
 all: fmt tidy
 	@$(MAKE) -j --no-print-directory _all_parallel TIDY_DONE=1
 
-_all_parallel: vet test-race build-all lint-python test-python-sdk test-python-ext test-python-schedule test-python-tmuxspinner test-node-sdk test-go-sdk check-licenses
+_all_parallel: vet test-race coverage build-all lint-python test-python-sdk test-python-ext test-python-schedule test-python-tmuxspinner test-node-sdk test-go-sdk check-licenses
 
 fmt:
 	@gofmt -s -w .
@@ -151,6 +151,62 @@ test-cover: tidy
 	go test -coverprofile=$(BINDIR)/coverage.out ./...
 	go tool cover -func=$(BINDIR)/coverage.out
 
+# ---------------------------------------------------------------------------
+# Coverage gate (covgate — https://github.com/kfet/covgate)
+#
+# Two tiers, both read from a single profile:
+#
+#   1. Gate: `-ignore=.covignore -min=100`. This is the sibling-repo
+#      convention. Its scope is small today because .covignore excludes most
+#      of the tree (see the ledger header there and BACKLOG.md), but it is an
+#      *invariant*, not a trend: one uncovered statement in a gated package
+#      fails the build. The patterns are non-recursive, so a brand-new
+#      package is gated at 100% until someone deliberately adds it to the
+#      ledger. That is where the gate bites today.
+#
+#   2. Floor: whole tree, no ignore file, `-min=$(COVERAGE_FLOOR)`. Catches
+#      catastrophic rot in the part the ledger excludes, which tier 1 cannot
+#      see. Ratchet COVERAGE_FLOOR up when headroom appears. It may only be
+#      re-based *downward* by a commit that says so and why — landing a
+#      large, legitimately-excluded feature (say a new TUI component)
+#      mechanically dilutes the whole-tree number through no sin, and
+#      without that escape valve the first person to hit it deletes the
+#      tier instead. Tier 1's 100% never moves.
+#
+#      Do NOT set COVERAGE_FLOOR to the currently measured value. The
+#      whole-tree number is not reproducible to the statement: measured
+#      across repeat runs it drifts by a handful of statements (21099-21105
+#      covered of 31495 — timing-dependent paths in the excluded tree). The
+#      ~1 point of slack is ~315 statements, two orders of magnitude more
+#      than the observed drift. Tightening it to the measured value buys
+#      nothing and produces a gate that flaps.
+#
+# `make test-cover` above stays the exploratory target (raw per-function
+# dump, no gate).
+#
+# covgate is pinned as a Go tool directive in go.mod (`go get -tool`), not
+# as `go run …@version`, so the version is visible to `go get -u` and to
+# dependabot instead of rotting in a Makefile string no update tool reads.
+# It costs exactly one `// indirect` require and two go.sum lines, because
+# covgate has zero dependencies. Contrast GO_LICENSES below, which stays on
+# `go run …@version`: a tool directive for it would drag ~25 requires and
+# ~750 go.sum lines into fir's module graph. Rule of thumb — tool directive
+# when the tool is dependency-free, `go run` when it would import a graph.
+# ---------------------------------------------------------------------------
+COVGATE        := go tool covgate
+COVERAGE_FLOOR := 66
+
+coverage: tidy
+	@mkdir -p $(BINDIR)
+	$(call RUN,coverage profile,go test -covermode=set -coverprofile=$(BINDIR)/coverage.tmp.out ./...)
+	$(call RUN,coverage gate (100%),$(COVGATE) -profile=$(BINDIR)/coverage.tmp.out -out=$(BINDIR)/coverage.gated.out -ignore=.covignore -min=100)
+	$(call RUN,coverage floor ($(COVERAGE_FLOOR)%),$(COVGATE) -profile=$(BINDIR)/coverage.tmp.out -out=$(BINDIR)/coverage.full.out -min=$(COVERAGE_FLOOR))
+	@rm -f $(BINDIR)/coverage.tmp.out
+
+# Browse the gated profile (what the 100% tier actually measures).
+open_coverage: coverage
+	go tool cover -html=$(BINDIR)/coverage.gated.out
+
 test-race: tidy
 	$(call RUN,test (race),go test -race ./...)
 
@@ -191,6 +247,9 @@ clean:
 # ---------------------------------------------------------------------------
 
 GO_LICENSES := go run github.com/google/go-licenses@v1.6.0
+# Deliberately NOT a go.mod tool directive (unlike COVGATE above): go-licenses
+# pulls ~25 requires / ~750 go.sum lines, which would bloat the very module
+# graph it exists to audit.
 
 notices: THIRD_PARTY_NOTICES.md
 

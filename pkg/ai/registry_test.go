@@ -206,3 +206,70 @@ func TestIsBuiltInProviderID(t *testing.T) {
 		t.Error("missing provider should not be built-in")
 	}
 }
+
+// TestRegisterProvider_IgnoresUnusable covers the guard that keeps the
+// provider registry free of records that could never be looked up.
+func TestRegisterProvider_IgnoresUnusable(t *testing.T) {
+	before := len(GetRegisteredProviders())
+	RegisterProvider(nil)
+	RegisterProvider(&RegisteredProvider{ID: "", DisplayName: "no id"})
+	if after := len(GetRegisteredProviders()); after != before {
+		t.Errorf("expected registry size to stay %d, got %d", before, after)
+	}
+}
+
+// TestGetRegisteredProviders_SortedByPriorityThenID covers the display
+// ordering every provider picker depends on.
+func TestGetRegisteredProviders_SortedByPriorityThenID(t *testing.T) {
+	ids := []Provider{"test-sort-c", "test-sort-a", "test-sort-b"}
+	t.Cleanup(func() {
+		for _, id := range ids {
+			UnregisterProvider(id)
+		}
+	})
+	RegisterProvider(&RegisteredProvider{ID: "test-sort-c", Priority: 9000})
+	RegisterProvider(&RegisteredProvider{ID: "test-sort-a", Priority: 9001})
+	RegisterProvider(&RegisteredProvider{ID: "test-sort-b", Priority: 9000})
+
+	var got []Provider
+	for _, p := range GetRegisteredProviders() {
+		switch p.ID {
+		case "test-sort-a", "test-sort-b", "test-sort-c":
+			got = append(got, p.ID)
+		}
+	}
+	want := []Provider{"test-sort-b", "test-sort-c", "test-sort-a"}
+	if len(got) != len(want) {
+		t.Fatalf("expected %d test records, got %v", len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("ordering: got %v, want %v", got, want)
+		}
+	}
+
+	// The whole list must be globally sorted, built-ins included.
+	all := GetRegisteredProviders()
+	for i := 1; i < len(all); i++ {
+		prev, cur := all[i-1], all[i]
+		if prev.Priority > cur.Priority || (prev.Priority == cur.Priority && prev.ID > cur.ID) {
+			t.Fatalf("registry not sorted at %d: %+v then %+v", i, prev, cur)
+		}
+	}
+}
+
+// TestIsBuiltInApi_PackageLevel covers the package-level convenience wrapper
+// around DefaultRegistry, which is what extension validation actually calls.
+func TestIsBuiltInApi_PackageLevel(t *testing.T) {
+	const api Api = "test-pkg-level-api"
+	const source = "builtin-ext-api:test-pkg-level"
+	t.Cleanup(func() { DefaultRegistry.UnregisterApiProviders(source) })
+
+	if IsBuiltInApi(api) {
+		t.Fatalf("unregistered api %q must not be built-in", api)
+	}
+	DefaultRegistry.RegisterApiProvider(&ApiProvider{Api: api, Stream: dummyStream}, source)
+	if !IsBuiltInApi(api) {
+		t.Errorf("IsBuiltInApi(%q) = false, want true", api)
+	}
+}

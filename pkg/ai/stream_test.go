@@ -248,3 +248,86 @@ func TestStreamSimple_AdaptiveOffNeverSendsOff(t *testing.T) {
 		t.Fatalf("adaptive off must be resolved to minimal up front, got %v", seen)
 	}
 }
+
+// TestStreamSimple_ThinkingOffPassThrough covers the happy path of the
+// thinking-off fallback wrapper: the provider accepts thinking-off, so every
+// event and the final result must reach the caller untouched and the provider
+// must be called exactly once.
+func TestStreamSimple_ThinkingOffPassThrough(t *testing.T) {
+	r := NewRegistry()
+	calls := 0
+	final := &AssistantMessage{Content: []AssistantContent{NewTextContent("ok")}, StopReason: StopReasonStop}
+	r.RegisterApiProvider(&ApiProvider{
+		Api: "pt-api",
+		StreamSimple: func(ctx context.Context, model *Model, prompt Context, options *SimpleStreamOptions) *AssistantMessageEventStream {
+			calls++
+			s := NewAssistantMessageEventStream()
+			go func() {
+				s.Push(AssistantMessageEvent{Type: EventStart, Partial: final})
+				s.Push(AssistantMessageEvent{Type: EventDone, Reason: StopReasonStop, Message: final})
+				s.End(final)
+			}()
+			return s
+		},
+	}, "")
+
+	model := &Model{API: "pt-api", ID: "m", Reasoning: true}
+	prompt := Context{Messages: []Message{NewUserMsg("hi", 1000)}}
+	stream := StreamSimple(context.Background(), r, model, prompt, &SimpleStreamOptions{Reasoning: ThinkingOff})
+
+	var types []AssistantMessageEventType
+	for ev := range stream.Events {
+		types = append(types, ev.Type)
+	}
+	if calls != 1 {
+		t.Errorf("expected exactly 1 provider call, got %d", calls)
+	}
+	if len(types) != 2 || types[0] != EventStart || types[1] != EventDone {
+		t.Errorf("expected [start done] to pass through, got %v", types)
+	}
+	if stream.Result() != final {
+		t.Errorf("expected the inner result to pass through, got %+v", stream.Result())
+	}
+}
+
+// TestStreamSimple_ThinkingOffErrorAfterStart covers the guard that makes the
+// fallback safe: once output has started, a late error must NOT trigger a
+// silent retry (that would duplicate already-streamed content).
+func TestStreamSimple_ThinkingOffErrorAfterStart(t *testing.T) {
+	r := NewRegistry()
+	calls := 0
+	r.RegisterApiProvider(&ApiProvider{
+		Api: "late-err-api",
+		StreamSimple: func(ctx context.Context, model *Model, prompt Context, options *SimpleStreamOptions) *AssistantMessageEventStream {
+			calls++
+			s := NewAssistantMessageEventStream()
+			go func() {
+				partial := &AssistantMessage{Content: []AssistantContent{NewTextContent("half")}}
+				s.Push(AssistantMessageEvent{Type: EventStart, Partial: partial})
+				s.Push(AssistantMessageEvent{Type: EventError, Reason: StopReasonError, Error: &AssistantMessage{
+					StopReason:   StopReasonError,
+					ErrorMessage: `"thinking.type.disabled" is not supported for this model.`,
+				}})
+				s.End(nil)
+			}()
+			return s
+		},
+	}, "")
+
+	model := &Model{API: "late-err-api", ID: "m", Reasoning: true}
+	prompt := Context{Messages: []Message{NewUserMsg("hi", 1000)}}
+	stream := StreamSimple(context.Background(), r, model, prompt, &SimpleStreamOptions{Reasoning: ThinkingOff})
+
+	sawError := false
+	for ev := range stream.Events {
+		if ev.Type == EventError {
+			sawError = true
+		}
+	}
+	if calls != 1 {
+		t.Errorf("a post-start error must not retry: expected 1 provider call, got %d", calls)
+	}
+	if !sawError {
+		t.Error("expected the error to reach the caller once output had started")
+	}
+}

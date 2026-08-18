@@ -81,6 +81,24 @@ func TestFormatPreamble_RoleMapping(t *testing.T) {
 	}
 }
 
+// TestFormatPreamble_UnknownRolePassesThrough covers the default arm of the
+// role mapper: a channel may carry roles fir has no alias for (e.g. "tool"),
+// and those must survive verbatim rather than be dropped or relabelled.
+func TestFormatPreamble_UnknownRolePassesThrough(t *testing.T) {
+	query := `[
+		{"role":"tool","content":"result 42"},
+		{"role":"user","content":"thanks"}
+	]`
+	preamble, latest := FormatPreamble(json.RawMessage(query))
+
+	if latest != "thanks" {
+		t.Errorf("latest: %q", latest)
+	}
+	if !strings.Contains(preamble, "tool: result 42") {
+		t.Errorf("unknown role should pass through unchanged: %q", preamble)
+	}
+}
+
 func TestFormatPreamble_SkipsEmptyContent(t *testing.T) {
 	query := `[
 		{"role":"user","content":"hi"},

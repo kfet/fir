@@ -1,0 +1,139 @@
+# Coverage exclusions — regex patterns matched against lines of the raw
+# `go test -coverprofile` output, applied before the 100% gate by covgate
+# (https://github.com/kfet/covgate). See `make coverage`.
+#
+# Convention (shared with the sibling repos): file- or directory-level
+# patterns only. NO LINE NUMBERS, NO PER-FUNCTION REGEXES — line numbers
+# shift on any edit above them, and per-function regexes silently mask new
+# untested code added inside the same function.
+#
+# ---------------------------------------------------------------------------
+# READ THIS BEFORE ADDING A LINE
+# ---------------------------------------------------------------------------
+# This list is a DELIBERATE STARTING POINT, not a permanent carve-out. fir
+# was ~67% covered when the gate was adopted, so almost the whole tree is
+# excluded on day one. That is honest debt, tracked in BACKLOG.md
+# ("Coverage gate: shrink the .covignore ledger"), and the goal is to delete
+# lines from here until only the structural section remains.
+#
+# The patterns are deliberately NON-RECURSIVE (`[^/]+\.go:`), which buys two
+# things:
+#
+#   1. A subpackage can be promoted independently — taking pkg/session/store
+#      to 100% does not require pkg/session to get there first.
+#   2. A NEW package is not excluded by anything here, so it must ship at
+#      100% coverage or earn an explicit line in this ledger. That is where
+#      the gate has real teeth today: on new code.
+#
+# Adding a line is a debt entry, not a fix. Prefer restructuring first —
+# push impossible-error branches into a `must…` helper that panics, or move
+# an unmockable dependency behind a thin wrapper at a real domain boundary
+# and exclude only the wrapper.
+#
+# In scope (gated at 100% today): pkg/ai (hand-written), pkg/envvars,
+# pkg/mcp/history, pkg/modes/print.
+
+
+# ===========================================================================
+# SECTION 1 — STRUCTURAL
+# Defensible long-term. These are process entrypoints, terminal rendering,
+# OS/binary-level side effects, and generated code: covering them means
+# testing the runtime, not fir's logic.
+# ===========================================================================
+
+# Generated model catalogue — a 1,249-statement data table emitted by
+# `make generate-models`. It is trivially "100% covered" by its own init(),
+# which would inflate the gated denominator ~4x while asserting nothing.
+^github\.com/kfet/fir/pkg/ai/models_generated\.go:
+
+# Process entrypoint: flag parsing, os.Exit, terminal setup, and the
+# interactive login/OAuth flows (browser hand-off, device codes, live
+# provider round-trips). Anything testable belongs in pkg/*.
+^github\.com/kfet/fir/cmd/fir/[^/]+\.go:
+
+# Build-time code generator. Fetches live provider model catalogues over the
+# network and rewrites pkg/ai/models_generated.go; not part of the shipped
+# binary.
+^github\.com/kfet/fir/cmd/generate-models/[^/]+\.go:
+
+# Bubble Tea TUI: event loop, key handling, and ANSI/viewport rendering.
+# Output is terminal geometry, not values — assertions would pin escape
+# sequences rather than behaviour.
+#
+# Caveat, stated so this stays honest: pkg/modes/interactive/commands.go
+# (~1,100 statements of slash-command dispatch) is the least structural
+# thing in this section. It is here because it is welded to the TUI model,
+# not because dispatch is untestable. Splitting the dispatch table out is a
+# legitimate way to shrink this exclusion.
+^github\.com/kfet/fir/pkg/modes/interactive/[^/]+\.go:
+^github\.com/kfet/fir/pkg/modes/interactive/components/[^/]+\.go:
+^github\.com/kfet/fir/pkg/modes/interactive/theme/[^/]+\.go:
+^github\.com/kfet/fir/pkg/tui/components/[^/]+\.go:
+
+# Self-update: downloads a release archive and replaces the running binary.
+^github\.com/kfet/fir/pkg/update/[^/]+\.go:
+
+# Re-execs the fir binary to resume a session in a fresh process.
+^github\.com/kfet/fir/pkg/session/reexec/[^/]+\.go:
+
+# Shells out to OS clipboard/screenshot binaries (pbpaste, wl-paste, ...).
+^github\.com/kfet/fir/pkg/resources/clipboard/[^/]+\.go:
+
+# Standalone helper program shipped as a skill asset, not linked into fir.
+^github\.com/kfet/fir/pkg/resources/builtin_skills/binary-size/[^/]+\.go:
+
+
+# ===========================================================================
+# SECTION 2 — PURE DEBT
+# These have NO structural excuse. They are ordinary, testable Go that
+# simply is not covered yet. Every line below exists only to be deleted.
+# BACKLOG.md carries the promotion queue, cheapest first.
+# ===========================================================================
+
+# Wire-protocol adapters for each hosted provider. The streamers are already
+# driven by fake HTTP servers in-repo; the gap is breadth, not feasibility.
+# A genuinely unmockable core (vendor SDK dial, websocket transport) may
+# survive as a narrow wrapper exclusion once the rest is covered.
+^github\.com/kfet/fir/pkg/ai/providers/[^/]+\.go:
+^github\.com/kfet/fir/pkg/ai/providers/declcfg/[^/]+\.go:
+
+# Env-var credential detection (which var names a provider reads, and
+# whether one is set). Pure string and os.Getenv work — testable with
+# t.Setenv, just untested.
+^github\.com/kfet/fir/pkg/ai/envkeys/[^/]+\.go:
+
+# Extension host: JSON-RPC over stdio to subprocess extensions. Subprocess
+# spawning is real, but the protocol, manager and bridge layers are pure
+# logic already exercised by in-repo integration tests.
+^github\.com/kfet/fir/pkg/extension/[^/]+\.go:
+^github\.com/kfet/fir/pkg/extension/apikind/[^/]+\.go:
+^github\.com/kfet/fir/pkg/extension/sdk/[^/]+\.go:
+
+# MCP client/server plumbing and the autoreply channel policy.
+^github\.com/kfet/fir/pkg/mcp/[^/]+\.go:
+^github\.com/kfet/fir/pkg/mcp/autoreply/[^/]+\.go:
+
+# ACP mode: JSON-RPC method dispatch and session/tool-call mapping. Pure
+# request/response translation.
+^github\.com/kfet/fir/pkg/modes/acp/[^/]+\.go:
+
+# Session runtime, compaction and the on-disk session store.
+^github\.com/kfet/fir/pkg/session/[^/]+\.go:
+^github\.com/kfet/fir/pkg/session/compaction/[^/]+\.go:
+^github\.com/kfet/fir/pkg/session/store/[^/]+\.go:
+
+# Model registry/resolution and the live-model refresh path.
+^github\.com/kfet/fir/pkg/models/[^/]+\.go:
+
+# Settings/config resolution, credential storage, package manager, and
+# skill/resource loading — all file-system and JSON work.
+^github\.com/kfet/fir/pkg/config/[^/]+\.go:
+^github\.com/kfet/fir/pkg/auth/[^/]+\.go:
+^github\.com/kfet/fir/pkg/pkg/[^/]+\.go:
+^github\.com/kfet/fir/pkg/resources/[^/]+\.go:
+
+# Structured logging and its file rotation.
+^github\.com/kfet/fir/pkg/log/[^/]+\.go:
+
+# Tool schema/plan codecs used by the agent runtime.
+^github\.com/kfet/fir/pkg/agent/tools/[^/]+\.go:

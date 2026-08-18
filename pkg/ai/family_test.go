@@ -203,3 +203,103 @@ func TestCompareGenerations(t *testing.T) {
 		}
 	}
 }
+
+// TestExtractFamily_DottedVendorPrefix covers the alpha-prefix split in
+// modelIDTokens: a vendor-dotted id whose remainder is "<word>.<version>"
+// (documented as "gemini.5" → "gemini" + "5"). The Bedrock-style prefix
+// stripper leaves the inner dot alone because the segment after it is a
+// version, not a hyphenated model name.
+func TestExtractFamily_DottedVendorPrefix(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"gemini.5-pro", "gemini-5-pro"},
+		{"google.gemini.5-pro", "gemini-5-pro"},
+		{"gemini.5", "gemini-5"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			if got := ExtractFamily(tt.input); got != tt.want {
+				t.Errorf("ExtractFamily(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestGenerationVector_MalformedVersionToken covers the parse-failure guard:
+// isVersionToken accepts a trailing bare dot ("3."), but splitting it yields an
+// empty component that Atoi rejects. Callers must see ok=false rather than a
+// truncated vector.
+func TestGenerationVector_MalformedVersionToken(t *testing.T) {
+	for _, id := range []string{"gpt-3.", "gpt-.", "gpt-3..1"} {
+		t.Run(id, func(t *testing.T) {
+			got, ok := GenerationVector(id)
+			if ok || got != nil {
+				t.Errorf("GenerationVector(%q) = %v, %v; want nil, false", id, got, ok)
+			}
+		})
+	}
+}
+
+// TestIsAlpha covers the token classifier directly. The empty-string case is
+// unreachable from modelIDTokens (its caller guarantees a non-empty prefix) but
+// the helper must still be total.
+func TestIsAlpha(t *testing.T) {
+	tests := []struct {
+		in   string
+		want bool
+	}{
+		{"", false},
+		{"gemini", true},
+		{"m2", false},
+		{"Gemini", false},
+		{"gpt-5", false},
+	}
+	for _, tt := range tests {
+		if got := isAlpha(tt.in); got != tt.want {
+			t.Errorf("isAlpha(%q) = %v, want %v", tt.in, got, tt.want)
+		}
+	}
+}
+
+// TestModelIDTokens_NeverEmpty pins the invariant that let ExtractFamily's
+// `if len(family) == 0 { return id }` fallback be deleted: strings.Split never
+// yields an empty slice and every loop iteration appends, so there is always
+// at least one token and therefore always at least one family element. This
+// test is the safety net that branch used to be — if a future edit adds a
+// path through modelIDTokens that appends nothing, this fails loudly rather
+// than silently changing ExtractFamily's contract.
+func TestModelIDTokens_NeverEmpty(t *testing.T) {
+	ids := []string{
+		"", "-", "--", ".", "-.-", "v", "5", "4-5", "3.1", "v3.2",
+		"gemini.5-pro", "google.gemini.5-pro", "minimax-m2.5",
+		"us.anthropic.claude-opus-4-6-v1:0", "deepseek/deepseek-v3.2",
+		"gpt-5-chat-latest", "kimi-k2-thinking", "k2p5", "-preview", "----",
+	}
+	// Plus every model ID fir actually ships, so the corpus tracks the catalog.
+	for _, p := range GetProviders() {
+		for _, m := range GetModels(p) {
+			ids = append(ids, m.ID)
+		}
+	}
+
+	for _, id := range ids {
+		if got := modelIDTokens(id); len(got) == 0 {
+			t.Errorf("modelIDTokens(%q) returned no tokens — ExtractFamily's deleted fallback is needed again", id)
+		}
+	}
+}
+
+// TestExtractFamily_DegenerateIDs pins the one family of inputs that yields an
+// empty result: ids that normalise away to nothing (bare separators, a lone
+// stripped family tag). Verified byte-for-byte identical to the behaviour
+// before the unreachable `len(family) == 0` fallback was deleted — the
+// fallback would have returned the normalised id, which for these is also "".
+func TestExtractFamily_DegenerateIDs(t *testing.T) {
+	for _, id := range []string{"", "-", "--", "----", ".", "-preview"} {
+		if got := ExtractFamily(id); got != "" {
+			t.Errorf("ExtractFamily(%q) = %q, want %q", id, got, "")
+		}
+	}
+}

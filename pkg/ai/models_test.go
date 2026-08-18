@@ -334,3 +334,60 @@ func TestGeneratedModelsRegistered(t *testing.T) {
 		t.Errorf("expected >100 total models, got %d", total)
 	}
 }
+
+// TestUnregisterModel covers the rollback path used when an extension
+// withdraws a provider: individual models are removed, and the provider bucket
+// itself disappears once it is empty so GetProviders() stops reporting it.
+func TestUnregisterModel(t *testing.T) {
+	const provider Provider = "test-unregister-model"
+	t.Cleanup(func() { UnregisterProviderModels(provider) })
+
+	RegisterModel(&Model{ID: "a", Provider: provider})
+	RegisterModel(&Model{ID: "b", Provider: provider})
+
+	// Removing an absent model is a no-op.
+	UnregisterModel(provider, "nonexistent")
+	UnregisterModel("nonexistent-provider", "a")
+	if got := len(GetModels(provider)); got != 2 {
+		t.Fatalf("expected 2 models after no-op removals, got %d", got)
+	}
+
+	UnregisterModel(provider, "a")
+	if GetModel(provider, "a") != nil {
+		t.Error("model 'a' should be gone")
+	}
+	if GetModel(provider, "b") == nil {
+		t.Error("model 'b' should survive")
+	}
+
+	// Removing the last model drops the provider bucket entirely.
+	UnregisterModel(provider, "b")
+	if GetModels(provider) != nil {
+		t.Error("expected nil models after removing the last one")
+	}
+	for _, p := range GetProviders() {
+		if p == provider {
+			t.Errorf("provider %q should no longer be listed", provider)
+		}
+	}
+}
+
+// TestUnregisterProviderModels covers the bulk rollback used on extension
+// shutdown.
+func TestUnregisterProviderModels(t *testing.T) {
+	const provider Provider = "test-unregister-provider"
+	t.Cleanup(func() { UnregisterProviderModels(provider) })
+
+	RegisterModel(&Model{ID: "a", Provider: provider})
+	RegisterModel(&Model{ID: "b", Provider: provider})
+	if got := len(GetModels(provider)); got != 2 {
+		t.Fatalf("expected 2 registered models, got %d", got)
+	}
+
+	UnregisterProviderModels(provider)
+	if GetModels(provider) != nil {
+		t.Error("expected all models gone")
+	}
+	// Idempotent.
+	UnregisterProviderModels(provider)
+}

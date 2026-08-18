@@ -24,6 +24,7 @@ require (
 )
 
 require (
+	github.com/kfet/covgate v0.1.2 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	golang.org/x/image v0.36.0 // indirect
@@ -55,3 +56,5 @@ require (
 	golang.org/x/oauth2 v0.35.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
 )
+
+tool github.com/kfet/covgate/cmd/covgate

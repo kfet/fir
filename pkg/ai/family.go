@@ -92,8 +92,9 @@ func normaliseModelID(modelID string) string {
 //   - Tokens with an alpha prefix like "gemini.5" split into "gemini" + "5".
 //   - Mixed tokens like "m2.5" get their trailing ".N" stripped → "m2".
 //
-// It also returns the normalised id so callers can fall back to it.
-func modelIDTokens(modelID string) ([]string, string) {
+// The result always holds at least one token: strings.Split never returns an
+// empty slice and every loop iteration appends.
+func modelIDTokens(modelID string) []string {
 	id := normaliseModelID(modelID)
 	var expanded []string
 	for _, p := range strings.Split(id, "-") {
@@ -110,7 +111,7 @@ func modelIDTokens(modelID string) ([]string, string) {
 		}
 		expanded = append(expanded, p)
 	}
-	return expanded, id
+	return expanded
 }
 
 // ExtractFamily returns a normalised "base family" string for lineage grouping.
@@ -140,7 +141,7 @@ func modelIDTokens(modelID string) ([]string, string) {
 //	kimi-k2-thinking             → kimi-k2-thinking
 //	k2p5                         → k2p5
 func ExtractFamily(modelID string) string {
-	tokens, id := modelIDTokens(modelID)
+	tokens := modelIDTokens(modelID)
 
 	// Classify tokens: keep word tokens and the FIRST version token (as
 	// the generation marker). Drop subsequent version tokens.
@@ -163,9 +164,6 @@ func ExtractFamily(modelID string) string {
 		family = append(family, p)
 	}
 
-	if len(family) == 0 {
-		return id
-	}
 	return strings.Join(family, "-")
 }
 
@@ -179,7 +177,7 @@ func ExtractFamily(modelID string) string {
 // Returns "" when the id is nothing but version tokens, which callers must
 // treat as "no comparable lineage".
 func ExtractLineage(modelID string) string {
-	tokens, _ := modelIDTokens(modelID)
+	tokens := modelIDTokens(modelID)
 	var lineage []string
 	for _, p := range tokens {
 		if !isVersionToken(p) {
@@ -197,7 +195,7 @@ func ExtractLineage(modelID string) string {
 // k2p5, deepseek-r1). Callers that use the vector to decide whether one model
 // supersedes another MUST stay silent in that case rather than guess.
 func GenerationVector(modelID string) (vec []int, ok bool) {
-	tokens, _ := modelIDTokens(modelID)
+	tokens := modelIDTokens(modelID)
 	for _, p := range tokens {
 		if !isVersionToken(p) {
 			continue

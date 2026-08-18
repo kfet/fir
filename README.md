@@ -187,8 +187,9 @@ for full details.
 ```bash
 make build          # build to ./bin/fir
 make install        # install to $GOPATH/bin
-make all            # build for all targets with all tests
-make test-cover     # run tests with coverage
+make all            # build for all targets with all tests (incl. the coverage gate)
+make test-cover     # run tests with coverage, print the per-function breakdown
+make coverage       # run the covgate coverage gate (see .covignore)
 make clean          # remove build artifacts
 ```
 
