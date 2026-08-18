@@ -90,6 +90,90 @@ fir_ext.run(name="slow-shutdown-ext")
 	}
 }
 
+// A legacy extension that never acks must delay shutdown once, not once per
+// event. Both shutdown events share a single shutdownAckTimeout budget; without
+// that, a non-acking extension subscribed to both costs 2x the timeout on every
+// exit. Timed against awaitShutdownEvents directly rather than Stop, so process
+// teardown (which has its own multi-second SIGTERM/SIGKILL bounds) cannot swamp
+// the signal.
+func TestNonAckingExtensionCostsOneBudgetNotTwo(t *testing.T) {
+	requirePython(t)
+
+	// Hand-rolled protocol: subscribes to both shutdown events and deliberately
+	// never replies, exactly as an extension built against an older SDK behaves.
+	script := strings.TrimSpace(`#!/usr/bin/env python3
+# ---
+# name: silent-ext
+# ---
+import json, sys
+
+def send(msg):
+    sys.stdout.write(json.dumps(msg) + "\n")
+    sys.stdout.flush()
+
+msg = json.loads(sys.stdin.readline())
+send({"jsonrpc": "2.0", "id": msg["id"], "result": {
+    "name": "silent-ext",
+    "tools": [],
+    "events": ["session_end", "session_shutdown"]
+}})
+
+# Read forever, answer nothing.
+while sys.stdin.readline():
+    pass
+`)
+
+	projectDir := t.TempDir()
+	extDir := filepath.Join(projectDir, ".fir", "extensions")
+	if err := os.MkdirAll(extDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	scriptPath := filepath.Join(extDir, "silent-ext.py")
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	const budget = 1 * time.Second
+	withShutdownAckTimeout(t, budget)
+
+	mgr := NewManager(slog.Default())
+	mgr.SetTrustStore(NewTrustStoreWithPath(filepath.Join(t.TempDir(), "trust.json")))
+	hash, _ := ComputeHash(scriptPath)
+	_ = mgr.trust.RecordTrust(projectDir, "silent-ext", hash)
+
+	api := &mockBridgeAPI{}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := mgr.Start(ctx, projectDir, projectDir, api); err != nil {
+		t.Fatalf("manager Start: %v", err)
+	}
+	t.Cleanup(func() { _ = mgr.Stop() })
+	waitForBridges(t, mgr, 1)
+
+	mgr.mu.Lock()
+	bridges := append([]*managedBridge(nil), mgr.bridges...)
+	mgr.mu.Unlock()
+
+	start := time.Now()
+	awaitShutdownEvents(bridges, SessionEndPayload{Reason: "test"})
+	elapsed := time.Since(start)
+
+	// Correct: ~1 budget. Regression (per-event budgets): ~2. The gap is wide
+	// because nothing but goroutine scheduling sits between the two waits.
+	if elapsed > budget*9/5 {
+		t.Errorf("awaitShutdownEvents took %v with a %v budget — the shutdown events "+
+			"are not sharing one budget (a non-acking extension is being waited on twice)",
+			elapsed, budget)
+	}
+	// Sanity: it really did wait, i.e. the extension genuinely never acked and we
+	// are not measuring an early return that would make the bound meaningless.
+	if elapsed < budget/2 {
+		t.Errorf("awaitShutdownEvents returned in %v, well under the %v budget — "+
+			"the fixture must not be acking; this assertion is not testing anything",
+			elapsed, budget)
+	}
+}
+
 // waitForBridges blocks until the manager reports at least n running bridges.
 // Generous cap: the extension handshake spawns a Python interpreter, which is
 // slow on a loaded runner, and an early-exit poll pays nothing on success.

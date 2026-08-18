@@ -61,6 +61,33 @@ func (h *harness) readMsg() rpcMessage {
 	return m
 }
 
+// readMsgWithin is readMsg bounded by a deadline. Use it when asserting that a
+// message *is* emitted: a plain readMsg blocks forever if the App stops sending
+// one, so a regression would hang until the whole test binary times out instead
+// of failing where the assertion is.
+func (h *harness) readMsgWithin(d time.Duration) rpcMessage {
+	h.t.Helper()
+	got := make(chan rpcMessage, 1)
+	go func() {
+		line, err := h.fromApp.ReadBytes('\n')
+		if err != nil {
+			return
+		}
+		var m rpcMessage
+		if err := json.Unmarshal(line, &m); err != nil {
+			return
+		}
+		got <- m
+	}()
+	select {
+	case m := <-got:
+		return m
+	case <-time.After(d):
+		h.t.Fatal("timed out waiting for a message from the App")
+		return rpcMessage{}
+	}
+}
+
 func (h *harness) close() {
 	_ = h.toApp.Close()
 	select {
@@ -352,7 +379,7 @@ func TestEventWithIDIsAcked(t *testing.T) {
 	}
 	close(release)
 
-	msg := h.readMsg()
+	msg := h.readMsgWithin(10 * time.Second)
 	if msg.ID == nil || *msg.ID != 7 {
 		t.Fatalf("ack id = %v, want 7", msg.ID)
 	}
@@ -370,7 +397,7 @@ func TestEventWithIDAckedWhenUnhandled(t *testing.T) {
 	h.readMsg()
 
 	h.send(map[string]any{"jsonrpc": "2.0", "id": 8, "method": "event/session_shutdown"})
-	msg := h.readMsg()
+	msg := h.readMsgWithin(10 * time.Second)
 	if msg.ID == nil || *msg.ID != 8 {
 		t.Fatalf("ack id = %v, want 8", msg.ID)
 	}
