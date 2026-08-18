@@ -1,92 +1,64 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-08-17T01:04:04Z",
+  "generatedAt": "2026-08-18T01:01:59Z",
   "providers": {
     "huggingface": {
       "models": [
         {
-          "id": "Qwen/Qwen3.8-2.4T-A95B",
-          "name": "Qwen3.8 2.4T A95B",
+          "id": "Qwen/Qwen3-VL-235B-A22B-Instruct",
+          "name": "Qwen3 VL 235B A22B Instruct",
           "api": "openai-completions",
-          "reasoning": true,
+          "reasoning": false,
           "input": [
-            "text"
+            "text",
+            "image"
           ],
           "cost": {
-            "input": 2.5,
-            "output": 6.25,
+            "input": 0.3,
+            "output": 1.5,
             "cacheRead": 0,
             "cacheWrite": 0
           },
-          "contextWindow": 262144,
-          "maxTokens": 131072,
+          "contextWindow": 131072,
+          "maxTokens": 32768,
+          "compat": {
+            "supportsDeveloperRole": false
+          }
+        },
+        {
+          "id": "Qwen/Qwen3-VL-235B-A22B-Thinking",
+          "name": "Qwen3 VL 235B A22B Thinking",
+          "api": "openai-completions",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 0.98,
+            "output": 3.95,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          },
+          "contextWindow": 131072,
+          "maxTokens": 32768,
           "compat": {
             "supportsDeveloperRole": false
           }
         }
       ]
     },
-    "opencode-go": {
-      "modelOverrides": {
-        "deepseek-v4-flash": {
-          "name": "DeepSeek V4 Flash",
-          "cost": {
-            "input": 0.22,
-            "output": 0.66,
-            "cacheRead": 0.007,
-            "cacheWrite": 0
-          }
-        },
-        "deepseek-v4-pro": {
-          "cost": {
-            "input": 0.66,
-            "output": 1.98,
-            "cacheRead": 0.022,
-            "cacheWrite": 0
-          }
-        }
-      }
-    },
     "openrouter": {
-      "models": [
-        {
-          "id": "dots-studio/dots-3-note-preview:free",
-          "name": "Dots Studio: Dots3-Note Preview (free)",
-          "api": "openai-completions",
-          "reasoning": true,
-          "input": [
-            "text",
-            "image"
-          ],
+      "modelOverrides": {
+        "deepseek/deepseek-v3.1-terminus": {
           "cost": {
-            "input": 0,
-            "output": 0,
+            "input": 0.27,
+            "output": 1,
             "cacheRead": 0,
             "cacheWrite": 0
           },
-          "contextWindow": 512000,
-          "maxTokens": 512000
+          "maxTokens": 163840
         },
-        {
-          "id": "qwen/qwen3.8-27b",
-          "name": "Qwen: Qwen3.8 27B",
-          "api": "openai-completions",
-          "reasoning": true,
-          "input": [
-            "text",
-            "image"
-          ],
-          "cost": {
-            "input": 0.45,
-            "output": 3.2,
-            "cacheRead": 0.05,
-            "cacheWrite": 0
-          },
-          "contextWindow": 262144,
-          "maxTokens": 131072
-        }
-      ],
-      "modelOverrides": {
         "deepseek/deepseek-v4-flash": {
           "cost": {
             "input": 0.08386,
@@ -96,14 +68,12 @@
           }
         },
         "deepseek/deepseek-v4-pro": {
-          "name": "DeepSeek: DeepSeek V4 Pro 0423",
           "cost": {
             "input": 0.66,
             "output": 1.98,
             "cacheRead": 0.022,
             "cacheWrite": 0
-          },
-          "maxTokens": 384000
+          }
         },
         "deepseek/deepseek-v4-pro-0813": {
           "cost": {
@@ -113,90 +83,78 @@
             "cacheWrite": 0
           }
         },
-        "google/gemma-4-26b-a4b-it": {
+        "openai/gpt-5.6-luna": {
           "cost": {
-            "input": 0.07,
-            "output": 0.34,
-            "cacheRead": 0,
-            "cacheWrite": 0
-          },
-          "maxTokens": 16384
+            "input": 0.2,
+            "output": 1.2,
+            "cacheRead": 0.02,
+            "cacheWrite": 0.25
+          }
         },
-        "moonshotai/kimi-k2.6": {
+        "openai/gpt-5.6-luna-pro": {
           "cost": {
-            "input": 0.95,
-            "output": 4,
-            "cacheRead": 0.16,
+            "input": 0.2,
+            "output": 1.2,
+            "cacheRead": 0.02,
+            "cacheWrite": 0.25
+          }
+        },
+        "openai/gpt-5.6-sol": {
+          "cost": {
+            "input": 2.5,
+            "output": 15,
+            "cacheRead": 0.25,
+            "cacheWrite": 3.125
+          }
+        },
+        "openai/gpt-5.6-sol-pro": {
+          "cost": {
+            "input": 2.5,
+            "output": 15,
+            "cacheRead": 0.25,
+            "cacheWrite": 3.125
+          }
+        },
+        "openai/gpt-5.6-sol-pro:batch": {
+          "cost": {
+            "input": 1.25,
+            "output": 7.5,
+            "cacheRead": 0.125,
             "cacheWrite": 0
           }
         },
-        "nvidia/nemotron-3-nano-30b-a3b": {
+        "openai/gpt-5.6-sol:batch": {
           "cost": {
-            "input": 0.05,
-            "output": 0.2,
-            "cacheRead": 0.03,
-            "cacheWrite": 0
-          },
-          "maxTokens": 262144
-        },
-        "nvidia/nemotron-3.5-lightning": {
-          "cost": {
-            "input": 0.08,
-            "output": 0.2,
-            "cacheRead": 0.04,
-            "cacheWrite": 0
-          },
-          "maxTokens": 131072
-        },
-        "qwen/qwen-plus-2025-07-28:thinking": {
-          "cost": {
-            "input": 0.26,
-            "output": 0.78,
-            "cacheRead": 0,
+            "input": 1.25,
+            "output": 7.5,
+            "cacheRead": 0.125,
             "cacheWrite": 0
           }
         },
-        "qwen/qwen3-30b-a3b": {
+        "openai/gpt-5.6-terra": {
           "cost": {
-            "input": 0.13,
-            "output": 0.52,
-            "cacheRead": 0,
-            "cacheWrite": 0
-          },
-          "maxTokens": 8192
+            "input": 2,
+            "output": 12,
+            "cacheRead": 0.2,
+            "cacheWrite": 2.5
+          }
         },
-        "qwen/qwen3-vl-235b-a22b-instruct": {
+        "openai/gpt-5.6-terra-pro": {
           "cost": {
-            "input": 0.21,
-            "output": 1.9,
-            "cacheRead": 0.1,
-            "cacheWrite": 0
+            "input": 2,
+            "output": 12,
+            "cacheRead": 0.2,
+            "cacheWrite": 2.5
           }
         },
         "qwen/qwen3.6-27b": {
           "cost": {
-            "input": 0.3,
-            "output": 2,
-            "cacheRead": 0.03,
+            "input": 0.6,
+            "output": 3.6,
+            "cacheRead": 0.12,
             "cacheWrite": 0
           },
-          "maxTokens": 65536
-        },
-        "qwen/qwen3.6-35b-a3b": {
-          "cost": {
-            "input": 0.14,
-            "output": 1,
-            "cacheRead": 0.05,
-            "cacheWrite": 0
-          }
-        },
-        "tencent/hy3-preview": {
-          "cost": {
-            "input": 0.18,
-            "output": 0.6,
-            "cacheRead": 0.06,
-            "cacheWrite": 0
-          }
+          "maxTokens": 262144
         },
         "z-ai/glm-4.6": {
           "cost": {
@@ -208,29 +166,127 @@
         },
         "z-ai/glm-5.2": {
           "cost": {
-            "input": 0.76,
-            "output": 2.42,
-            "cacheRead": 0.14,
+            "input": 0.5,
+            "output": 3.15,
+            "cacheRead": 0.115,
+            "cacheWrite": 0
+          },
+          "maxTokens": 131072
+        },
+        "~deepseek/deepseek-v4-flash-latest": {
+          "cost": {
+            "input": 0.0783,
+            "output": 0.1566,
+            "cacheRead": 0.01566,
             "cacheWrite": 0
           },
           "maxTokens": 262144
         },
-        "~deepseek/deepseek-v4-flash-latest": {
+        "~openai/gpt-latest": {
           "cost": {
-            "input": 0.0603,
-            "output": 0.1206,
-            "cacheRead": 0.01206,
-            "cacheWrite": 0
-          },
-          "maxTokens": 262144
+            "input": 2.5,
+            "output": 15,
+            "cacheRead": 0.25,
+            "cacheWrite": 3.125
+          }
         }
       }
     },
     "vercel-ai-gateway": {
       "models": [
         {
-          "id": "alibaba/qwen3.8-27b",
-          "name": "Qwen3.8 27B",
+          "id": "openai/gpt-4.1-fast",
+          "name": "GPT-4.1 (Fast)",
+          "api": "anthropic-messages",
+          "reasoning": false,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 3.5,
+            "output": 14,
+            "cacheRead": 0.875,
+            "cacheWrite": 0
+          },
+          "contextWindow": 1047576,
+          "maxTokens": 32768
+        },
+        {
+          "id": "openai/gpt-4.1-mini-fast",
+          "name": "GPT-4.1 mini (Fast)",
+          "api": "anthropic-messages",
+          "reasoning": false,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 0.7,
+            "output": 2.8,
+            "cacheRead": 0.175,
+            "cacheWrite": 0
+          },
+          "contextWindow": 1047576,
+          "maxTokens": 32768
+        },
+        {
+          "id": "openai/gpt-4.1-nano-fast",
+          "name": "GPT-4.1 nano (Fast)",
+          "api": "anthropic-messages",
+          "reasoning": false,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 0.2,
+            "output": 0.8,
+            "cacheRead": 0.05,
+            "cacheWrite": 0
+          },
+          "contextWindow": 1047576,
+          "maxTokens": 32768
+        },
+        {
+          "id": "openai/gpt-4o-fast",
+          "name": "GPT-4o (Fast)",
+          "api": "anthropic-messages",
+          "reasoning": false,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 4.25,
+            "output": 17,
+            "cacheRead": 2.125,
+            "cacheWrite": 0
+          },
+          "contextWindow": 128000,
+          "maxTokens": 16384
+        },
+        {
+          "id": "openai/gpt-4o-mini-fast",
+          "name": "GPT-4o mini (Fast)",
+          "api": "anthropic-messages",
+          "reasoning": false,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 0.25,
+            "output": 1,
+            "cacheRead": 0.125,
+            "cacheWrite": 0
+          },
+          "contextWindow": 128000,
+          "maxTokens": 16384
+        },
+        {
+          "id": "openai/gpt-5-fast",
+          "name": "GPT-5 (Fast)",
           "api": "anthropic-messages",
           "reasoning": true,
           "input": [
@@ -238,39 +294,252 @@
             "image"
           ],
           "cost": {
-            "input": 0,
-            "output": 0,
-            "cacheRead": 0,
+            "input": 2.5,
+            "output": 20,
+            "cacheRead": 0.25,
             "cacheWrite": 0
           },
-          "contextWindow": 262144,
-          "maxTokens": 262133
+          "contextWindow": 400000,
+          "maxTokens": 128000
         },
         {
-          "id": "nvidia/nemotron-3.5-lightning",
-          "name": "Nemotron 3.5 Lightning 30B",
+          "id": "openai/gpt-5-mini-fast",
+          "name": "GPT-5 mini (Fast)",
           "api": "anthropic-messages",
           "reasoning": true,
           "input": [
-            "text"
+            "text",
+            "image"
           ],
           "cost": {
-            "input": 0,
-            "output": 0,
-            "cacheRead": 0,
+            "input": 0.45,
+            "output": 3.6,
+            "cacheRead": 0.045,
             "cacheWrite": 0
           },
-          "contextWindow": 262144,
-          "maxTokens": 131072
+          "contextWindow": 400000,
+          "maxTokens": 128000,
+          "sweScore": 56.2
+        },
+        {
+          "id": "openai/gpt-5.1-thinking-fast",
+          "name": "GPT 5.1 Thinking (Fast)",
+          "api": "anthropic-messages",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 2.5,
+            "output": 20,
+            "cacheRead": 0.25,
+            "cacheWrite": 0
+          },
+          "contextWindow": 400000,
+          "maxTokens": 128000,
+          "sweScore": 66
+        },
+        {
+          "id": "openai/gpt-5.2-fast",
+          "name": "GPT 5.2 (Fast)",
+          "api": "anthropic-messages",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 3.5,
+            "output": 28,
+            "cacheRead": 0.35,
+            "cacheWrite": 0
+          },
+          "contextWindow": 400000,
+          "maxTokens": 128000,
+          "sweScore": 72.8
+        },
+        {
+          "id": "openai/gpt-5.3-codex-fast",
+          "name": "GPT 5.3 Codex (Fast)",
+          "api": "anthropic-messages",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 3.5,
+            "output": 28,
+            "cacheRead": 0.35,
+            "cacheWrite": 0
+          },
+          "contextWindow": 400000,
+          "maxTokens": 128000,
+          "sweScore": 80
+        },
+        {
+          "id": "openai/gpt-5.4-fast",
+          "name": "GPT 5.4 (Fast)",
+          "api": "anthropic-messages",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 5,
+            "output": 30,
+            "cacheRead": 0.5,
+            "cacheWrite": 0
+          },
+          "contextWindow": 1050000,
+          "maxTokens": 128000,
+          "sweScore": 77.2
+        },
+        {
+          "id": "openai/gpt-5.4-mini-fast",
+          "name": "GPT 5.4 Mini (Fast)",
+          "api": "anthropic-messages",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 1.5,
+            "output": 9,
+            "cacheRead": 0.15,
+            "cacheWrite": 0
+          },
+          "contextWindow": 400000,
+          "maxTokens": 128000,
+          "sweScore": 77.2
+        },
+        {
+          "id": "openai/gpt-5.5-fast",
+          "name": "GPT 5.5 (Fast)",
+          "api": "anthropic-messages",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 12.5,
+            "output": 75,
+            "cacheRead": 1.25,
+            "cacheWrite": 0
+          },
+          "contextWindow": 1000000,
+          "maxTokens": 128000
+        },
+        {
+          "id": "openai/gpt-5.6-luna-fast",
+          "name": "GPT 5.6 Luna (Fast)",
+          "api": "anthropic-messages",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 0.4,
+            "output": 2.4,
+            "cacheRead": 0.04,
+            "cacheWrite": 0.25
+          },
+          "contextWindow": 1050000,
+          "maxTokens": 128000
+        },
+        {
+          "id": "openai/gpt-5.6-sol-fast",
+          "name": "GPT 5.6 Sol (Fast)",
+          "api": "anthropic-messages",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 5,
+            "output": 30,
+            "cacheRead": 0.5,
+            "cacheWrite": 3.125
+          },
+          "contextWindow": 1050000,
+          "maxTokens": 128000
+        },
+        {
+          "id": "openai/gpt-5.6-terra-fast",
+          "name": "GPT 5.6 Terra (Fast)",
+          "api": "anthropic-messages",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 4,
+            "output": 24,
+            "cacheRead": 0.4,
+            "cacheWrite": 2.5
+          },
+          "contextWindow": 1050000,
+          "maxTokens": 128000
+        },
+        {
+          "id": "openai/o3-fast",
+          "name": "o3 (Fast)",
+          "api": "anthropic-messages",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 3.5,
+            "output": 14,
+            "cacheRead": 0.875,
+            "cacheWrite": 0
+          },
+          "contextWindow": 200000,
+          "maxTokens": 100000
+        },
+        {
+          "id": "openai/o4-mini-fast",
+          "name": "o4-mini (Fast)",
+          "api": "anthropic-messages",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 2,
+            "output": 8,
+            "cacheRead": 0.5,
+            "cacheWrite": 0
+          },
+          "contextWindow": 200000,
+          "maxTokens": 100000
         }
       ],
       "modelOverrides": {
-        "alibaba/qwen3.8-2.4t-a95b": {
+        "google/gemini-3.6-flash": {
           "cost": {
-            "input": 2,
-            "output": 6,
-            "cacheRead": 0.2,
+            "input": 0.75,
+            "output": 3.75,
+            "cacheRead": 0.075,
             "cacheWrite": 0
+          }
+        },
+        "openai/gpt-5.6-sol": {
+          "cost": {
+            "input": 2.5,
+            "output": 15,
+            "cacheRead": 0.25,
+            "cacheWrite": 3.125
           }
         }
       }
