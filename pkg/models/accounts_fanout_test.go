@@ -66,7 +66,25 @@ func TestBedrockAccountModelOverrides(t *testing.T) {
 		ContextWindow: 200000,
 		MaxTokens:     8192,
 	})
-	t.Cleanup(func() { ai.UnregisterProviderModels("amazon-bedrock") })
+	// Cleanups run LIFO, so this assertion (registered first) runs LAST —
+	// after the rollback below. It pins the invariant the rollback exists to
+	// respect: this test registers a scratch model under the REAL
+	// amazon-bedrock provider, so it must remove exactly that model and
+	// nothing else. The previous rollback was
+	// ai.UnregisterProviderModels("amazon-bedrock"), which deletes the whole
+	// provider key from the registry — taking all 118 genuine Bedrock models
+	// with it. Since ai.GetProviders() derives from those keys, amazon-bedrock
+	// then stopped being a "built-in" provider for every later test in the
+	// package, and catalog-overlay validation (which may only add models to
+	// built-in providers) rejected the embedded catalog with the misleading
+	// `"baseUrl" is required when defining custom models`. That failure
+	// surfaced only in a full-package run, never when the test was run alone.
+	t.Cleanup(func() {
+		if n := len(ai.GetModels("amazon-bedrock")); n == 0 {
+			t.Errorf("rollback stripped every amazon-bedrock model; it must remove only this test's scratch model")
+		}
+	})
+	t.Cleanup(func() { ai.UnregisterModel("amazon-bedrock", "anthropic.claude-3-5-sonnet") })
 
 	authStore := auth.NewInMemoryAuthStorage(auth.AuthStorageData{
 		"amazon-bedrock": {Type: auth.CredentialTypeAWSIAM, Extra: map[string]any{"mode": "profile", "profile": "default"}},
