@@ -1,48 +1,12 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-08-18T13:13:12Z",
+  "generatedAt": "2026-08-20T01:01:58Z",
   "providers": {
     "amazon-bedrock": {
       "models": [
         {
-          "id": "global.openai.gpt-5.6-luna",
-          "name": "GPT-5.6 Luna (Global)",
-          "api": "bedrock-converse-stream",
-          "reasoning": true,
-          "input": [
-            "text",
-            "image"
-          ],
-          "cost": {
-            "input": 0.22,
-            "output": 1.32,
-            "cacheRead": 0.022,
-            "cacheWrite": 0.275
-          },
-          "contextWindow": 1050000,
-          "maxTokens": 128000
-        },
-        {
-          "id": "global.openai.gpt-5.6-sol",
-          "name": "GPT-5.6 Sol (Global)",
-          "api": "bedrock-converse-stream",
-          "reasoning": true,
-          "input": [
-            "text",
-            "image"
-          ],
-          "cost": {
-            "input": 5.5,
-            "output": 33,
-            "cacheRead": 0.55,
-            "cacheWrite": 6.875
-          },
-          "contextWindow": 1050000,
-          "maxTokens": 128000
-        },
-        {
-          "id": "global.openai.gpt-5.6-terra",
-          "name": "GPT-5.6 Terra (Global)",
+          "id": "xai.grok-4.6",
+          "name": "Grok 4.6",
           "api": "bedrock-converse-stream",
           "reasoning": true,
           "input": [
@@ -51,12 +15,13 @@
           ],
           "cost": {
             "input": 2.2,
-            "output": 13.2,
-            "cacheRead": 0.22,
-            "cacheWrite": 2.75
+            "output": 6.6,
+            "cacheRead": 0.55,
+            "cacheWrite": 0
           },
-          "contextWindow": 1050000,
-          "maxTokens": 128000
+          "contextWindow": 500000,
+          "maxTokens": 500000,
+          "sweScore": 72
         }
       ]
     },
@@ -103,11 +68,149 @@
           "compat": {
             "supportsDeveloperRole": false
           }
+        },
+        {
+          "id": "zai-org/GLM-4.6V-Flash",
+          "name": "GLM-4.6V-Flash",
+          "api": "openai-completions",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 0.3,
+            "output": 0.9,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          },
+          "contextWindow": 131072,
+          "maxTokens": 32768,
+          "compat": {
+            "supportsDeveloperRole": false
+          }
         }
       ]
     },
-    "openrouter": {
+    "opencode": {
       "modelOverrides": {
+        "gpt-5.6-sol": {
+          "name": "GPT-5.6 Sol (50% Off)",
+          "cost": {
+            "input": 2.5,
+            "output": 15,
+            "cacheRead": 0.25,
+            "cacheWrite": 3.125
+          }
+        }
+      }
+    },
+    "opencode-go": {
+      "models": [
+        {
+          "id": "muse-spark-1.2-contributor",
+          "name": "Muse Spark 1.2 Contributor",
+          "api": "openai-responses",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 0.1,
+            "output": 0.2,
+            "cacheRead": 0.002,
+            "cacheWrite": 0
+          },
+          "contextWindow": 1048576,
+          "maxTokens": 131072
+        }
+      ],
+      "modelOverrides": {
+        "gpt-5.6-luna": {
+          "name": "GPT-5.6 Luna",
+          "cost": {
+            "input": 0.2,
+            "output": 1.2,
+            "cacheRead": 0.02,
+            "cacheWrite": 0.25
+          }
+        },
+        "hy3": {
+          "name": "Hy3 (8x usage)",
+          "cost": {
+            "input": 0.0175,
+            "output": 0.0725,
+            "cacheRead": 0.004375,
+            "cacheWrite": 0
+          }
+        }
+      }
+    },
+    "openrouter": {
+      "models": [
+        {
+          "id": "z-ai/glm-5.2:free",
+          "name": "Z.ai: GLM 5.2 (free)",
+          "api": "openai-completions",
+          "reasoning": true,
+          "input": [
+            "text"
+          ],
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          },
+          "contextWindow": 256000,
+          "maxTokens": 256000
+        },
+        {
+          "id": "z-ai/glm-5.3",
+          "name": "Z.ai: GLM 5.3",
+          "api": "openai-completions",
+          "reasoning": true,
+          "input": [
+            "text"
+          ],
+          "cost": {
+            "input": 1.4,
+            "output": 4.4,
+            "cacheRead": 0.26,
+            "cacheWrite": 0
+          },
+          "contextWindow": 1048576,
+          "maxTokens": 131072
+        },
+        {
+          "id": "~z-ai/glm-latest",
+          "name": "Z.ai: GLM Latest",
+          "api": "openai-completions",
+          "reasoning": true,
+          "input": [
+            "text"
+          ],
+          "cost": {
+            "input": 1.4,
+            "output": 4.4,
+            "cacheRead": 0.26,
+            "cacheWrite": 0
+          },
+          "contextWindow": 1048576,
+          "maxTokens": 131072
+        }
+      ],
+      "modelOverrides": {
+        "deepseek/deepseek-chat-v3-0324": {
+          "cost": {
+            "input": 0.25,
+            "output": 1,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          },
+          "maxTokens": 163840
+        },
         "deepseek/deepseek-v3.1-terminus": {
           "cost": {
             "input": 0.27,
@@ -117,27 +220,63 @@
           },
           "maxTokens": 163840
         },
-        "deepseek/deepseek-v4-flash": {
-          "cost": {
-            "input": 0.08386,
-            "output": 0.16772,
-            "cacheRead": 0.016772,
-            "cacheWrite": 0
-          }
-        },
         "deepseek/deepseek-v4-pro": {
           "cost": {
-            "input": 0.66,
-            "output": 1.98,
-            "cacheRead": 0.022,
+            "input": 1.44,
+            "output": 2.88,
+            "cacheRead": 0.1215,
             "cacheWrite": 0
-          }
+          },
+          "maxTokens": 393216
         },
         "deepseek/deepseek-v4-pro-0813": {
           "cost": {
-            "input": 0.66,
-            "output": 1.98,
-            "cacheRead": 0.022,
+            "input": 1.056,
+            "output": 3.168,
+            "cacheRead": 0.0352,
+            "cacheWrite": 0
+          },
+          "maxTokens": 4096
+        },
+        "google/gemma-4-31b-it": {
+          "cost": {
+            "input": 0.09,
+            "output": 0.34,
+            "cacheRead": 0.05,
+            "cacheWrite": 0
+          },
+          "maxTokens": 16384
+        },
+        "minimax/minimax-m2.5": {
+          "cost": {
+            "input": 0.225,
+            "output": 0.9,
+            "cacheRead": 0.06,
+            "cacheWrite": 0
+          },
+          "maxTokens": 4096
+        },
+        "minimax/minimax-m3:batch": {
+          "cost": {
+            "input": 0.3,
+            "output": 1.2,
+            "cacheRead": 0.06,
+            "cacheWrite": 0
+          }
+        },
+        "moonshotai/kimi-k2.7-code:batch": {
+          "cost": {
+            "input": 0.95,
+            "output": 4,
+            "cacheRead": 0.19,
+            "cacheWrite": 0
+          }
+        },
+        "nvidia/nemotron-3-ultra-550b-a55b:batch": {
+          "cost": {
+            "input": 0.6,
+            "output": 3.6,
+            "cacheRead": 0.2,
             "cacheWrite": 0
           }
         },
@@ -205,14 +344,52 @@
             "cacheWrite": 2.5
           }
         },
-        "qwen/qwen3.6-27b": {
+        "qwen/qwen3-next-80b-a3b-instruct": {
           "cost": {
-            "input": 0.6,
-            "output": 3.6,
-            "cacheRead": 0.12,
+            "input": 0.09,
+            "output": 1.1,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          },
+          "maxTokens": 16384
+        },
+        "qwen/qwen3.5-122b-a10b": {
+          "cost": {
+            "input": 0.26,
+            "output": 2.08,
+            "cacheRead": 0,
             "cacheWrite": 0
           },
           "maxTokens": 262144
+        },
+        "qwen/qwen3.5-35b-a3b": {
+          "cost": {
+            "input": 0.25,
+            "output": 1.25,
+            "cacheRead": 0.25,
+            "cacheWrite": 0
+          },
+          "maxTokens": 262144
+        },
+        "qwen/qwen3.6-27b": {
+          "cost": {
+            "input": 0.3,
+            "output": 2,
+            "cacheRead": 0.03,
+            "cacheWrite": 0
+          },
+          "maxTokens": 65536
+        },
+        "qwen/qwen3.8-27b": {
+          "contextWindow": 1000000
+        },
+        "thinkingmachines/inkling:batch": {
+          "cost": {
+            "input": 1,
+            "output": 4.05,
+            "cacheRead": 0.17,
+            "cacheWrite": 0
+          }
         },
         "z-ai/glm-4.6": {
           "cost": {
@@ -224,21 +401,29 @@
         },
         "z-ai/glm-5.2": {
           "cost": {
-            "input": 0.5,
-            "output": 3.15,
-            "cacheRead": 0.115,
+            "input": 0.966,
+            "output": 3.036,
+            "cacheRead": 0.1932,
             "cacheWrite": 0
           },
           "maxTokens": 131072
         },
+        "z-ai/glm-5.2:batch": {
+          "cost": {
+            "input": 1.4,
+            "output": 4.4,
+            "cacheRead": 0.26,
+            "cacheWrite": 0
+          }
+        },
         "~deepseek/deepseek-v4-flash-latest": {
           "cost": {
-            "input": 0.0783,
-            "output": 0.1566,
-            "cacheRead": 0.01566,
+            "input": 0.07,
+            "output": 0.14,
+            "cacheRead": 0.014,
             "cacheWrite": 0
           },
-          "maxTokens": 262144
+          "maxTokens": 1048576
         },
         "~openai/gpt-latest": {
           "cost": {
@@ -246,6 +431,21 @@
             "output": 15,
             "cacheRead": 0.25,
             "cacheWrite": 3.125
+          }
+        }
+      }
+    },
+    "poe": {
+      "modelOverrides": {
+        "deepseek-v3.2-exp": {
+          "contextWindow": 160000
+        },
+        "ds-v4-flash-0731-el": {
+          "cost": {
+            "input": 0.4283,
+            "output": 1.2848,
+            "cacheRead": 0,
+            "cacheWrite": 0
           }
         }
       }
@@ -358,7 +558,8 @@
             "cacheWrite": 0
           },
           "contextWindow": 400000,
-          "maxTokens": 128000
+          "maxTokens": 128000,
+          "sweScore": 77.3
         },
         {
           "id": "openai/gpt-5-mini-fast",
@@ -490,7 +691,8 @@
             "cacheWrite": 0
           },
           "contextWindow": 1000000,
-          "maxTokens": 128000
+          "maxTokens": 128000,
+          "sweScore": 77.3
         },
         {
           "id": "openai/gpt-5.6-luna-fast",
@@ -581,14 +783,49 @@
           },
           "contextWindow": 200000,
           "maxTokens": 100000
+        },
+        {
+          "id": "zai/glm-5.3",
+          "name": "GLM 5.3",
+          "api": "anthropic-messages",
+          "reasoning": true,
+          "input": [
+            "text"
+          ],
+          "cost": {
+            "input": 1.4,
+            "output": 4.4,
+            "cacheRead": 0.26,
+            "cacheWrite": 0
+          },
+          "contextWindow": 1000000,
+          "maxTokens": 12800
         }
       ],
       "modelOverrides": {
+        "alibaba/qwen3.8-27b": {
+          "cost": {
+            "input": 0.55,
+            "output": 3.3,
+            "cacheRead": 0.11,
+            "cacheWrite": 0
+          },
+          "contextWindow": 1000000,
+          "maxTokens": 131072
+        },
         "google/gemini-3.6-flash": {
           "cost": {
             "input": 0.75,
             "output": 3.75,
             "cacheRead": 0.075,
+            "cacheWrite": 0
+          }
+        },
+        "nvidia/nemotron-3.5-lightning": {
+          "cost": {
+            "input": 0.05,
+            "output": 0.2,
+            "cacheRead": 0.01,
             "cacheWrite": 0
           }
         },
@@ -598,6 +835,14 @@
             "output": 15,
             "cacheRead": 0.25,
             "cacheWrite": 3.125
+          }
+        },
+        "zai/glm-5.2": {
+          "cost": {
+            "input": 0.8,
+            "output": 2.55,
+            "cacheRead": 0.16,
+            "cacheWrite": 0
           }
         }
       }
