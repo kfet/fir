@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-08-20T01:01:58Z",
+  "generatedAt": "2026-08-20T04:55:28Z",
   "providers": {
     "amazon-bedrock": {
       "models": [
@@ -93,6 +93,26 @@
       ]
     },
     "opencode": {
+      "models": [
+        {
+          "id": "muse-spark-1.2-contributor-free",
+          "name": "Muse Spark 1.2 Contributor Free",
+          "api": "openai-responses",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          },
+          "contextWindow": 1048576,
+          "maxTokens": 131072
+        }
+      ],
       "modelOverrides": {
         "gpt-5.6-sol": {
           "name": "GPT-5.6 Sol (50% Off)",
