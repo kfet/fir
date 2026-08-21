@@ -438,8 +438,9 @@ otherwise noted.
 |                  | old hosts.                            |                           |
 +------------------+---------------------------------------+---------------------------+
 | ``prepend_       | ``{content}``                         | ``{ok: true}``            |
-| context``        | Adds a ``[SYS_EXT]`` block to the     |                           |
-|                  | system prompt (dynamic context).      |                           |
+| context``        | Appends a ``[SYS_EXT]`` user message  |                           |
+|                  | to live agent state; leaves the       |                           |
+|                  | system prompt (and cache) intact.     |                           |
 +------------------+---------------------------------------+---------------------------+
 | ``reload_        | ``{name}``                            | ``{ok: true}``            |
 | extension``      | Reload one extension by name: stop    |                           |
@@ -3085,11 +3086,16 @@ class Context:
         return []
 
     def prepend(self, content: str) -> None:
-        """Add a [SYS_EXT] block to the system prompt.
+        """Append a [SYS_EXT] block to the live agent conversation.
 
         Extensions use this to inject dynamic context that the LLM treats
         as an authoritative extension of the system prompt. The content is
-        wrapped in ``[SYS_EXT]`` tags automatically by the runtime.
+        wrapped in ``[SYS_EXT]`` tags automatically by the runtime and
+        appended as a user message to the agent's in-memory state — the
+        system prompt itself is left untouched, so this does not invalidate
+        the provider's prompt cache. The message is not persisted to the
+        session store, and it does not start a turn: the model sees it on
+        its next turn.
 
         Parameters
         ----------

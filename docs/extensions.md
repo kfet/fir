@@ -188,6 +188,36 @@ Extensions must be **executable files** (have the execute permission bit set). T
 
 **Shadowing:** If a project-local extension has the same name as a global one, the project-local version takes precedence.
 
+### Builtin extensions
+
+fir embeds a set of extensions in the binary; they are discovered automatically
+at lowest priority (a same-named project or global extension shadows them).
+List them with `fir extensions`, and extract one for customisation with
+`fir extensions install <name>`. Disable one for a run with `-d <name>`.
+
+#### `handoff-nudger`
+
+Watches context usage after every turn and, once it crosses a threshold, injects
+a `[SYS_EXT]` note telling the agent to wrap up and call `self_handoff`.
+
+*Why:* auto-compaction only fires at 70% of the context window. On a 1M-window
+model that is ~700k tokens, so a long session re-reads a huge prefix on every
+turn. Prompt caching keeps fresh input near zero, but **cache-read cost grows
+linearly with conversation length and nothing stops it** — one measured 198-turn
+session accumulated 45.7M cache-read tokens and never compacted once.
+Compaction is also lossy and in-band; `self_handoff` (a curated briefing plus
+bookmarks) preserves more for less.
+
+Configure via `handoff-nudger.json` in a config dir (project-local `.fir/`
+overrides `~/.config/fir/`):
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `atTokens` | `150000` | Absolute token threshold |
+| `atPercent` | `60` | Percent-of-window threshold; the lower of the two thresholds fires |
+| `nudgeEvery` | `40000` | Further tokens before re-nudging an agent that keeps going |
+| `off` | `false` | Disable the nudge entirely |
+
 ### Optional mode targeting
 
 Extensions can opt into specific fir modes with comment frontmatter at the top of the script:

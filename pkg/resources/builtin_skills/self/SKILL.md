@@ -287,7 +287,9 @@ Control loading via `settings.json` `"extensions"` allowlist, `--extension`/`-e`
 
 Extensions can optionally self-restrict by mode using script comment frontmatter (`# modes: ...`), e.g. `tui`, `acp`, or `text`. Mark an extension `# explicit: true` to make it **opt-in only** — it stays discoverable (so `fir -e <name>` and listings find it) but is **not** auto-loaded; it runs only when named in the allowlist. The shipped `demo` and `hello` example extensions use this.
 
-Builtin extensions (notify, tmuxspinner, plan_nudger, etc.) are embedded in the binary and auto-discovered at lowest priority. Use `fir extensions` to list them and `fir extensions install <name>` to extract one for customisation.
+Builtin extensions (notify, tmuxspinner, plan_nudger, handoff_nudger, etc.) are embedded in the binary and auto-discovered at lowest priority. Use `fir extensions` to list them and `fir extensions install <name>` to extract one for customisation.
+
+`handoff-nudger` watches context usage after each turn and, once it crosses the lower of `atTokens` (150000) / `atPercent` (60) of the window, prepends a `[SYS_EXT]` note telling you to wrap up and `self_handoff` — auto-compaction only fires at 70% and is lossy, while cache-read cost grows linearly with conversation length. Tune or disable it in `handoff-nudger.json` (`atTokens`, `atPercent`, `nudgeEvery`, `off`) in `.fir/` or `~/.config/fir/`.
 
 Extensions can be reloaded via `/reload`; there is no automatic file watching. Reloading extensions rebuilds the system prompt, which might impact prompt cacheing.
 
