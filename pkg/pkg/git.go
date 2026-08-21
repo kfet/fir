@@ -45,14 +45,75 @@ func CloneRef(url, ref, dest string) error {
 }
 
 // Pull fast-forwards the git repository at dir.
+//
+// It deliberately does NOT use "git pull". Pull is the one git command that
+// decides what to merge by reading FETCH_HEAD, and git rewrites that file
+// non-atomically. fir runs Fetch ("git fetch --tags origin") on these same
+// package clones at session start, so a concurrent fetch — another fir session
+// on the same host, or our own — can clobber the FETCH_HEAD a pull is mid-read
+// of, yielding "fatal: Cannot fast-forward to multiple branches" (duplicated
+// entries) or "no such ref was fetched" (a lost entry).
+//
+// Instead we fetch the tracked branch by name and fast-forward to its
+// remote-tracking ref. Ref updates are atomic, so a racing fetch can at worst
+// leave the clone one commit behind, which the next update picks up.
+//
+// Detached HEAD (a package pinned to a tag or sha via CloneRef) has no branch
+// to fast-forward: Pull refreshes the remote refs and tags and returns nil,
+// leaving the pin intact. Updating such a package is a re-pin (CheckoutRef),
+// not a pull.
 func Pull(dir string) error {
-	cmd := exec.Command("git", "-C", dir, "pull", "--ff-only")
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("git pull in %s: %w\n%s", dir, err, stderr.String())
+	branch, err := currentBranch(dir)
+	if err != nil {
+		return err
+	}
+	if branch == "" {
+		// Detached HEAD: pinned ref, nothing to fast-forward. Keep the
+		// object store current so a later CheckoutRef can resolve.
+		return Fetch(dir)
+	}
+	upstream := upstreamRef(dir, branch)
+	// A fetch racing another fir session's fetch can lose the ref lock
+	// ("cannot lock ref ...: is at X but expected Y"). That failure means the
+	// other fetch already moved the ref, so the merge below is still worth
+	// attempting; only report the fetch error if the merge also fails.
+	fetchErr := runGit(dir, "fetch", "--quiet", "origin", branch)
+	if err := runGit(dir, "merge", "--ff-only", "--quiet", upstream); err != nil {
+		if fetchErr != nil {
+			return fetchErr
+		}
+		return err
 	}
 	return nil
+}
+
+// currentBranch returns the short name of the branch checked out at dir, or
+// "" when HEAD is detached. An error means HEAD could not be read at all.
+func currentBranch(dir string) (string, error) {
+	cmd := exec.Command("git", "-C", dir, "symbolic-ref", "--quiet", "--short", "HEAD")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		// Exit status 1 with no stderr is git's way of saying "detached".
+		if _, ok := err.(*exec.ExitError); ok && stderr.Len() == 0 {
+			return "", nil
+		}
+		return "", fmt.Errorf("git symbolic-ref in %s: %w\n%s", dir, err, stderr.String())
+	}
+	return strings.TrimSpace(stdout.String()), nil
+}
+
+// upstreamRef resolves the remote-tracking ref to fast-forward branch onto.
+// It prefers the configured upstream (@{u}) and falls back to origin/<branch>,
+// which is what the default refspec produces.
+func upstreamRef(dir, branch string) string {
+	cmd := exec.Command("git", "-C", dir, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
+	out, err := cmd.Output()
+	if u := strings.TrimSpace(string(out)); err == nil && u != "" {
+		return u
+	}
+	return "origin/" + branch
 }
 
 // SparseCloneRef clones only a subdirectory of a repo using sparse checkout.
