@@ -12,23 +12,39 @@ from that file until only the structural section remains.
 
 **Where the numbers stand at adoption** (31,495 statements total):
 
-| Bucket | Statements | Share |
-| --- | ---: | ---: |
-| Gated at 100% | 372 | 1.2% |
-| Excluded — structural | 12,446 | 39.5% |
-| Excluded — pure debt | 18,677 | 59.3% |
+| Bucket | At adoption | Today | Share today |
+| --- | ---: | ---: | ---: |
+| Gated at 100% | 372 | 1,443 | 4.6% |
+| Excluded — structural | 12,446 | 12,446 | 39.5% |
+| Excluded — pure debt | 18,677 | 17,602 | 55.9% |
 
 The gated scope at adoption was `pkg/ai` (hand-written), `pkg/envvars`,
 `pkg/mcp/history` and `pkg/modes/print`. All four were taken to exactly 100%
 as part of the adoption, so the gate is small but real — it is not measuring
 a generated table.
 
-**Sealed since adoption.** `pkg/pkg` (the package manager: source parsing,
-git clone/sparse-checkout plumbing, resource discovery) was promoted out of
-section 2 at 100%, taking the gated scope to **890 statements**. Its git
-paths are covered against local temp repos — bare origins created in
-`t.TempDir()` with an `insteadOf` rewrite standing in for GitHub — so no test
-touches the network.
+**Sealed since adoption.** Seven packages have been promoted out of section
+2 at 100%, taking the gated scope from 372 to **1,443 statements** (4.6% of
+the tree) and the whole-tree number from 67.0% to 68.0%:
+
+| Package | Statements | Queue item |
+| --- | ---: | --- |
+| `pkg/extension/apikind` | 6 | 1 |
+| `pkg/ai/envkeys` | 47 | 2 |
+| `pkg/extension/sdk` | 64 | 3 |
+| `pkg/ai/providers/declcfg` | 122 | 4 |
+| `pkg/agent/tools` | 117 | 5 |
+| `pkg/log` | 199 | 6 |
+| `pkg/pkg` | 518 | 12 (out of order) |
+
+Nothing was added to the ledger to achieve this: every uncovered branch was
+either reached by a test or deleted as genuinely dead code. Filesystem and
+git work is done against `t.TempDir()`; no test touches the network. Four
+real bugs were found on the way (see CHANGELOG under `## [Unreleased]`).
+
+Note that three promoted packages force failures with `chmod 0500`, which is
+a no-op under root — the suite must be run unprivileged, and now that these
+packages are gated at 100% that is enforced rather than merely advisable.
 
 **Why a tiny scope is still worth having.** The gate is an *invariant*, not
 a trend: one uncovered statement in a gated package fails the build. And the
@@ -61,12 +77,12 @@ statements as of adoption):
 
 | # | Package | Uncovered | Total |
 | --- | --- | ---: | ---: |
-| 1 | `pkg/extension/apikind` | 6 | 6 |
-| 2 | `pkg/ai/envkeys` | 18 | 47 |
-| 3 | `pkg/extension/sdk` | 21 | 64 |
-| 4 | `pkg/ai/providers/declcfg` | 21 | 122 |
-| 5 | `pkg/agent/tools` | 26 | 117 |
-| 6 | `pkg/log` | 44 | 199 |
+| ~~1~~ | ~~`pkg/extension/apikind`~~ | — | 6 (sealed) |
+| ~~2~~ | ~~`pkg/ai/envkeys`~~ | — | 47 (sealed) |
+| ~~3~~ | ~~`pkg/extension/sdk`~~ | — | 64 (sealed) |
+| ~~4~~ | ~~`pkg/ai/providers/declcfg`~~ | — | 122 (sealed) |
+| ~~5~~ | ~~`pkg/agent/tools`~~ | — | 117 (sealed) |
+| ~~6~~ | ~~`pkg/log`~~ | — | 199 (sealed) |
 | 7 | `pkg/mcp/autoreply` | 72 | 253 |
 | 8 | `pkg/session/compaction` | 77 | 600 |
 | 9 | `pkg/auth` | 134 | 525 |
@@ -81,13 +97,15 @@ statements as of adoption):
 | 18 | `pkg/extension` | 877 | 2645 |
 | 19 | `pkg/ai/providers` | 1476 | 4590 |
 
-The first six are sub-day units and are the on-ramp: without one, a ledger
-of 2,000-statement packages never moves. Clearing section 2 entirely would
-put the gate over 19,049 statements — **60% of the tree** — at a hard 100%.
+The first six were sub-day units and were the on-ramp: without one, a ledger
+of 2,000-statement packages never moves. **All six are now sealed**, along
+with `pkg/pkg` (item 12, taken out of order). Clearing the rest of section 2
+would put the gate over 19,000 statements — **60% of the tree** — at a hard
+100%. `pkg/mcp/autoreply` is the next cheapest.
 
 **Measuring progress.** `make coverage` prints both numbers under `V=1`.
 Three things should move monotonically: rows deleted from section 2 of
-`.covignore`, the gated statement count (372 at adoption, 890 today), and
+`.covignore`, the gated statement count (372 at adoption, 1,443 today), and
 `COVERAGE_FLOOR`. If none of them has moved in a release cycle, the ledger
 has become a carve-out and this entry has failed.
 

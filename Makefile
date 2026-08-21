@@ -203,7 +203,7 @@ test-cover: tidy
 # when the tool is dependency-free, `go run` when it would import a graph.
 # ---------------------------------------------------------------------------
 COVGATE        := go tool covgate
-COVERAGE_FLOOR := 66
+COVERAGE_FLOOR := 67
 
 coverage: tidy
 	@mkdir -p $(BINDIR)
