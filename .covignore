@@ -125,6 +125,3 @@
 
 # Structured logging and its file rotation.
 ^github\.com/kfet/fir/pkg/log/[^/]+\.go:
-
-# Tool schema/plan codecs used by the agent runtime.
-^github\.com/kfet/fir/pkg/agent/tools/[^/]+\.go:
