@@ -15,6 +15,11 @@ import (
 // Tests override this to avoid touching ~/.cache.
 var cacheDir = defaultCacheDir
 
+// sdkFS is the file tree that gets hashed and extracted. It is the embedded
+// one in production; tests substitute a failing fs.FS to exercise the I/O
+// error paths, which embed.FS cannot produce.
+var sdkFS fs.FS = EmbeddedSDKs
+
 func defaultCacheDir() (string, error) { return cache.Dir("sdks") }
 
 // sweepStale collects SDK trees from older binaries. Every release ships
@@ -29,7 +34,7 @@ func sweepStale(base, keep string) {
 // Used as the directory name so extraction is skipped when unchanged.
 func embeddedHash() (string, error) {
 	h := sha256.New()
-	err := fs.WalkDir(EmbeddedSDKs, ".", func(path string, d fs.DirEntry, err error) error {
+	err := fs.WalkDir(sdkFS, ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -38,7 +43,7 @@ func embeddedHash() (string, error) {
 		if d.IsDir() {
 			return nil
 		}
-		data, err := EmbeddedSDKs.ReadFile(path)
+		data, err := fs.ReadFile(sdkFS, path)
 		if err != nil {
 			return err
 		}
@@ -94,7 +99,7 @@ func EnsureExtracted() (string, error) {
 		}
 	}()
 
-	if err := fs.WalkDir(EmbeddedSDKs, ".", func(path string, d fs.DirEntry, err error) error {
+	if err := fs.WalkDir(sdkFS, ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -102,7 +107,7 @@ func EnsureExtracted() (string, error) {
 		if d.IsDir() {
 			return os.MkdirAll(dest, 0o755)
 		}
-		data, err := EmbeddedSDKs.ReadFile(path)
+		data, err := fs.ReadFile(sdkFS, path)
 		if err != nil {
 			return fmt.Errorf("read embedded %s: %w", path, err)
 		}
@@ -121,9 +126,11 @@ func EnsureExtracted() (string, error) {
 	// Atomic rename. If another process raced us, one rename wins and the
 	// loser gets EEXIST/ENOTEMPTY — that's fine, the content is identical.
 	if err := os.Rename(tmp, dir); err != nil {
-		// Another process won the race — use their copy.
+		// Another process won the race — use their copy. tmp was NOT
+		// renamed (that is why we are here), so it must still be cleaned
+		// up: leaving success false does exactly that. Setting it here
+		// would leak a full SDK copy into the cache on every lost race.
 		if _, statErr := os.Stat(dir); statErr == nil {
-			success = true // prevent cleanup of already-renamed dir
 			go sweepStale(base, dir)
 			return dir, nil
 		}
