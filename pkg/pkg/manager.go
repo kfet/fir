@@ -87,9 +87,7 @@ func (m *Manager) Install(source string, local bool) error {
 	installPath := m.installPath(src, local)
 
 	// Register in settings.
-	if err := m.addPackage(source, local); err != nil {
-		return err
-	}
+	m.addPackage(source, local)
 
 	// Print discovered resources.
 	res, err := ScanPackageResources(installPath)
@@ -194,9 +192,7 @@ func (m *Manager) Uninstall(source string, local bool) error {
 		return err
 	}
 
-	if err := m.removePackage(source, local); err != nil {
-		return err
-	}
+	m.removePackage(source, local)
 
 	if src.Type == "git" {
 		dest := m.gitInstallPath(src, local)
@@ -372,55 +368,54 @@ func (m *Manager) installPath(src *Source, projectScope bool) string {
 }
 
 // addPackage appends a source string to the appropriate settings scope,
-// deduplicating by the canonical raw source string.
-func (m *Manager) addPackage(source string, projectScope bool) error {
+// deduplicating by the canonical raw source string. Registering an
+// already-registered source is a no-op.
+func (m *Manager) addPackage(source string, projectScope bool) {
 	if projectScope {
 		pkgs := m.sm.GetProjectPackages()
 		if containsPackage(pkgs, source) {
-			return nil
+			return
 		}
 		m.sm.SetProjectPackages(append(pkgs, source))
-	} else {
-		pkgs := m.sm.GetGlobalPackages()
-		if containsPackage(pkgs, source) {
-			return nil
-		}
-		m.sm.SetGlobalPackages(append(pkgs, source))
+		return
 	}
-	return nil
+	pkgs := m.sm.GetGlobalPackages()
+	if containsPackage(pkgs, source) {
+		return
+	}
+	m.sm.SetGlobalPackages(append(pkgs, source))
 }
 
 // removePackage removes a source string from the appropriate settings scope.
-func (m *Manager) removePackage(source string, projectScope bool) error {
+func (m *Manager) removePackage(source string, projectScope bool) {
 	if projectScope {
-		pkgs := m.sm.GetProjectPackages()
-		m.sm.SetProjectPackages(filterPackage(pkgs, source))
-	} else {
-		pkgs := m.sm.GetGlobalPackages()
-		m.sm.SetGlobalPackages(filterPackage(pkgs, source))
+		m.sm.SetProjectPackages(filterPackage(m.sm.GetProjectPackages(), source))
+		return
 	}
-	return nil
+	m.sm.SetGlobalPackages(filterPackage(m.sm.GetGlobalPackages(), source))
 }
 
 // containsPackage checks whether source is already registered in the packages
 // slice. Comparison is by canonical identity (Host+"/"+Path for git, resolved
 // path for local) so different spellings of the same repo don't create duplicates.
 func containsPackage(pkgs []any, source string) bool {
-	newSrc, err := ParseSource(source)
-	if err != nil {
-		return false
+	// An unparseable candidate has no identity, only a verbatim spelling.
+	// filterPackage resolves its target the same way; membership and removal
+	// must agree on what counts as "the same package".
+	newID := ""
+	if newSrc, err := ParseSource(source); err == nil {
+		newID = sourceIdentity(newSrc)
 	}
-	newID := sourceIdentity(newSrc)
 	for _, p := range pkgs {
 		existing := entrySource(p)
 		if existing == "" {
 			continue
 		}
+		if existing == source {
+			return true
+		}
 		existSrc, err := ParseSource(existing)
 		if err != nil {
-			if existing == source {
-				return true
-			}
 			continue
 		}
 		if sourceIdentity(existSrc) == newID {
@@ -522,12 +517,6 @@ func (m *Manager) resolveEntry(entry any, scope string) (InstalledPackage, error
 		InstallPath: installPath,
 		Resources:   resources,
 	}, nil
-}
-
-// gitDirBase returns "host/path" used as the storage sub-path.
-// Exported for test convenience.
-func gitDirBase(src *Source) string {
-	return src.Host + string(filepath.Separator) + strings.ReplaceAll(src.Path, "/", string(filepath.Separator))
 }
 
 // ResolvePackageResources implements resources.ResourcePackageResolver.
