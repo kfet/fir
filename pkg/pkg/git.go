@@ -237,15 +237,3 @@ func runGit(dir string, args ...string) error {
 	}
 	return nil
 }
-
-// CurrentRef returns the short HEAD commit hash of the repository at dir.
-func CurrentRef(dir string) (string, error) {
-	cmd := exec.Command("git", "-C", dir, "rev-parse", "--short", "HEAD")
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("git rev-parse in %s: %w\n%s", dir, err, stderr.String())
-	}
-	return strings.TrimSpace(stdout.String()), nil
-}

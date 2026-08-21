@@ -70,7 +70,10 @@ func globPatterns(dir string, patterns []string) ([]string, error) {
 		// Pattern ending in "/" means "all files under this subdir"
 		if strings.HasSuffix(pat, "/") {
 			sub := filepath.Join(dir, strings.TrimSuffix(pat, "/"))
-			err := filepath.WalkDir(sub, func(p string, d fs.DirEntry, err error) error {
+			// The closure swallows every walk error (an unreadable or missing
+			// entry is skipped, not fatal) and WalkDir only ever returns what
+			// the closure returns, so the walk itself cannot fail here.
+			_ = filepath.WalkDir(sub, func(p string, d fs.DirEntry, err error) error {
 				if err != nil {
 					return nil // skip unreadable entries
 				}
@@ -79,9 +82,6 @@ func globPatterns(dir string, patterns []string) ([]string, error) {
 				}
 				return nil
 			})
-			if err != nil {
-				return nil, err
-			}
 			continue
 		}
 		matches, err := filepath.Glob(filepath.Join(dir, pat))
@@ -141,12 +141,12 @@ func autoDiscover(dir string) (*PackageResources, error) {
 			return nil
 		}
 
-		rel, relErr := filepath.Rel(dir, p)
-		if relErr != nil {
-			return nil
-		}
-		parts := strings.SplitN(rel, string(filepath.Separator), 2)
-		atRoot := len(parts) == 1
+		// A file is "at root" when its parent is the package directory
+		// itself — or when it *is* the scanned path, which happens when a
+		// single file is installed as a package. WalkDir yields paths under
+		// dir, so comparing cleaned paths is exact and cannot fail.
+		cleanDir := filepath.Clean(dir)
+		atRoot := filepath.Dir(p) == cleanDir || filepath.Clean(p) == cleanDir
 		name := d.Name()
 		ext := strings.ToLower(filepath.Ext(name))
 		parentDir := filepath.Base(filepath.Dir(p))

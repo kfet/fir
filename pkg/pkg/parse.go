@@ -37,13 +37,7 @@ func ParseSource(s string) (*Source, error) {
 
 	// --- Local path detection ---
 	if isLocalPath(s) {
-		resolved, err := resolveLocalPath(s)
-		if err != nil {
-			return nil, fmt.Errorf("resolving local path %q: %w", s, err)
-		}
-		src.Type = "local"
-		src.Local = resolved
-		return src, nil
+		return parseLocal(src, s)
 	}
 
 	// --- SSH URL: git@host:path[@ref] ---
@@ -72,6 +66,11 @@ func ParseSource(s string) (*Source, error) {
 	}
 
 	// Fallback: treat as local path.
+	return parseLocal(src, s)
+}
+
+// parseLocal fills src in as a resolved local path.
+func parseLocal(src *Source, s string) (*Source, error) {
 	resolved, err := resolveLocalPath(s)
 	if err != nil {
 		return nil, fmt.Errorf("resolving local path %q: %w", s, err)
