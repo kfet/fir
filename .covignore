@@ -95,7 +95,6 @@
 # A genuinely unmockable core (vendor SDK dial, websocket transport) may
 # survive as a narrow wrapper exclusion once the rest is covered.
 ^github\.com/kfet/fir/pkg/ai/providers/[^/]+\.go:
-^github\.com/kfet/fir/pkg/ai/providers/declcfg/[^/]+\.go:
 
 # Extension host: JSON-RPC over stdio to subprocess extensions. Subprocess
 # spawning is real, but the protocol, manager and bridge layers are pure

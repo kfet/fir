@@ -66,9 +66,10 @@ func fnRandID(args []string) (string, error) {
 	}
 	const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789"
 	b := make([]byte, 9)
-	if _, err := rand.Read(b); err != nil {
-		return "", fmt.Errorf("rand_id: %w", err)
-	}
+	// crypto/rand.Read never returns an error and always fills b entirely
+	// (it crashes the program irrecoverably instead), so there is no error
+	// path to handle here.
+	rand.Read(b)
 	for i := range b {
 		b[i] = alphabet[b[i]%byte(len(alphabet))]
 	}
