@@ -122,6 +122,3 @@
 ^github\.com/kfet/fir/pkg/config/[^/]+\.go:
 ^github\.com/kfet/fir/pkg/auth/[^/]+\.go:
 ^github\.com/kfet/fir/pkg/resources/[^/]+\.go:
-
-# Structured logging and its file rotation.
-^github\.com/kfet/fir/pkg/log/[^/]+\.go:

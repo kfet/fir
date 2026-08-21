@@ -15,10 +15,15 @@ import (
 
 var debugEnabled atomic.Bool
 
+// debugEnvSet reports whether the FIR_DEBUG environment variable requests
+// debug logging at startup. Split out from init so the rule is testable —
+// init runs once per process, before any test can set the variable.
+func debugEnvSet() bool {
+	return os.Getenv("FIR_DEBUG") != ""
+}
+
 func init() {
-	if os.Getenv("FIR_DEBUG") != "" {
-		debugEnabled.Store(true)
-	}
+	debugEnabled.Store(debugEnvSet())
 }
 
 // Enable turns debug logging on.
