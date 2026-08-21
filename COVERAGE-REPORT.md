@@ -1,6 +1,6 @@
 # Coverage-gate on-ramp: queue items 1-6 sealed
 
-Branch: `test/pkg-pkg-coverage` (worktree `~/fir-covpkg`), 11 commits on top of
+Branch: `test/pkg-pkg-coverage` (worktree `~/fir-covpkg`), 13 commits on top of
 `624b4442`. Not merged, not pushed. `make all` is green.
 
 ## Result
@@ -140,15 +140,14 @@ so this holds today; a root-based CI image would break it. Recorded in
 046ece59 test(pkg): take pkg/pkg to 100% statement coverage
 99b8eda2 chore(coverage): seal pkg/pkg in the ledger, document the ratchet
 ef6e3f32 docs(pkg): record the unprivileged-suite constraint and report the result
-37aedd67 test(apikind): cover the ApiSpec handler registry, promote it out of the ledger
-a26ab0d3 test(envkeys): cover credential detection, promote it out of the ledger
+cf101ad9 test(apikind): cover the ApiSpec handler registry, promote it out of the ledger
+96666e86 test(envkeys): cover credential detection, promote it out of the ledger
 3b29c9d5 fix(sdk): stop leaking a full SDK copy when the extract race is lost
-dc51b8c9 test(declcfg): cover the substitution grammar, promote it out of the ledger
-…        test(agent/tools): cover the schema codec, promote it out of the ledger
-…        test(log): cover rotation failure paths, promote it out of the ledger
+75a2229b test(declcfg): cover the substitution grammar, promote it out of the ledger
+d237a6e8 test(agent/tools): cover the schema codec, promote it out of the ledger
+3fe99a84 test(log): cover rotation failure paths, promote it out of the ledger
+daa3867c chore(coverage): record the cleared on-ramp and ratchet the floor
 ```
-
-(Exact hashes: `git log --oneline main..HEAD`.)
 
 ## Next cheapest
 

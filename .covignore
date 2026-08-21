@@ -30,8 +30,10 @@
 # an unmockable dependency behind a thin wrapper at a real domain boundary
 # and exclude only the wrapper.
 #
-# In scope (gated at 100% today): pkg/ai (hand-written), pkg/envvars,
-# pkg/mcp/history, pkg/modes/print, pkg/pkg.
+# In scope (gated at 100% today): everything this file does not match.
+# BACKLOG.md carries the current list of promoted packages and the queue of
+# what is next — do not maintain a second copy of it here, it rots on every
+# promotion.
 
 
 # ===========================================================================
