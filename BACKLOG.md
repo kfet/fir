@@ -18,10 +18,17 @@ from that file until only the structural section remains.
 | Excluded — structural | 12,446 | 39.5% |
 | Excluded — pure debt | 18,677 | 59.3% |
 
-The gated scope is `pkg/ai` (hand-written), `pkg/envvars`,
+The gated scope at adoption was `pkg/ai` (hand-written), `pkg/envvars`,
 `pkg/mcp/history` and `pkg/modes/print`. All four were taken to exactly 100%
 as part of the adoption, so the gate is small but real — it is not measuring
 a generated table.
+
+**Sealed since adoption.** `pkg/pkg` (the package manager: source parsing,
+git clone/sparse-checkout plumbing, resource discovery) was promoted out of
+section 2 at 100%, taking the gated scope to **890 statements**. Its git
+paths are covered against local temp repos — bare origins created in
+`t.TempDir()` with an `insteadOf` rewrite standing in for GitHub — so no test
+touches the network.
 
 **Why a tiny scope is still worth having.** The gate is an *invariant*, not
 a trend: one uncovered statement in a gated package fails the build. And the
@@ -65,7 +72,7 @@ statements as of adoption):
 | 9 | `pkg/auth` | 134 | 525 |
 | 10 | `pkg/session/store` | 147 | 1015 |
 | 11 | `pkg/config` | 158 | 593 |
-| 12 | `pkg/pkg` | 161 | 520 |
+| 12 | ~~`pkg/pkg`~~ | ~~161~~ | ~~520~~ (sealed) |
 | 13 | `pkg/resources` | 198 | 922 |
 | 14 | `pkg/mcp` | 238 | 1602 |
 | 15 | `pkg/models` | 266 | 1317 |
@@ -80,7 +87,7 @@ put the gate over 19,049 statements — **60% of the tree** — at a hard 100%.
 
 **Measuring progress.** `make coverage` prints both numbers under `V=1`.
 Three things should move monotonically: rows deleted from section 2 of
-`.covignore`, the gated statement count (372 at adoption), and
+`.covignore`, the gated statement count (372 at adoption, 890 today), and
 `COVERAGE_FLOOR`. If none of them has moved in a release cycle, the ledger
 has become a carve-out and this entry has failed.
 

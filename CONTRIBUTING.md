@@ -68,6 +68,24 @@ the maintenance cost falls on one person.
   internal-shaped even though it is importable. See the README note before
   depending on it.
 
+## The coverage ratchet
+
+`make coverage` (part of `make all`) runs two tiers over one profile. Tier 1
+is a hard `-min=100` over everything *not* matched by `.covignore`; tier 2 is
+a whole-tree floor (`COVERAGE_FLOOR` in the Makefile) that catches rot in the
+excluded part. Tier 1's 100% never moves.
+
+`.covignore` is a debt ledger, not a carve-out. Section 1 is structural
+(entrypoints, TUI rendering, generated tables); section 2 is ordinary code
+that simply is not covered yet, and every line in it exists to be deleted.
+Sealing a package is one commit: cover it to 100%, delete its line, watch the
+gate pass. Going the other way — adding a line — needs a justification in the
+commit message, and is usually the wrong move: prefer pushing the unmockable
+part behind a narrow wrapper and excluding only the wrapper. The patterns are
+non-recursive on purpose, so a **new package is gated at 100% from its first
+commit** unless someone deliberately writes it into the ledger. `BACKLOG.md`
+carries the promotion queue, cheapest first.
+
 ## License
 
 By contributing, you agree that your contributions are licensed under the same

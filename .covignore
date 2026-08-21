@@ -31,7 +31,7 @@
 # and exclude only the wrapper.
 #
 # In scope (gated at 100% today): pkg/ai (hand-written), pkg/envvars,
-# pkg/mcp/history, pkg/modes/print.
+# pkg/mcp/history, pkg/modes/print, pkg/pkg.
 
 
 # ===========================================================================
@@ -129,7 +129,6 @@
 # skill/resource loading — all file-system and JSON work.
 ^github\.com/kfet/fir/pkg/config/[^/]+\.go:
 ^github\.com/kfet/fir/pkg/auth/[^/]+\.go:
-^github\.com/kfet/fir/pkg/pkg/[^/]+\.go:
 ^github\.com/kfet/fir/pkg/resources/[^/]+\.go:
 
 # Structured logging and its file rotation.
