@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-08-20T01:01:58Z",
+  "generatedAt": "2026-08-21T01:01:43Z",
   "providers": {
     "amazon-bedrock": {
       "models": [
@@ -43,10 +43,7 @@
             "cacheWrite": 0
           },
           "contextWindow": 131072,
-          "maxTokens": 32768,
-          "compat": {
-            "supportsDeveloperRole": false
-          }
+          "maxTokens": 32768
         },
         {
           "id": "Qwen/Qwen3-VL-235B-A22B-Thinking",
@@ -64,10 +61,7 @@
             "cacheWrite": 0
           },
           "contextWindow": 131072,
-          "maxTokens": 32768,
-          "compat": {
-            "supportsDeveloperRole": false
-          }
+          "maxTokens": 32768
         },
         {
           "id": "zai-org/GLM-4.6V-Flash",
@@ -85,14 +79,49 @@
             "cacheWrite": 0
           },
           "contextWindow": 131072,
-          "maxTokens": 32768,
-          "compat": {
-            "supportsDeveloperRole": false
-          }
+          "maxTokens": 32768
         }
       ]
     },
     "opencode": {
+      "models": [
+        {
+          "id": "muse-spark-1.2-contributor-free",
+          "name": "Muse Spark 1.2 Free",
+          "api": "openai-responses",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          },
+          "contextWindow": 1048576,
+          "maxTokens": 131072
+        },
+        {
+          "id": "x-preview-f-free",
+          "name": "Ox Alpha Free",
+          "api": "openai-completions",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          },
+          "contextWindow": 1000000,
+          "maxTokens": 131072
+        }
+      ],
       "modelOverrides": {
         "gpt-5.6-sol": {
           "name": "GPT-5.6 Sol (50% Off)",
@@ -149,6 +178,24 @@
     },
     "openrouter": {
       "models": [
+        {
+          "id": "stealth/ox-alpha",
+          "name": "Ox Alpha",
+          "api": "openai-completions",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          },
+          "contextWindow": 1048576,
+          "maxTokens": 131072
+        },
         {
           "id": "z-ai/glm-5.2:free",
           "name": "Z.ai: GLM 5.2 (free)",
@@ -215,37 +262,36 @@
           "cost": {
             "input": 0.27,
             "output": 1,
-            "cacheRead": 0,
+            "cacheRead": 0.135,
             "cacheWrite": 0
-          },
-          "maxTokens": 163840
+          }
         },
         "deepseek/deepseek-v4-pro": {
           "cost": {
-            "input": 1.44,
-            "output": 2.88,
-            "cacheRead": 0.1215,
+            "input": 1.6,
+            "output": 3.2,
+            "cacheRead": 0.135,
             "cacheWrite": 0
           },
           "maxTokens": 393216
         },
         "deepseek/deepseek-v4-pro-0813": {
           "cost": {
-            "input": 1.056,
-            "output": 3.168,
-            "cacheRead": 0.0352,
+            "input": 1.188,
+            "output": 3.564,
+            "cacheRead": 0.0396,
             "cacheWrite": 0
           },
           "maxTokens": 4096
         },
-        "google/gemma-4-31b-it": {
+        "meta/muse-glimmer-30b": {
           "cost": {
-            "input": 0.09,
-            "output": 0.34,
-            "cacheRead": 0.05,
+            "input": 0.3,
+            "output": 1.1,
+            "cacheRead": 0.04,
             "cacheWrite": 0
           },
-          "maxTokens": 16384
+          "maxTokens": 131072
         },
         "minimax/minimax-m2.5": {
           "cost": {
@@ -264,6 +310,14 @@
             "cacheWrite": 0
           }
         },
+        "moonshotai/kimi-k2.7-code": {
+          "cost": {
+            "input": 0.67,
+            "output": 3.4,
+            "cacheRead": 0.17,
+            "cacheWrite": 0
+          }
+        },
         "moonshotai/kimi-k2.7-code:batch": {
           "cost": {
             "input": 0.95,
@@ -279,6 +333,9 @@
             "cacheRead": 0.2,
             "cacheWrite": 0
           }
+        },
+        "nvidia/nemotron-3.5-lightning": {
+          "contextWindow": 262144
         },
         "openai/gpt-5.6-luna": {
           "cost": {
@@ -360,7 +417,7 @@
             "cacheRead": 0,
             "cacheWrite": 0
           },
-          "maxTokens": 262144
+          "maxTokens": 65536
         },
         "qwen/qwen3.5-35b-a3b": {
           "cost": {
@@ -373,15 +430,18 @@
         },
         "qwen/qwen3.6-27b": {
           "cost": {
-            "input": 0.3,
-            "output": 2,
-            "cacheRead": 0.03,
+            "input": 0.6,
+            "output": 3.6,
+            "cacheRead": 0.12,
             "cacheWrite": 0
           },
-          "maxTokens": 65536
+          "maxTokens": 262144
         },
         "qwen/qwen3.8-27b": {
           "contextWindow": 1000000
+        },
+        "thinkingmachines/inkling-small": {
+          "contextWindow": 1048576
         },
         "thinkingmachines/inkling:batch": {
           "cost": {
@@ -414,16 +474,17 @@
             "output": 4.4,
             "cacheRead": 0.26,
             "cacheWrite": 0
-          }
+          },
+          "contextWindow": 1048575
         },
         "~deepseek/deepseek-v4-flash-latest": {
           "cost": {
-            "input": 0.07,
+            "input": 0.065,
             "output": 0.14,
             "cacheRead": 0.014,
             "cacheWrite": 0
           },
-          "maxTokens": 1048576
+          "maxTokens": 262144
         },
         "~openai/gpt-latest": {
           "cost": {
@@ -445,6 +506,22 @@
             "input": 0.4283,
             "output": 1.2848,
             "cacheRead": 0,
+            "cacheWrite": 0
+          }
+        },
+        "muse-glimmer-30b-el": {
+          "cost": {
+            "input": 0.202,
+            "output": 0.8081,
+            "cacheRead": 0.0505,
+            "cacheWrite": 0
+          }
+        },
+        "qwen3.8-27b-el": {
+          "cost": {
+            "input": 0.1717,
+            "output": 0.5051,
+            "cacheRead": 0.0808,
             "cacheWrite": 0
           }
         }
@@ -785,6 +862,233 @@
           "maxTokens": 100000
         },
         {
+          "id": "spacexai/grok-4.1-fast-non-reasoning",
+          "name": "Grok 4.1 Fast Non-Reasoning",
+          "api": "anthropic-messages",
+          "reasoning": false,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 0.2,
+            "output": 0.5,
+            "cacheRead": 0.05,
+            "cacheWrite": 0
+          },
+          "contextWindow": 1000000,
+          "maxTokens": 1000000,
+          "sweScore": 72
+        },
+        {
+          "id": "spacexai/grok-4.1-fast-reasoning",
+          "name": "Grok 4.1 Fast Reasoning",
+          "api": "anthropic-messages",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 0.2,
+            "output": 0.5,
+            "cacheRead": 0.05,
+            "cacheWrite": 0
+          },
+          "contextWindow": 1000000,
+          "maxTokens": 1000000,
+          "sweScore": 72
+        },
+        {
+          "id": "spacexai/grok-4.20-multi-agent",
+          "name": "Grok 4.20 Multi-Agent",
+          "api": "anthropic-messages",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 1.25,
+            "output": 2.5,
+            "cacheRead": 0.2,
+            "cacheWrite": 0
+          },
+          "contextWindow": 2000000,
+          "maxTokens": 2000000,
+          "sweScore": 72
+        },
+        {
+          "id": "spacexai/grok-4.20-multi-agent-beta",
+          "name": "Grok 4.20 Multi Agent Beta",
+          "api": "anthropic-messages",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 1.25,
+            "output": 2.5,
+            "cacheRead": 0.2,
+            "cacheWrite": 0
+          },
+          "contextWindow": 2000000,
+          "maxTokens": 2000000,
+          "sweScore": 72
+        },
+        {
+          "id": "spacexai/grok-4.20-non-reasoning",
+          "name": "Grok 4.20 Non-Reasoning",
+          "api": "anthropic-messages",
+          "reasoning": false,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 1.25,
+            "output": 2.5,
+            "cacheRead": 0.2,
+            "cacheWrite": 0
+          },
+          "contextWindow": 2000000,
+          "maxTokens": 2000000,
+          "sweScore": 72
+        },
+        {
+          "id": "spacexai/grok-4.20-non-reasoning-beta",
+          "name": "Grok 4.20 Beta Non-Reasoning",
+          "api": "anthropic-messages",
+          "reasoning": false,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 1.25,
+            "output": 2.5,
+            "cacheRead": 0.2,
+            "cacheWrite": 0
+          },
+          "contextWindow": 2000000,
+          "maxTokens": 2000000,
+          "sweScore": 72
+        },
+        {
+          "id": "spacexai/grok-4.20-reasoning",
+          "name": "Grok 4.20 Reasoning",
+          "api": "anthropic-messages",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 1.25,
+            "output": 2.5,
+            "cacheRead": 0.2,
+            "cacheWrite": 0
+          },
+          "contextWindow": 2000000,
+          "maxTokens": 2000000,
+          "sweScore": 72
+        },
+        {
+          "id": "spacexai/grok-4.20-reasoning-beta",
+          "name": "Grok 4.20 Beta Reasoning",
+          "api": "anthropic-messages",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 1.25,
+            "output": 2.5,
+            "cacheRead": 0.2,
+            "cacheWrite": 0
+          },
+          "contextWindow": 2000000,
+          "maxTokens": 2000000,
+          "sweScore": 72
+        },
+        {
+          "id": "spacexai/grok-4.3",
+          "name": "Grok 4.3",
+          "api": "anthropic-messages",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 1.25,
+            "output": 2.5,
+            "cacheRead": 0.2,
+            "cacheWrite": 0
+          },
+          "contextWindow": 1000000,
+          "maxTokens": 1000000,
+          "sweScore": 72
+        },
+        {
+          "id": "spacexai/grok-4.5",
+          "name": "Grok 4.5",
+          "api": "anthropic-messages",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 2,
+            "output": 6,
+            "cacheRead": 0.3,
+            "cacheWrite": 0
+          },
+          "contextWindow": 500000,
+          "maxTokens": 500000,
+          "sweScore": 72
+        },
+        {
+          "id": "spacexai/grok-4.6",
+          "name": "Grok 4.6",
+          "api": "anthropic-messages",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 2,
+            "output": 6,
+            "cacheRead": 0.5,
+            "cacheWrite": 0
+          },
+          "contextWindow": 500000,
+          "maxTokens": 500000,
+          "sweScore": 72
+        },
+        {
+          "id": "spacexai/grok-build-0.1",
+          "name": "Grok Build 0.1",
+          "api": "anthropic-messages",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 1,
+            "output": 2,
+            "cacheRead": 0.2,
+            "cacheWrite": 0
+          },
+          "contextWindow": 256000,
+          "maxTokens": 256000
+        },
+        {
           "id": "zai/glm-5.3",
           "name": "GLM 5.3",
           "api": "anthropic-messages",
@@ -803,6 +1107,12 @@
         }
       ],
       "modelOverrides": {
+        "alibaba/qwen3.8-2.4t-a95b": {
+          "input": [
+            "text",
+            "image"
+          ]
+        },
         "alibaba/qwen3.8-27b": {
           "cost": {
             "input": 0.55,
@@ -836,6 +1146,16 @@
             "cacheRead": 0.25,
             "cacheWrite": 3.125
           }
+        },
+        "tencent/hy3": {
+          "cost": {
+            "input": 0.132,
+            "output": 0.528,
+            "cacheRead": 0.033,
+            "cacheWrite": 0
+          },
+          "contextWindow": 256000,
+          "maxTokens": 128000
         },
         "zai/glm-5.2": {
           "cost": {
