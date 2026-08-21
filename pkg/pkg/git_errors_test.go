@@ -1,3 +1,10 @@
+// Error-path coverage for the git plumbing.
+//
+// Several tests here force a git failure by making a directory unwritable
+// (0500). That works as an ordinary user and is how CI runs; running the
+// suite as root defeats the permission check and those tests fail. Since
+// pkg/pkg is sealed at 100% in .covignore, this is a standing constraint:
+// run the test suite unprivileged.
 package pkg
 
 import (
@@ -86,8 +93,11 @@ func TestCloneFailureReportsStderr(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected cloning a non-existent repository to fail")
 	}
-	if !strings.Contains(err.Error(), missing) || !strings.Contains(err.Error(), "repository") {
-		t.Errorf("error should name the repo and include git stderr, got: %v", err)
+	if !strings.Contains(err.Error(), "git clone "+missing) {
+		t.Errorf("error should name the failing command and repo, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "fatal:") {
+		t.Errorf("error should carry git's own stderr, got: %v", err)
 	}
 }
 
