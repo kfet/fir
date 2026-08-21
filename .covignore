@@ -97,11 +97,6 @@
 ^github\.com/kfet/fir/pkg/ai/providers/[^/]+\.go:
 ^github\.com/kfet/fir/pkg/ai/providers/declcfg/[^/]+\.go:
 
-# Env-var credential detection (which var names a provider reads, and
-# whether one is set). Pure string and os.Getenv work — testable with
-# t.Setenv, just untested.
-^github\.com/kfet/fir/pkg/ai/envkeys/[^/]+\.go:
-
 # Extension host: JSON-RPC over stdio to subprocess extensions. Subprocess
 # spawning is real, but the protocol, manager and bridge layers are pure
 # logic already exercised by in-repo integration tests.

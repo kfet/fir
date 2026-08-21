@@ -3,7 +3,6 @@
 package envkeys
 
 import (
-	"os"
 	"testing"
 )
 
@@ -29,7 +28,7 @@ func TestGetEnvApiKey_GitHubCopilot(t *testing.T) {
 }
 
 func TestGetEnvApiKey_GitHubCopilot_Fallback(t *testing.T) {
-	os.Unsetenv("COPILOT_GITHUB_TOKEN")
+	t.Setenv("COPILOT_GITHUB_TOKEN", "")
 	t.Setenv("GH_TOKEN", "gh-test")
 	if got := GetEnvApiKey("github-copilot"); got != "gh-test" {
 		t.Errorf("expected 'gh-test', got %q", got)
@@ -44,7 +43,7 @@ func TestGetEnvApiKey_Bedrock(t *testing.T) {
 }
 
 func TestGetEnvApiKey_Bedrock_AccessKey(t *testing.T) {
-	os.Unsetenv("AWS_PROFILE")
+	t.Setenv("AWS_PROFILE", "")
 	t.Setenv("AWS_ACCESS_KEY_ID", "AKIA...")
 	t.Setenv("AWS_SECRET_ACCESS_KEY", "secret")
 	if got := GetEnvApiKey("amazon-bedrock"); got != "<authenticated>" {
@@ -53,13 +52,13 @@ func TestGetEnvApiKey_Bedrock_AccessKey(t *testing.T) {
 }
 
 func TestGetEnvApiKey_Bedrock_None(t *testing.T) {
-	os.Unsetenv("AWS_PROFILE")
-	os.Unsetenv("AWS_ACCESS_KEY_ID")
-	os.Unsetenv("AWS_SECRET_ACCESS_KEY")
-	os.Unsetenv("AWS_BEARER_TOKEN_BEDROCK")
-	os.Unsetenv("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI")
-	os.Unsetenv("AWS_CONTAINER_CREDENTIALS_FULL_URI")
-	os.Unsetenv("AWS_WEB_IDENTITY_TOKEN_FILE")
+	t.Setenv("AWS_PROFILE", "")
+	t.Setenv("AWS_ACCESS_KEY_ID", "")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "")
+	t.Setenv("AWS_BEARER_TOKEN_BEDROCK", "")
+	t.Setenv("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI", "")
+	t.Setenv("AWS_CONTAINER_CREDENTIALS_FULL_URI", "")
+	t.Setenv("AWS_WEB_IDENTITY_TOKEN_FILE", "")
 	if got := GetEnvApiKey("amazon-bedrock"); got != "" {
 		t.Errorf("expected '', got %q", got)
 	}
@@ -109,10 +108,10 @@ func TestGetEnvApiKey_AllStandardProviders(t *testing.T) {
 }
 
 func TestGetEnvApiKey_GoogleVertex_NoCredentials(t *testing.T) {
-	os.Unsetenv("GOOGLE_APPLICATION_CREDENTIALS")
-	os.Unsetenv("GOOGLE_CLOUD_PROJECT")
-	os.Unsetenv("GCLOUD_PROJECT")
-	os.Unsetenv("GOOGLE_CLOUD_LOCATION")
+	t.Setenv("GOOGLE_APPLICATION_CREDENTIALS", "")
+	t.Setenv("GOOGLE_CLOUD_PROJECT", "")
+	t.Setenv("GCLOUD_PROJECT", "")
+	t.Setenv("GOOGLE_CLOUD_LOCATION", "")
 	if got := GetEnvApiKey("google-vertex"); got != "" {
 		t.Errorf("expected '', got %q", got)
 	}
