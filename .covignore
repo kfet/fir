@@ -106,7 +106,6 @@
 # spawning is real, but the protocol, manager and bridge layers are pure
 # logic already exercised by in-repo integration tests.
 ^github\.com/kfet/fir/pkg/extension/[^/]+\.go:
-^github\.com/kfet/fir/pkg/extension/apikind/[^/]+\.go:
 ^github\.com/kfet/fir/pkg/extension/sdk/[^/]+\.go:
 
 # MCP client/server plumbing and the autoreply channel policy.
