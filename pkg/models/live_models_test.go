@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/ai/envkeys"
 	"github.com/kfet/fir/pkg/auth"
 )
 
@@ -236,6 +237,14 @@ func TestLiveCachePersistence(t *testing.T) {
 }
 
 func TestRefreshLive_ClearsStateAndDiskCache(t *testing.T) {
+	// The test assumes no provider has auth (so the re-fetch pass cannot
+	// re-populate liveModels). Hermetic env: unset every API-key env var
+	// HasAuth would consult, so a developer shell with e.g.
+	// OPENROUTER_API_KEY exported does not make this test fail.
+	for _, v := range envkeys.KnownApiKeyEnvVars() {
+		t.Setenv(v, "")
+	}
+
 	tmpDir := t.TempDir()
 	authStore := auth.NewAuthStorage("")
 	registry := NewModelRegistry(authStore, "")

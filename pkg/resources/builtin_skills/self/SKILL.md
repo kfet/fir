@@ -187,6 +187,43 @@ Drop a `models.json` in `~/.config/fir/` (global) or `.fir/` (project). Add mode
 
 The same file also supports per-provider overrides (`baseUrl`, `apiKey`, `headers`, `authHeader`) and per-model overrides under `modelOverrides`. Most model fields (cost, `contextWindow`, `maxTokens`, `sweScore`, `compaction`, `serverTools`, …) can be set on a custom model or supplied via `modelOverrides` to patch a built-in. `sweScore` (SWE-bench Verified %, 0–100) shows up in the `/model` selector and drives its sort order.
 
+#### `api` — the wire protocol (and its silent failure mode)
+
+`api` selects the **wire protocol**, not the vendor. Legal values are the `API`
+constants in the external module `github.com/kfet/ai` (`types.go`, at the
+version pinned in fir's `go.mod`; re-check with
+`grep 'API =' "$(go env GOMODCACHE)"/github.com/kfet/ai@*/types.go`, aliased in
+fir as `pkg/ai/aliases.go`):
+
+`openai-completions`, `openai-responses`, `azure-openai-responses`,
+`openai-codex-responses`, `anthropic-messages`, `bedrock-converse-stream`,
+`google-generative-ai`, `google-vertex`.
+
+Extensions may register further wire protocols at runtime (`ext-api:*`, `ext:*`).
+
+OpenAI-compatible endpoints (OpenRouter, Groq, local servers, …) take
+`openai-completions` — **not** `"openai"`, which is a provider name, not an API.
+
+Neither mistake is caught when the config loads:
+
+- **Unknown `api`** — the model still appears in `--list-models` and `/model`;
+  every request to it fails with `no API provider registered for api: <value>`.
+- **Missing `api`** on a provider fir has no built-in for — validation rejects
+  the *whole* custom-model load (`Provider X, model Y: no "api" specified. Set
+  at provider or model level`), so every custom model disappears and
+  `--provider X` reports `Unknown provider "X"`. That error text is shown only
+  in the interactive `/model` selector, not by `--list-models`.
+
+`api` can be set per provider and per model: model-level wins, then
+provider-level, then — for built-in providers only — the API of that provider's
+first built-in model. So a custom model on a built-in provider may omit `api`; a
+model on a brand-new provider may not.
+
+`apiKey` and header values are resolved the same way: a value starting with `!`
+is run as a shell command and its stdout used; otherwise the value is used as an
+env var *name* if that variable is set, else taken literally. There is no
+`${VAR}` interpolation inside a string.
+
 #### Drop-in fragments: `models.d/`
 
 Alongside `models.json`, fir reads every `*.json` file in a `models.d/`
