@@ -1,6 +1,6 @@
 ---
 name: ship-wt
-description: Spawn a fresh fir agent in a new worktree that ships itself — does the work, then runs ship-it (review-and-fix loop, ff-merge, optional cleanup) when done. Use when you want a worktree task to finish and merge on its own.
+description: Spawn a fresh fir agent in a new worktree that ships itself — does the work, then runs ship-it (review-and-fix loop, ff-merge, release, worktree cleanup) when done. Use when you want a worktree task to finish and merge on its own.
 builtin: true
 override: true
 ---
@@ -17,15 +17,11 @@ The work happens over there. Don't draft designs or touch code here.
 
 1. Pick a short kebab-case feature name from the whole task.
 
-2. Build the task text. Start from the user's full task, ensure it carries a mode
-   tag, and **append the ship-it instruction**:
-   - `Mode: do.` → ship-it will merge and leave the worktree (more work coming).
-   - `Mode: do, final.` → ship-it will merge and clean up the worktree + branch.
-
-   Append verbatim:
+2. Build the task text. Start from the user's full task, ensure it carries a
+   `Mode: do.` tag, and **append the ship-it instruction** verbatim:
    > "When implementation is complete and `make all` passes, invoke the `ship-it`
-   > skill to finish: it loops review-and-fix until clean, ff-merges to main, and
-   > (only if this task is tagged final) removes the worktree. Do not ask
+   > skill to finish: it loops review-and-fix until clean, ff-merges to main,
+   > cuts and publishes a release, and removes the worktree. Do not ask
    > permission."
 
 3. Spawn via `wt`'s script (reused — `ship-wt` adds no spawn logic of its own):

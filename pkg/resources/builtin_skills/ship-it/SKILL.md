@@ -1,6 +1,6 @@
 ---
 name: ship-it
-description: Finish a feature on a worktree branch — loop review-and-fix until clean, ff-merge to main, optionally clean up the worktree, and log any instruction friction. Use when implementation is done and make all passes.
+description: Finish a feature on a worktree branch — loop review-and-fix until clean, ff-merge to main, cut and publish a release, clean up the worktree, and log any instruction friction. Use when implementation is done and make all passes.
 builtin: true
 override: true
 ---
@@ -19,12 +19,18 @@ Run only on a worktree feature branch with implementation complete and
    until a pass finds zero new issues, then commits.
 2. **merge-to-main** — invoke the `merge-to-main` skill (squash, rebase, verify
    no main content lost, ff-merge, build).
-3. **Cleanup — only if the task is tagged final.** The task text carries the
-   signal; do not infer it:
-   - `Mode: do.` → stop here, leave the worktree and branch in place (more work
-     is coming).
-   - `Mode: do, final.` → remove the worktree and branch.
-4. **Instruction friction log** — see below.
+3. **release** — in the main worktree (the branch is already merged there),
+   invoke the `release` skill: it determines the version from the
+   `## [Unreleased]` entries in `CHANGELOG.md`, runs `make all`, updates
+   `CHANGELOG.md` and `VERSION`, commits, tags, and installs. Invoking `ship-it`
+   *is* the confirmation that skill asks for — do not stop to ask again.
+4. **deploy** — complete the `release` skill's Publishing step: `make publish`
+   (pushes the commit and tag; GoReleaser CI builds and uploads the release),
+   followed by its post-publish workflow monitoring. When the target is a
+   specific host rather than a GitHub release, use `make deploy HOST=<host>`
+   instead.
+5. **Cleanup** — remove the worktree and branch.
+6. **Instruction friction log** — see below.
 
 ## Instruction friction log
 
@@ -51,5 +57,6 @@ later, deliberately, by the `instruction-tune` skill — do not act on them now.
 
 ## Output
 
-Report: review-and-fix summary, merge result + commit, whether the worktree was
-cleaned up, and any friction entries logged (or "no friction logged").
+Report: review-and-fix summary, merge result + commit, release version + tag,
+deploy result (published release or host deployed to), confirmation the worktree
+was removed, and any friction entries logged (or "no friction logged").
