@@ -467,7 +467,7 @@ func TestResolveAgentDir_EnvOverride(t *testing.T) {
 
 func TestDrainUpdateNotice_WithNotice(t *testing.T) {
 	ch := make(chan string, 1)
-	ch <- "› fir v1.0.0 available"
+	ch <- "1.0.0"
 	// drainUpdateNotice should not block and should consume the message
 	drainUpdateNotice(ch)
 	if len(ch) != 0 {
@@ -477,7 +477,7 @@ func TestDrainUpdateNotice_WithNotice(t *testing.T) {
 
 func TestDrainUpdateNotice_EmptyNotice(t *testing.T) {
 	ch := make(chan string, 1)
-	ch <- "" // empty — no notice to print
+	ch <- "" // empty — up to date, nothing to print
 	drainUpdateNotice(ch)
 	if len(ch) != 0 {
 		t.Error("expected channel to be drained even for empty notice")

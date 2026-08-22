@@ -2270,7 +2270,7 @@ func TestSetUpdateChannel_StoresChannel(t *testing.T) {
 func TestStartUpdateNoticeWatcher_ShowsNotice(t *testing.T) {
 	tm := newTestMode(t)
 	ch := make(chan string, 1)
-	ch <- "fir v1.0.0 available"
+	ch <- "1.0.0"
 	tm.mode.updateCh = ch
 
 	before := tm.messageCount()
@@ -2296,7 +2296,7 @@ func TestStartUpdateNoticeWatcher_ShowsNotice(t *testing.T) {
 func TestStartUpdateNoticeWatcher_EmptyNotice(t *testing.T) {
 	tm := newTestMode(t)
 	ch := make(chan string, 1)
-	ch <- "" // empty — no notice
+	ch <- "" // empty — up to date
 	tm.mode.updateCh = ch
 
 	before := tm.messageCount()
@@ -2329,6 +2329,62 @@ func TestStartUpdateNoticeWatcher_ContextCancel(t *testing.T) {
 		// OK — goroutine exited promptly
 	case <-time.After(2 * time.Second):
 		t.Error("goroutine did not exit promptly after context cancellation")
+	}
+}
+
+func TestUpdateVersion_DefaultEmpty(t *testing.T) {
+	tm := newTestMode(t)
+	if got := tm.mode.UpdateVersion(); got != "" {
+		t.Errorf("expected empty update version before check, got %q", got)
+	}
+	if got := tm.mode.getFooterData().UpdateVersion; got != "" {
+		t.Errorf("expected no update version in footer data, got %q", got)
+	}
+}
+
+func TestStartUpdateNoticeWatcher_SetsFooterVersion(t *testing.T) {
+	tm := newTestMode(t)
+	ch := make(chan string, 1)
+	ch <- "1.0.0"
+	tm.mode.updateCh = ch
+
+	tm.mode.startUpdateNoticeWatcher()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && tm.mode.UpdateVersion() == "" {
+		tm.waitRender()
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	if got := tm.mode.UpdateVersion(); got != "1.0.0" {
+		t.Fatalf("expected update version 1.0.0, got %q", got)
+	}
+	if got := tm.mode.getFooterData().UpdateVersion; got != "1.0.0" {
+		t.Errorf("expected footer data to carry update version, got %q", got)
+	}
+}
+
+func TestStartUpdateNoticeWatcher_EmptyLeavesFooterClean(t *testing.T) {
+	tm := newTestMode(t)
+	ch := make(chan string, 1)
+	ch <- ""
+	tm.mode.updateCh = ch
+
+	tm.mode.startUpdateNoticeWatcher()
+
+	// Wait until the watcher has actually consumed the value, so the
+	// assertion below cannot pass merely because the goroutine never ran.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && len(ch) > 0 {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if len(ch) > 0 {
+		t.Fatal("watcher did not consume the update check result")
+	}
+	tm.waitRender()
+
+	if got := tm.mode.getFooterData().UpdateVersion; got != "" {
+		t.Errorf("expected no footer indicator when up to date, got %q", got)
 	}
 }
 

@@ -463,6 +463,7 @@ func (m *InteractiveMode) getFooterData() components.FooterData {
 	data := components.FooterData{
 		Pwd:             pwd,
 		AutoCompactMode: m.autoCompactMode,
+		UpdateVersion:   m.UpdateVersion(),
 	}
 
 	if m.session == nil {

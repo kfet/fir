@@ -226,3 +226,57 @@ func TestFooterComponent_NoPlan(t *testing.T) {
 		t.Fatal("should not show plan indicator when no plan")
 	}
 }
+
+func TestUpdateBadge(t *testing.T) {
+	tests := []struct {
+		name    string
+		version string
+		want    string
+	}{
+		{"empty means up to date", "", ""},
+		{"whitespace only", "   ", ""},
+		{"plain version", "0.99.1", "⬆ 0.99.1 · fir update"},
+		{"v prefix stripped", "v0.99.1", "⬆ 0.99.1 · fir update"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := updateBadge(tt.version); got != tt.want {
+				t.Errorf("updateBadge(%q) = %q, want %q", tt.version, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFooterComponent_UpdateAvailable(t *testing.T) {
+	f := NewFooterComponent(func() FooterData {
+		return FooterData{
+			Pwd:           "/home/user",
+			ModelID:       "test-model",
+			ContextWindow: 128000,
+			UpdateVersion: "0.99.1",
+		}
+	})
+
+	joined := strings.Join(f.Render(120), "\n")
+	if !strings.Contains(joined, "⬆ 0.99.1") {
+		t.Fatalf("expected update indicator in footer, got %q", joined)
+	}
+	if !strings.Contains(joined, "fir update") {
+		t.Fatalf("expected actionable 'fir update' hint in footer, got %q", joined)
+	}
+}
+
+func TestFooterComponent_NoUpdateAvailable(t *testing.T) {
+	f := NewFooterComponent(func() FooterData {
+		return FooterData{
+			Pwd:           "/home/user",
+			ModelID:       "test-model",
+			ContextWindow: 128000,
+		}
+	})
+
+	joined := strings.Join(f.Render(120), "\n")
+	if strings.Contains(joined, "⬆") {
+		t.Fatalf("should not show update indicator when binary is current, got %q", joined)
+	}
+}

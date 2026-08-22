@@ -556,7 +556,8 @@ func run() error {
 
 	// Start async version check for interactive and print modes.
 	// Skipped for machine-to-machine modes (ACP).
-	// The channel always receives exactly one value (notice text or "").
+	// The channel always receives exactly one value (the newer version
+	// available, or "" when up to date / the check was skipped or failed).
 	noticeCh := make(chan string, 1)
 	wantUpdateCheck := args.OutputMode != ModeACP
 	if wantUpdateCheck {
@@ -565,7 +566,7 @@ func run() error {
 			defer cancel()
 			rel, _ := update.CheckLatest(ctx, version, agentDir)
 			if rel != nil {
-				noticeCh <- update.UpdateNotice(rel.Version)
+				noticeCh <- rel.Version
 			} else {
 				noticeCh <- ""
 			}
@@ -878,13 +879,14 @@ func extensionConfigDirs(projectDir string) []string {
 	}
 }
 
-// drainUpdateNotice non-blockingly reads a notice from noticeCh and prints
-// it to stderr if non-empty. Used by print mode after the run completes.
+// drainUpdateNotice non-blockingly reads the available-update version from
+// noticeCh and prints the notice to stderr if one is available. Used by print
+// mode after the run completes.
 func drainUpdateNotice(noticeCh <-chan string) {
 	select {
-	case notice := <-noticeCh:
-		if notice != "" {
-			fmt.Fprintln(os.Stderr, notice)
+	case version := <-noticeCh:
+		if version != "" {
+			fmt.Fprintln(os.Stderr, update.UpdateNotice(version))
 		}
 	default:
 		// Check still in flight — skip rather than block.

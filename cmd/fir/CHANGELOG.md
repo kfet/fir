@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Added
+- **An available update is now visible inside the interactive TUI, not just on CLI paths.** `pkg/update`'s cached, async check already ran for interactive sessions, but its result was a one-shot message that scrolled away — so fleet hosts silently drifted versions behind. The footer now carries a compact, persistent, actionable indicator (`⬆ 0.99.1 · fir update`) driven by the same check (no second mechanism, no blocking network call), and it disappears the moment the running binary is current. `/update` already existed to act on it.
+
 ## [0.99.0] - 2026-08-21
 
 ### Added

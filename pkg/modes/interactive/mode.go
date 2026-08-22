@@ -25,6 +25,7 @@ import (
 	"github.com/kfet/fir/pkg/session"
 	"github.com/kfet/fir/pkg/session/store"
 	tuicomp "github.com/kfet/fir/pkg/tui/components"
+	"github.com/kfet/fir/pkg/update"
 	"github.com/kfet/pinoauth"
 	"github.com/kfet/tui"
 )
@@ -137,9 +138,15 @@ type InteractiveMode struct {
 	// from settings that were just reloaded by session.Reload().
 	beforeExtensionReload func() error
 
-	// updateCh receives a single update notice string (or "") when the
-	// background version check completes. Shown in the TUI at startup.
+	// updateCh receives a single available-release version string (or "")
+	// when the background version check completes. Shown in the TUI at
+	// startup and, persistently, in the footer.
 	updateCh <-chan string
+
+	// updateVersion holds the newer release version once the background check
+	// reports one. Read by getFooterData on every render, written by the
+	// update-notice watcher goroutine — hence atomic.
+	updateVersion atomic.Pointer[string]
 
 	// clipboardReader reads an image from the system clipboard.
 	// Defaults to clipboard.ReadClipboardImage; can be replaced in tests.
@@ -353,11 +360,22 @@ func (m *InteractiveMode) NotifyMCPServerDisconnected(name string, err error) {
 	}
 }
 
-// SetUpdateChannel supplies a channel that delivers a single update notice
-// string (or "") once the background version check completes.  When the
-// notice is non-empty it is shown in the TUI message area at startup.
+// SetUpdateChannel supplies a channel that delivers a single version string
+// (the newer release available, or "") once the background version check
+// completes.  When it is non-empty the TUI shows a one-shot notice in the
+// message area and a persistent indicator in the footer.
 func (m *InteractiveMode) SetUpdateChannel(ch <-chan string) {
 	m.updateCh = ch
+}
+
+// UpdateVersion returns the newer release version reported by the background
+// version check, or "" when the running binary is current (or the check has
+// not completed / is disabled). Safe to call from any goroutine.
+func (m *InteractiveMode) UpdateVersion() string {
+	if v := m.updateVersion.Load(); v != nil {
+		return *v
+	}
+	return ""
 }
 
 // startUpdateNoticeWatcher spawns a goroutine that waits for the version
@@ -368,9 +386,13 @@ func (m *InteractiveMode) startUpdateNoticeWatcher() {
 		select {
 		case <-m.ctx.Done():
 			return
-		case notice := <-m.updateCh:
-			if notice != "" {
-				m.showMessage(notice)
+		case version := <-m.updateCh:
+			if version != "" {
+				// Store before showing: showMessage triggers the render that
+				// reads updateVersion for the footer, so the badge and the
+				// one-shot notice land in the same frame.
+				m.updateVersion.Store(&version)
+				m.showMessage(update.UpdateNotice(version))
 			}
 		}
 	}()

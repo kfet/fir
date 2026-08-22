@@ -49,6 +49,9 @@ type FooterData struct {
 	PlanTitle string
 	// PlanKeyHint is the display string for the toggle-plan keybinding (e.g. "ctrl+r").
 	PlanKeyHint string
+	// UpdateVersion is the newer release available for download (empty when
+	// the running binary is current or the check has not completed).
+	UpdateVersion string
 }
 
 // FooterComponent renders a status footer with pwd, token stats, and context usage.
@@ -182,6 +185,11 @@ func (f *FooterComponent) Render(width int) []string {
 		}
 	}
 
+	// Update available — persistent, actionable indicator.
+	if badge := updateBadge(data.UpdateVersion); badge != "" {
+		statsParts = append(statsParts, t.Fg("warning", badge))
+	}
+
 	statsLeft := strings.Join(statsParts, " ")
 
 	// Right side: model name + thinking level
@@ -268,6 +276,18 @@ func (f *FooterComponent) Render(width int) []string {
 	lines := []string{dimPwd, dimStatsLeft + dimRemainder}
 
 	return lines
+}
+
+// updateBadge renders the compact "update available" footer indicator for
+// version, e.g. "⬆ 0.99.1 · fir update". It returns "" when version is empty
+// (up to date, check disabled, or check not finished yet), which is what
+// makes the indicator disappear once the running binary is current.
+func updateBadge(version string) string {
+	version = strings.TrimSpace(version)
+	if version == "" {
+		return ""
+	}
+	return "⬆ " + strings.TrimPrefix(version, "v") + " · fir update"
 }
 
 // formatTokens formats token counts for display.
