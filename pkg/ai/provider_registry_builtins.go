@@ -95,8 +95,10 @@ func builtInProviders() []*RegisteredProvider {
 		},
 		{
 			ID: ProviderOpenRouter, DisplayName: "OpenRouter", ShortName: "or", Priority: 10,
-			DefaultModelID: "moonshotai/kimi-k2.6",
-			EnvKeys:        EnvKeySpec{Primary: "OPENROUTER_API_KEY"},
+			DefaultModelID:  "moonshotai/kimi-k2.6",
+			KeyLink:         "https://openrouter.ai/keys",
+			EnvKeys:         EnvKeySpec{Primary: "OPENROUTER_API_KEY"},
+			OAuthProviderID: "openrouter",
 		},
 		{
 			ID: ProviderVercelAIGateway, DisplayName: "Vercel AI Gateway", Priority: 11,

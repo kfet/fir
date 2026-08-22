@@ -35,6 +35,8 @@ import (
 //	forge:          1 tool  (forge_tool)
 //	remote:         6 tools (rexec, rjob, rput, rget, rtmux, rhosts)
 //
+// (openrouter-auth registers an auth provider but no tools.)
+//
 // The exact composition is tested elsewhere; this constant pins the total
 // for shape-checking tests in this file.
 const builtinToolCount = 28
@@ -766,6 +768,9 @@ func TestManager_StartFailures_AuthExt(t *testing.T) {
 
 func TestManager_StartFailures_Empty(t *testing.T) {
 	dir := t.TempDir()
+	// Isolate from the host's global extensions dir (~/.config/fir/extensions)
+	// so the failure list only reflects this test's own extension.
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	scriptPath := writeExtScript(t, dir, "good-ext")
 
 	trustPath := filepath.Join(dir, "trust.json")

@@ -1086,9 +1086,10 @@ that integrate with fir's auth storage. Two flow models are supported:
 2. **Imperative** (legacy / non-standard flows): the extension leaves
    `flow` empty and implements `auth/login` itself. fir invokes
    `auth/login` and the extension calls back through the bridge for
-   PKCE, callback server, prompts, etc. Use only when the provider
-   has a non-standard flow that doesn't fit the static spec — the
-   GitHub Copilot device-code grant is the only built-in example.
+   PKCE, callback server, prompts, etc. Built-in examples: the GitHub
+   Copilot device-code grant and OpenRouter's PKCE-shaped flow
+   (`callback_url` instead of `redirect_uri`, no `state`, and a JSON
+   key-minting endpoint answering `{"key": …}`).
 
 ### Init payload
 
