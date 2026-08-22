@@ -70,6 +70,16 @@ def _load_aside():
     return aside
 
 
+# The verbatim failure text github.com/kfet/agent >= v0.1.3 synthesises when a
+# provider asserts stop_reason=error but supplies no diagnosis. This — not the
+# "no usable content" wording — is the modern shape of "this candidate cannot
+# answer", and the chain walk must cool the model off and advance past it.
+_PROVIDER_ERR = (
+    "side-query: provider reported stop_reason=error with no error message "
+    "(provider=anthropic model=claude-fable-5 blocks: [])"
+)
+
+
 # ---------------------------------------------------------------------------
 # _result_text
 # ---------------------------------------------------------------------------
@@ -715,6 +725,62 @@ class TestLoadAdvisorConfig(unittest.TestCase):
         self.assertEqual(cfg[0]["provider"], "anthropic")
 
 
+class TestConfigReadFreshness(unittest.TestCase):
+    """aside.json must be honoured after the init handshake.
+
+    `aside` is a builtin extension, so `ext_reload` refuses it and there is
+    no way to re-import mid-session. The tool decorator also evaluates
+    `_advisor()` at IMPORT time — before the host's init handshake has set
+    `fir_ext.config_dirs` — so a memoized read captured the built-in default
+    forever and a user's aside.json pin never took effect at all.
+    """
+
+    def setUp(self):
+        import tempfile
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self._prev_dirs = list(fir_ext.config_dirs)
+        self.addCleanup(lambda: setattr(fir_ext, "config_dirs", self._prev_dirs))
+
+    def _write(self, payload):
+        import json as _json
+        import os
+
+        with open(os.path.join(self._tmp.name, "aside.json"), "w") as f:
+            _json.dump(payload, f)
+
+    def test_config_written_after_import_is_honoured(self):
+        # Import with NO config dirs, exactly as the runtime does.
+        fir_ext.config_dirs = []
+        mod = _load_aside()
+        self.assertEqual(mod._advisor()[0]["model"], mod._DEFAULT_ADVISOR_SPEC.split("/")[1])
+        # Init handshake lands, user has a pin on disk.
+        self._write({"advisor": "openai/gpt-pinned", "delegate": "openai/gpt-cheap"})
+        fir_ext.config_dirs = [self._tmp.name]
+        self.assertEqual(mod._advisor(), {"provider": "openai", "model": "gpt-pinned"})
+        self.assertEqual(mod._delegate(), {"provider": "openai", "model": "gpt-cheap"})
+
+    def test_edit_mid_session_takes_effect(self):
+        fir_ext.config_dirs = [self._tmp.name]
+        mod = _load_aside()
+        self._write({"advisor": "openai/first"})
+        self.assertEqual(mod._advisor()["model"], "first")
+        self._write({"advisor": "openai/second"})
+        self.assertEqual(mod._advisor()["model"], "second")
+
+    def test_explicit_override_short_circuits_the_read(self):
+        # Tests (and only tests) inject by assignment; that must win over
+        # whatever is on disk.
+        fir_ext.config_dirs = [self._tmp.name]
+        self._write({"advisor": "openai/on-disk"})
+        mod = _load_aside()
+        mod._ADVISOR = {"provider": "anthropic", "model": "injected"}
+        self.assertEqual(mod._advisor()["model"], "injected")
+        mod._ADVISOR = None
+        self.assertIsNone(mod._advisor())
+
+
 class TestAsideAdvisorCommand(unittest.TestCase):
     """The /aside-advisor slash command — show, set, off."""
 
@@ -1284,6 +1350,176 @@ class TestModelUnavailableSignature(unittest.TestCase):
         self.assertFalse(self.mod._is_model_unavailable_error("connection reset by peer"))
 
 
+class TestEmptyResponseClassification(unittest.TestCase):
+    """Provider-asserted failure vs. a live model that rendered nothing.
+
+    These are two different classes with two different routing policies, and
+    telling them apart is the whole point of this module's chain walk:
+
+      * a provider that asserts ``stop_reason=error`` and supplies no
+        diagnosis has FAILED the call — cool the model off and advance;
+      * a response whose blocks merely render to nothing (redacted thinking,
+        thinking-only, zero-length text, or no blocks at all) came from a
+        LIVE model and is a transient blip — retry once, advance, never cool
+        the model off.
+
+    Before ``github.com/kfet/agent`` v0.1.3 the two were indistinguishable:
+    an errored message with an empty ``ErrorMessage`` fell through to the
+    degenerate-content arm of ``SimplePrompt`` and surfaced wearing the
+    second class's wording. v0.1.3 intercepts it and synthesises its own
+    text, so the ambiguity is gone — and this class pins that boundary.
+    """
+
+    # The verbatim error text github.com/kfet/agent >= v0.1.3 synthesises in
+    # ensureErrorMessage() when a provider reports an error stop reason with
+    # no message. Pinned in full ON PURPOSE: the classifier keys on a short
+    # stable substring so upstream can reformat the parenthesised tail, but
+    # this constant must break loudly if the WORDING drifts, because nothing
+    # else in fir would notice until an advisor chain silently dead-ended
+    # again.
+    AGENT_V013_PROVIDER_ERROR = (
+        "side-query: provider reported stop_reason=error with no error message "
+        "(provider=anthropic model=claude-fable-5 blocks: [])"
+    )
+
+    def setUp(self):
+        self.mod = _load_aside()
+
+    def test_agent_v013_provider_error_text_is_unavailability(self):
+        err = self.AGENT_V013_PROVIDER_ERROR
+        self.assertTrue(self.mod._is_provider_error_without_message(err))
+        self.assertTrue(self.mod._is_model_unavailable_error(err))
+        # It quotes a block summary, but it is NOT the transient class — a
+        # loose match here would retry a call upstream already called terminal.
+        self.assertFalse(self.mod._is_empty_content_error(err))
+
+    def test_agent_v013_text_matches_no_legacy_signature(self):
+        # The rule has to be structural: the synthesised text deliberately
+        # avoids every retryable-error pattern upstream knows about, and it
+        # contains none of our own unavailability substrings either. Without
+        # _is_provider_error_without_message it would fall to the unknown-error
+        # branch and stop the walk instead of advancing it.
+        low = self.AGENT_V013_PROVIDER_ERROR.lower()
+        for sig in self.mod._MODEL_UNAVAILABLE_SIGNATURES:
+            self.assertNotIn(sig, low, f"signature {sig!r} would mask the structural rule")
+        # Nor may it be mistaken for a request-shaped fault, which would
+        # surface it to the caller instead of advancing the chain.
+        self.assertFalse(self.mod._is_request_shaped_error(self.AGENT_V013_PROVIDER_ERROR))
+
+    def test_provider_error_with_blocks_is_still_unavailability(self):
+        # A partial stream that then errors silently is the same provider
+        # assertion; the block summary is incidental.
+        err = (
+            "side-query: provider reported stop_reason=error with no error message "
+            "(provider=anthropic model=claude-fable-5 blocks: [text(len=12)])"
+        )
+        self.assertTrue(self.mod._is_model_unavailable_error(err))
+
+    def test_noblocks_with_stop_reason_error_is_transient_not_unavailability(self):
+        # Deliberate reversal of an earlier rule. Against agent < v0.1.3 this
+        # exact string WAS a laundered hard failure; from v0.1.3 a hard
+        # failure can no longer reach this wording, so what remains is a live
+        # model that rendered nothing — the class fleet telemetry measured as
+        # a transient drip that succeeds on re-probe.
+        err = "side-query: response had no usable content (blocks: []) (stop_reason=error)"
+        self.assertTrue(self.mod._is_empty_content_error(err))
+        self.assertFalse(self.mod._is_model_unavailable_error(err))
+
+    def test_noblocks_without_stop_reason_suffix_is_transient(self):
+        # The ambiguous residue: a provider that asserts neither an error nor
+        # a stop reason. It lands in the transient class by design, which
+        # degrades gracefully (retry, advance, executor) instead of cooling
+        # off a model we have no evidence against.
+        for err in (
+            "side-query: response had no usable content (blocks: [])",
+            "side-query: response had no usable content (blocks: []) (stop_reason=)",
+        ):
+            with self.subTest(err=err):
+                self.assertTrue(self.mod._is_empty_content_error(err))
+                self.assertFalse(self.mod._is_model_unavailable_error(err))
+
+    def test_redacted_thinking_is_not_unavailability(self):
+        # A live model that emitted a redacted thinking block generated
+        # something. Useless, but it is NOT evidence the model is gone.
+        err = (
+            "side-query: response had no usable content "
+            "(blocks: [thinking(th=0,sig=940)]) (stop_reason=error)"
+        )
+        self.assertEqual(
+            self.mod._classify_empty_blocks("thinking(th=0,sig=940)"), "empty:redacted"
+        )
+        self.assertTrue(self.mod._is_empty_content_error(err))
+        self.assertFalse(self.mod._is_model_unavailable_error(err))
+
+    def test_thinking_only_is_not_unavailability(self):
+        err = (
+            "side-query: response had no usable content "
+            "(blocks: [thinking(th=12,sig=940)]) (stop_reason=error)"
+        )
+        self.assertFalse(self.mod._is_model_unavailable_error(err))
+
+    def test_empty_text_block_is_not_unavailability(self):
+        err = (
+            "side-query: response had no usable content (blocks: [text(len=0)]) (stop_reason=error)"
+        )
+        self.assertFalse(self.mod._is_model_unavailable_error(err))
+
+    def test_noblocks_on_user_abort_is_not_unavailability(self):
+        # Ctrl-C must never cool a model off, and the request-shaped carve-out
+        # must claim it before the empty-content retry can fire another call.
+        err = "side-query: response had no usable content (blocks: []) (stop_reason=aborted)"
+        self.assertFalse(self.mod._is_model_unavailable_error(err))
+        self.assertTrue(self.mod._is_request_shaped_error(err))
+
+    def test_noblocks_on_clean_stop_is_not_unavailability(self):
+        err = "side-query: response had no usable content (blocks: []) (stop_reason=stop)"
+        self.assertFalse(self.mod._is_model_unavailable_error(err))
+        self.assertTrue(self.mod._is_empty_content_error(err))
+
+    def test_unrelated_error_is_neither_class(self):
+        self.assertFalse(self.mod._is_provider_error_without_message("connection reset by peer"))
+        self.assertFalse(self.mod._is_empty_content_error("connection reset by peer"))
+
+
+class TestRequestShapedError(unittest.TestCase):
+    """Errors attributable to the REQUEST — never retried on another route."""
+
+    def setUp(self):
+        self.mod = _load_aside()
+
+    def test_overflow_is_request_shaped(self):
+        self.assertTrue(
+            self.mod._is_request_shaped_error("side-query: Input exceeds context window limit")
+        )
+
+    def test_cancellation_is_request_shaped(self):
+        for s in (
+            "side-query: context canceled",
+            "side-query: context cancelled",
+            "response had no usable content (blocks: []) (stop_reason=aborted)",
+        ):
+            self.assertTrue(self.mod._is_request_shaped_error(s), s)
+
+    def test_transport_error_is_not_request_shaped(self):
+        self.assertFalse(self.mod._is_request_shaped_error("connection reset by peer"))
+
+    def test_unavailability_is_not_request_shaped(self):
+        self.assertFalse(self.mod._is_request_shaped_error("not_found_error: gone"))
+
+
+class TestShortError(unittest.TestCase):
+    def setUp(self):
+        self.mod = _load_aside()
+
+    def test_flattens_whitespace(self):
+        self.assertEqual(self.mod._short_error("a\n  b\tc"), "a b c")
+
+    def test_truncates_long_error(self):
+        out = self.mod._short_error("x" * 500)
+        self.assertLessEqual(len(out), self.mod._SHORT_ERROR_CHARS)
+        self.assertTrue(out.endswith("…"))
+
+
 class TestAvailabilityDegrade(unittest.TestCase):
     """Layer A — degrade advisor/delegate to the highest available model."""
 
@@ -1351,8 +1587,13 @@ class TestAvailabilityDegrade(unittest.TestCase):
             ctx.side_query.call_args.kwargs,
             {"model": None, "provider": None, "effort": None},
         )
-        # No advisor prefix — escalation was disabled this session.
-        self.assertEqual(result["content"][0]["text"], "executor reply")
+        # No advisor TRACE prefix — nothing advisory answered. But escalation
+        # was requested and did not happen, so the caller is told: silence
+        # here would let the executor treat its own reply as advisor-endorsed.
+        text = result["content"][0]["text"]
+        self.assertEqual(
+            text, "[advisor unavailable — answered on executor model]\n\nexecutor reply"
+        )
 
     def test_delegate_degrades_to_highest_haiku(self):
         mod = self._mod(delegate={"provider": "anthropic", "model": "claude-haiku-9-9"})
@@ -1430,18 +1671,86 @@ class TestReactiveFallback(unittest.TestCase):
             text.startswith("[delegate unavailable — answered on executor model]"), text
         )
 
-    def test_non_unavailability_error_still_surfaces(self):
+    def test_route_shaped_error_falls_through_to_executor(self):
+        # A route-shaped failure (transport blip) must NOT hard-fail the
+        # caller: the executor answers, and the note names the actual fault
+        # rather than claiming an unavailability we never established.
         mod = self._mod(advisor={"provider": "anthropic", "model": "claude-fable-5"})
 
         def sq(question, model=None, provider=None, effort=None):
-            raise RuntimeError("connection reset by peer")
+            if model is not None:
+                raise RuntimeError("connection reset by peer")
+            return "executor answer"
+
+        ctx = self._ctx(sq)
+        result = mod._run_aside([], "q", ctx, escalate=True)
+        self.assertFalse(result["is_error"])
+        text = result["content"][0]["text"]
+        self.assertTrue(
+            text.startswith("[advisor failed (connection reset by peer) — "),
+            text,
+        )
+        self.assertIn("answered on executor model]", text)
+        self.assertIn("executor answer", text)
+        self.assertEqual(ctx.side_query.call_count, 2)
+        # NOT memoized — a transport blip is no evidence the model is dead.
+        self.assertEqual(mod._UNAVAILABLE_UNTIL, {})
+
+    def test_route_shaped_error_and_executor_failure_chains_both(self):
+        mod = self._mod(advisor={"provider": "anthropic", "model": "claude-fable-5"})
+
+        def sq(question, model=None, provider=None, effort=None):
+            if model is not None:
+                raise RuntimeError("connection reset by peer")
+            raise RuntimeError("executor socket hangup")
 
         ctx = self._ctx(sq)
         result = mod._run_aside([], "q", ctx, escalate=True)
         self.assertTrue(result["is_error"])
-        self.assertIn("aside LLM call failed", result["content"][0]["text"])
-        # Only the routed call — no executor retry for a generic error.
+        text = result["content"][0]["text"]
+        self.assertIn("advisor chain failed", text)
+        self.assertIn("connection reset by peer", text)
+        self.assertIn("executor fallback also failed", text)
+        self.assertIn("executor socket hangup", text)
+
+    def test_user_abort_surfaces_immediately(self):
+        # Cancelling a side query must not fire another LLM call at the
+        # executor, and must not memoize the model as dead.
+        mod = self._mod(advisor={"provider": "anthropic", "model": "claude-fable-5"})
+
+        def sq(question, model=None, provider=None, effort=None):
+            raise RuntimeError("side-query: context canceled")
+
+        ctx = self._ctx(sq)
+        result = mod._run_aside([], "q", ctx, escalate=True)
+        self.assertTrue(result["is_error"])
+        self.assertIn("context canceled", result["content"][0]["text"])
         self.assertEqual(ctx.side_query.call_count, 1)
+        self.assertEqual(mod._UNAVAILABLE_UNTIL, {})
+
+    def test_abort_wearing_empty_content_wording_is_not_retried(self):
+        # An abort surfaces as `(blocks: []) (stop_reason=aborted)`, which
+        # matches the empty-content pattern — so the same-candidate retry
+        # would have fired one more LLM call (and slept) after the user hit
+        # Ctrl-C. The request-shaped check has to win inside the retry loop,
+        # not merely after it returns.
+        mod = self._mod(advisor={"provider": "anthropic", "model": "claude-fable-5"})
+        mod._EMPTY_CONTENT_RETRY_BACKOFF = 1.5
+
+        def sq(question, model=None, provider=None, effort=None):
+            raise RuntimeError(
+                "side-query: response had no usable content (blocks: []) (stop_reason=aborted)"
+            )
+
+        ctx = self._ctx(sq)
+        with mock.patch.object(mod.time, "sleep") as sleep:
+            result = mod._run_aside([], "q", ctx, escalate=True)
+        self.assertTrue(result["is_error"])
+        self.assertIn("stop_reason=aborted", result["content"][0]["text"])
+        # One probe only: no retry, no chain advance, no executor fallback.
+        self.assertEqual(ctx.side_query.call_count, 1)
+        sleep.assert_not_called()
+        self.assertEqual(mod._UNAVAILABLE_UNTIL, {})
 
     def test_overflow_error_hits_hint_not_fallback(self):
         mod = self._mod(advisor={"provider": "anthropic", "model": "claude-fable-5"})
@@ -1478,9 +1787,10 @@ class TestReactiveFallback(unittest.TestCase):
 
 
 class TestSessionUnavailableMemo(unittest.TestCase):
-    """Per-session 404 memo — once a model 404s, escalation skips it for the
-    rest of the session and Layer A degrades to the next live flagship instead
-    of re-probing the dead model on every call."""
+    """Availability circuit breaker — a failed model is skipped for a backoff
+    window (not the whole session) so Layer A degrades to the next live
+    flagship instead of re-probing on every call, while an intermittent model
+    recovers on its own."""
 
     def _mod(self, advisor=None, delegate=None):
         mod = _load_aside()
@@ -1490,15 +1800,69 @@ class TestSessionUnavailableMemo(unittest.TestCase):
 
     def test_fresh_load_starts_with_empty_memo(self):
         mod = self._mod()
-        self.assertEqual(mod._SESSION_UNAVAILABLE, set())
+        self.assertEqual(mod._UNAVAILABLE_UNTIL, {})
+
+    def test_cooldown_expires_and_model_is_probed_again(self):
+        # The whole point of a cooldown over a tombstone: an intermittent
+        # model comes back without restarting the session.
+        mod = self._mod()
+        mod._mark_model_unavailable("anthropic", "claude-fable-5")
+        self.assertTrue(mod._model_unavailable("anthropic", "claude-fable-5"))
+        # Rewind the deadline rather than sleeping — no wall-clock waits.
+        _, failures = mod._UNAVAILABLE_UNTIL["anthropic/claude-fable-5"]
+        mod._UNAVAILABLE_UNTIL["anthropic/claude-fable-5"] = (mod.time.monotonic() - 1, failures)
+        self.assertFalse(mod._model_unavailable("anthropic", "claude-fable-5"))
+
+    def test_backoff_doubles_per_consecutive_failure_and_caps(self):
+        mod = self._mod()
+        windows = []
+        for _ in range(12):
+            before = mod.time.monotonic()
+            mod._mark_model_unavailable("anthropic", "claude-fable-5")
+            until, _ = mod._UNAVAILABLE_UNTIL["anthropic/claude-fable-5"]
+            windows.append(until - before)
+        self.assertAlmostEqual(windows[0], mod._UNAVAILABLE_BASE_COOLDOWN, delta=1.0)
+        self.assertAlmostEqual(windows[1], mod._UNAVAILABLE_BASE_COOLDOWN * 2, delta=1.0)
+        self.assertAlmostEqual(windows[2], mod._UNAVAILABLE_BASE_COOLDOWN * 4, delta=1.0)
+        # Capped, never unbounded.
+        self.assertAlmostEqual(windows[-1], mod._UNAVAILABLE_MAX_COOLDOWN, delta=1.0)
+
+    def test_success_resets_the_breaker(self):
+        mod = self._mod()
+        mod._mark_model_unavailable("anthropic", "claude-fable-5")
+        mod._mark_model_unavailable("anthropic", "claude-fable-5")
+        mod._mark_model_available("anthropic", "claude-fable-5")
+        self.assertEqual(mod._UNAVAILABLE_UNTIL, {})
+        # Fresh short backoff, not a resumed ratchet toward the cap.
+        before = mod.time.monotonic()
+        mod._mark_model_unavailable("anthropic", "claude-fable-5")
+        until, _ = mod._UNAVAILABLE_UNTIL["anthropic/claude-fable-5"]
+        self.assertAlmostEqual(until - before, mod._UNAVAILABLE_BASE_COOLDOWN, delta=1.0)
+
+    def test_answering_candidate_closes_its_breaker(self):
+        # An intermittent head that fails once then answers must not stay
+        # marked — otherwise one blip costs the best advisor for the session.
+        mod = self._mod(advisor=[{"provider": "anthropic", "model": "claude-fable-5"}])
+        mod._mark_model_unavailable("anthropic", "claude-fable-5")
+        _, failures = mod._UNAVAILABLE_UNTIL["anthropic/claude-fable-5"]
+        mod._UNAVAILABLE_UNTIL["anthropic/claude-fable-5"] = (mod.time.monotonic() - 1, failures)
+
+        ctx = _blocking_ctx()
+        ctx.side_query = mock.MagicMock(return_value="fable answered")
+        result = mod._run_aside([], "q", ctx, escalate=True)
+        self.assertFalse(result["is_error"])
+        self.assertIn("fable answered", result["content"][0]["text"])
+        self.assertEqual(mod._UNAVAILABLE_UNTIL, {})
 
     def test_mark_ignores_falsy(self):
         mod = self._mod()
         mod._mark_model_unavailable(None, "x")
         mod._mark_model_unavailable("anthropic", None)
-        self.assertEqual(mod._SESSION_UNAVAILABLE, set())
+        self.assertEqual(mod._UNAVAILABLE_UNTIL, {})
+        mod._mark_model_available(None, "x")
+        mod._mark_model_available("anthropic", None)
         mod._mark_model_unavailable("anthropic", "claude-fable-5")
-        self.assertEqual(mod._SESSION_UNAVAILABLE, {"anthropic/claude-fable-5"})
+        self.assertTrue(mod._model_unavailable("anthropic", "claude-fable-5"))
 
     def test_degrade_role_excludes_memoized_model(self):
         mod = self._mod()
@@ -1544,7 +1908,7 @@ class TestSessionUnavailableMemo(unittest.TestCase):
             ),
             r1["content"][0]["text"],
         )
-        self.assertIn("anthropic/claude-fable-5", mod._SESSION_UNAVAILABLE)
+        self.assertTrue(mod._model_unavailable("anthropic", "claude-fable-5"))
 
         r2 = mod._run_aside([], "q2", ctx, escalate=True)
         self.assertFalse(r2["is_error"])
@@ -1639,8 +2003,8 @@ class TestChainWalk(unittest.TestCase):
         # both candidates probed, then executor (model=None).
         self.assertEqual(calls, ["claude-fable-5", "claude-opus-4-8", None])
         # both memoized.
-        self.assertIn("anthropic/claude-fable-5", mod._SESSION_UNAVAILABLE)
-        self.assertIn("anthropic/claude-opus-4-8", mod._SESSION_UNAVAILABLE)
+        self.assertTrue(mod._model_unavailable("anthropic", "claude-fable-5"))
+        self.assertTrue(mod._model_unavailable("anthropic", "claude-opus-4-8"))
 
     def test_chain_and_executor_both_dead_chains_both_errors(self):
         mod = self._mod(
@@ -1697,6 +2061,215 @@ class TestChainWalk(unittest.TestCase):
         self.assertIn("context window full", text)
         # Only the first candidate was tried — no advance, no executor retry.
         self.assertEqual(calls, ["claude-fable-5"])
+
+    def test_provider_error_head_advances_to_next_candidate(self):
+        # THE BUG: an unavailable model's failure carries no 404/not_found
+        # signature at all — the provider asserts an error and says nothing
+        # else, and agent >= v0.1.3 synthesises this text for it. The walk
+        # must advance rather than dead-ending on a chain head with two
+        # healthy candidates sitting behind it.
+        mod = self._mod(
+            advisor=[
+                {"provider": "anthropic", "model": "claude-fable-5"},
+                {"provider": "anthropic", "model": "claude-opus-4-8"},
+            ]
+        )
+        available = [
+            {"provider": "anthropic", "id": "claude-fable-5", "name": "Fable"},
+            {"provider": "anthropic", "id": "claude-opus-4-8", "name": "Opus"},
+        ]
+        calls = []
+
+        def sq(question, model=None, provider=None, effort=None):
+            calls.append(model)
+            if model == "claude-fable-5":
+                raise RuntimeError(_PROVIDER_ERR)
+            return "opus answered"
+
+        ctx = self._ctx(sq, available=available)
+        result = mod._run_aside([], "q", ctx, escalate=True)
+        self.assertFalse(result["is_error"])
+        text = result["content"][0]["text"]
+        self.assertTrue(
+            text.startswith(
+                "[advisor: anthropic/claude-opus-4-8 (fallback: claude-fable-5 unavailable)]"
+            ),
+            text,
+        )
+        self.assertIn("opus answered", text)
+        # Advanced to candidate 2 — no executor fallback needed, and NO retry
+        # on the dead head: upstream already called this class terminal.
+        self.assertEqual(calls, ["claude-fable-5", "claude-opus-4-8"])
+        self.assertTrue(mod._model_unavailable("anthropic", "claude-fable-5"))
+
+    def test_whole_chain_provider_error_falls_to_executor_with_note(self):
+        mod = self._mod(
+            advisor=[
+                {"provider": "anthropic", "model": "claude-fable-5"},
+                {"provider": "anthropic", "model": "claude-opus-4-8"},
+            ]
+        )
+        available = [
+            {"provider": "anthropic", "id": "claude-fable-5", "name": "Fable"},
+            {"provider": "anthropic", "id": "claude-opus-4-8", "name": "Opus"},
+        ]
+        calls = []
+
+        def sq(question, model=None, provider=None, effort=None):
+            calls.append(model)
+            if model is not None:
+                raise RuntimeError(_PROVIDER_ERR)
+            return "executor answered"
+
+        ctx = self._ctx(sq, available=available)
+        result = mod._run_aside([], "q", ctx, escalate=True)
+        self.assertFalse(result["is_error"])
+        text = result["content"][0]["text"]
+        self.assertTrue(text.startswith("[advisor unavailable — answered on executor model]"), text)
+        self.assertIn("executor answered", text)
+        self.assertEqual(calls, ["claude-fable-5", "claude-opus-4-8", None])
+        self.assertTrue(mod._model_unavailable("anthropic", "claude-fable-5"))
+        self.assertTrue(mod._model_unavailable("anthropic", "claude-opus-4-8"))
+
+    def test_empty_redacted_never_cools_off_a_live_model(self):
+        # A redacted-thinking response is a real generation from a LIVE
+        # model. It is retried once on the same candidate, then the walk
+        # advances — but nothing is ever cooled off, and the note says what
+        # actually happened rather than asserting an unavailability that was
+        # never established.
+        mod = self._mod(
+            advisor=[
+                {"provider": "anthropic", "model": "claude-fable-5"},
+                {"provider": "anthropic", "model": "claude-opus-4-8"},
+            ]
+        )
+        mod._EMPTY_CONTENT_RETRY_BACKOFF = 0
+        available = [
+            {"provider": "anthropic", "id": "claude-fable-5", "name": "Fable"},
+            {"provider": "anthropic", "id": "claude-opus-4-8", "name": "Opus"},
+        ]
+        calls = []
+
+        def sq(question, model=None, provider=None, effort=None):
+            calls.append(model)
+            if model is not None:
+                raise RuntimeError(
+                    "side-query: response had no usable content "
+                    "(blocks: [thinking(th=0,sig=940)]) (stop_reason=error)"
+                )
+            return "executor answered"
+
+        ctx = self._ctx(sq, available=available)
+        result = mod._run_aside([], "q", ctx, escalate=True)
+        self.assertFalse(result["is_error"])
+        text = result["content"][0]["text"]
+        self.assertTrue(
+            text.startswith("[advisor returned no usable content — answered on executor model]"),
+            text,
+        )
+        self.assertIn("executor answered", text)
+        # Each candidate probed twice (one retry), then the executor.
+        self.assertEqual(
+            calls,
+            ["claude-fable-5", "claude-fable-5", "claude-opus-4-8", "claude-opus-4-8", None],
+        )
+        # Nothing cooled off: the models are alive.
+        self.assertEqual(mod._UNAVAILABLE_UNTIL, {})
+
+    def test_cooled_off_chain_still_signals_that_escalation_did_not_happen(self):
+        # Everything in the chain is cooling off, so resolution yields an
+        # EMPTY chain and no candidate is even probed. The executor answers —
+        # but it must NOT answer silently: the caller asked for advisor
+        # judgement and would otherwise treat its own model's answer as
+        # advisor-endorsed.
+        mod = self._mod(
+            advisor=[
+                {"provider": "anthropic", "model": "claude-fable-5"},
+                {"provider": "anthropic", "model": "claude-opus-4-8"},
+            ]
+        )
+        mod._mark_model_unavailable("anthropic", "claude-fable-5")
+        mod._mark_model_unavailable("anthropic", "claude-opus-4-8")
+        calls = []
+
+        def sq(question, model=None, provider=None, effort=None):
+            calls.append(model)
+            return "executor answered"
+
+        # Availability unknown ([]) → _resolve_role_chain skips cooling models.
+        ctx = self._ctx(sq)
+        result = mod._run_aside([], "q", ctx, escalate=True)
+        self.assertFalse(result["is_error"])
+        text = result["content"][0]["text"]
+        self.assertTrue(text.startswith("[advisor unavailable — answered on executor model]"), text)
+        self.assertIn("executor answered", text)
+        # Executor only — no candidate was probed.
+        self.assertEqual(calls, [None])
+
+    def test_plain_aside_without_escalation_answers_silently(self):
+        # The other side of the same condition: no role was requested, so
+        # there is nothing to report and no note belongs on the answer.
+        mod = self._mod()
+
+        def sq(question, model=None, provider=None, effort=None):
+            return "executor answered"
+
+        ctx = self._ctx(sq)
+        result = mod._run_aside([], "q", ctx)
+        self.assertFalse(result["is_error"])
+        self.assertEqual(result["content"][0]["text"], "executor answered")
+
+    def test_intermittent_head_never_hard_fails_and_recovers(self):
+        # The head is INTERMITTENT, not dead: it fails one call and answers
+        # the next. Two properties must hold — escalation never becomes a hard
+        # error while it is down, and the head comes back on its own without
+        # restarting the session.
+        mod = self._mod(
+            advisor=[
+                {"provider": "anthropic", "model": "claude-fable-5"},
+                {"provider": "anthropic", "model": "claude-opus-4-8"},
+            ]
+        )
+        available = [
+            {"provider": "anthropic", "id": "claude-fable-5", "name": "Fable"},
+            {"provider": "anthropic", "id": "claude-opus-4-8", "name": "Opus"},
+        ]
+        fable_up = [False]
+        calls = []
+
+        def sq(question, model=None, provider=None, effort=None):
+            calls.append(model)
+            if model == "claude-fable-5" and not fable_up[0]:
+                raise RuntimeError(_PROVIDER_ERR)
+            return f"{model or 'executor'} answered"
+
+        ctx = self._ctx(sq, available=available)
+
+        # Call 1: head is down → answered by opus, NOT an error.
+        r1 = mod._run_aside([], "q1", ctx, escalate=True)
+        self.assertFalse(r1["is_error"])
+        self.assertIn("claude-opus-4-8 answered", r1["content"][0]["text"])
+
+        # Call 2, still inside the cooldown: the head is not re-probed.
+        r2 = mod._run_aside([], "q2", ctx, escalate=True)
+        self.assertFalse(r2["is_error"])
+        self.assertNotIn("claude-fable-5", calls[2:])
+
+        # The head recovers and its cooldown lapses.
+        fable_up[0] = True
+        _, failures = mod._UNAVAILABLE_UNTIL["anthropic/claude-fable-5"]
+        mod._UNAVAILABLE_UNTIL["anthropic/claude-fable-5"] = (mod.time.monotonic() - 1, failures)
+
+        # Call 3: the head is tried again and answers — no restart needed.
+        r3 = mod._run_aside([], "q3", ctx, escalate=True)
+        self.assertFalse(r3["is_error"])
+        text = r3["content"][0]["text"]
+        self.assertTrue(text.startswith("[advisor: anthropic/claude-fable-5]"), text)
+        self.assertIn("claude-fable-5 answered", text)
+        # Breaker closed by the success.
+        self.assertEqual(mod._UNAVAILABLE_UNTIL, {})
+        # At no point did escalation return an error.
+        self.assertEqual(calls[0], "claude-fable-5")
 
     def test_memo_skips_dead_model_on_next_call(self):
         # First call kills fable; second call must not re-probe it — the chain
@@ -2129,8 +2702,8 @@ class TestEmptyContentRetry(unittest.TestCase):
         # Same candidate twice — no chain advance, no executor fallback.
         self.assertEqual(calls, ["claude-fable-5", "claude-fable-5"])
         self.assertTrue(text.startswith("[advisor: anthropic/claude-fable-5]"), text)
-        # Transient, so nothing is memoized as dead.
-        self.assertNotIn("anthropic/claude-fable-5", mod._SESSION_UNAVAILABLE)
+        # Transient, so the model's breaker is never opened.
+        self.assertFalse(mod._model_unavailable("anthropic", "claude-fable-5"))
 
     def test_no_blocks_variant_also_retried(self):
         mod = self._mod(advisor=list(_RETRY_CHAIN))
@@ -2184,7 +2757,7 @@ class TestEmptyContentRetry(unittest.TestCase):
         ctx = self._ctx(sq, available=_RETRY_AVAILABLE)
         result = mod._run_aside([], "q", ctx, escalate=True)
         self.assertFalse(result["is_error"])
-        self.assertEqual(mod._SESSION_UNAVAILABLE, set())
+        self.assertEqual(mod._UNAVAILABLE_UNTIL, {})
 
     def test_chain_all_empty_falls_through_to_executor(self):
         mod = self._mod(advisor=list(_RETRY_CHAIN))
@@ -2251,7 +2824,7 @@ class TestEmptyContentRetry(unittest.TestCase):
 
     def test_mixed_dead_and_empty_notes_unavailable(self):
         # A 404 anywhere in the walk means the note keeps the "unavailable"
-        # wording; the 404'd model is memoized, the empty one is not.
+        # wording; the 404'd model is cooled off, the empty one is not.
         mod = self._mod(advisor=list(_RETRY_CHAIN))
 
         def sq(question, model=None, provider=None, effort=None):
@@ -2266,8 +2839,8 @@ class TestEmptyContentRetry(unittest.TestCase):
         self.assertFalse(result["is_error"])
         text = result["content"][0]["text"]
         self.assertTrue(text.startswith("[advisor unavailable — answered on executor model]"), text)
-        self.assertIn("anthropic/claude-fable-5", mod._SESSION_UNAVAILABLE)
-        self.assertNotIn("anthropic/claude-opus-4-8", mod._SESSION_UNAVAILABLE)
+        self.assertTrue(mod._model_unavailable("anthropic", "claude-fable-5"))
+        self.assertFalse(mod._model_unavailable("anthropic", "claude-opus-4-8"))
 
     def test_overflow_after_empty_is_surfaced_not_advanced(self):
         # Retry is scoped to empty content only: a hard error on the retry
@@ -2341,20 +2914,19 @@ class TestDynamicDefaultChain(unittest.TestCase):
         """Module whose advisor/delegate came from the bundled default."""
         return self._mod_with_config(None)
 
-    @staticmethod
-    def _mod_with_config(cfg):
-        """Module whose advisor/delegate were (re-)loaded from *cfg*.
+    def _mod_with_config(self, cfg):
+        """Module whose advisor/delegate resolve from *cfg*.
 
-        aside.py resolves the lazy configs during import, so the caches must
-        be reset before patching the config reader — otherwise the injected
-        aside.json is never seen.
+        The config is re-read on every access, so the patch must stay mounted
+        for the whole test rather than just long enough to warm a cache — it
+        is registered as a cleanup, not scoped to a ``with`` block.
         """
         mod = _load_aside()
         mod._ADVISOR = mod._ADVISOR_UNSET
         mod._DELEGATE = mod._ADVISOR_UNSET
-        with mock.patch.object(mod, "_read_existing_config", return_value=cfg):
-            mod._advisor()
-            mod._delegate()
+        patcher = mock.patch.object(mod, "_read_existing_config", return_value=cfg)
+        patcher.start()
+        self.addCleanup(patcher.stop)
         return mod
 
     def test_ranks_live_flagships_strongest_first(self):

@@ -41,11 +41,14 @@ required).  Override or disable it with one line:
     /aside-advisor off                                # disable escalation
 
 Stored in the highest-priority config dir advertised by the host (project-local
-``.fir/aside.json`` overrides ``~/.config/fir/aside.json``).  Read lazily on
-first use so the host's config dirs are available from the init handshake.
-The ``escalate`` parameter only appears in the tool schema when an advisor
-is in effect, so users who explicitly disable it see no extra surface.
-Changes take effect on the next session start.
+``.fir/aside.json`` overrides ``~/.config/fir/aside.json``).  Re-read on every
+use, so an edit to the file takes effect on the next escalation and
+``/aside-advisor`` always reports the LIVE resolved value — this extension is
+builtin, so ``ext_reload`` refuses it and there would otherwise be no way to
+change or even observe the routing in a running session.  One thing is still
+fixed at session start: whether the ``escalate`` parameter appears in the tool
+schema at all, because the host collects tool schemas during the init
+handshake.
 
 Advisor / delegate as a fallback CHAIN
 --------------------------------------
@@ -53,21 +56,26 @@ Advisor / delegate as a fallback CHAIN
 The advisor (and delegate) is an ORDERED FALLBACK CHAIN, not a single model.
 The bundled default advisor chain is
 ``anthropic/claude-fable-5 -> claude-opus-4-8 -> claude-opus-4-7`` (Fable is
-kept first: it looks live in ``/v1/models`` but 404s at runtime, so we try it
-and let the 404 advance the chain).  ``aside.json`` accepts a JSON array to
-express a custom chain, alongside the back-compat single string:
+kept first: it looks live in ``/v1/models`` even while it is unavailable, so
+we try it and let the failure advance the chain).  ``aside.json`` accepts a
+JSON array to express a custom chain, alongside the back-compat single string:
 
     {"advisor": ["anthropic/claude-fable-5:high", "anthropic/claude-opus-4-8"]}
     {"advisor": "anthropic/claude-opus-4-8:high"}     # single (back-compat)
     {"advisor": "off"}                                # disabled
 
 Resolution walks the chain in order.  Each candidate passes through the
-availability/memo filter (skip models memoized unavailable this session,
-degrade a pruned model to a live sibling of its tier).  A model-unavailability
-error memoizes that model and advances to the next candidate; when the whole
-chain is exhausted the query terminates on the executor / current-session
-model (never a hard failure).  ``/aside-advisor`` and ``/aside-delegate`` set a
-single pinned model; edit ``aside.json`` directly to configure a chain array.
+availability/breaker filter (skip models cooling off after a failure,
+degrade a pruned model to a live sibling of its tier).  A candidate that
+cannot answer opens its breaker and advances; a candidate that fails for a reason
+unrelated to its own health stops the walk; either way the query terminates
+on the executor / current-session model, so escalation is NEVER a hard
+failure just because the advisor is down.  The single exception is a failure
+attributable to the REQUEST rather than the route — context overflow or a
+user cancellation — which surfaces immediately, because no other model can
+do anything with the same oversized prompt or the same cancelled context.
+``/aside-advisor`` and ``/aside-delegate`` set a single pinned model; edit
+``aside.json`` directly to configure a chain array.
 
 Delegate de-escalation
 ----------------------
@@ -124,10 +132,13 @@ _CONFIG_FILENAME = "aside.json"
 # entries — and when an explicit aside.json value is absent.
 #
 # Fable is kept FIRST by explicit decision: it is NOT flagged unavailable in
-# /v1/models — it looks identical to a live model, and only a runtime 404
-# reveals it is dead. So we try it and let the 404 advance the chain to the
-# next candidate. The tail Opus versions are concrete fallbacks the chain walk
-# advances to when Fable (and higher Opuses) 404 at runtime.
+# /v1/models — it looks identical to a live model, and only a runtime failure
+# reveals it is down. So we try it and let that failure advance the chain to
+# the next candidate. Note the runtime failure often carries NO provider error
+# text at all — see _is_provider_error_without_message, which is what makes
+# this chain actually degrade instead of dead-ending on the head.
+# The tail Opus versions are concrete fallbacks the chain walk advances to
+# when Fable (and higher Opuses) fail at runtime.
 _DEFAULT_ADVISOR_SPEC = "anthropic/claude-fable-5"
 _DEFAULT_ADVISOR_CHAIN = [
     _DEFAULT_ADVISOR_SPEC,
@@ -276,38 +287,49 @@ def _format_role_config(cfg: dict[str, str] | list[dict[str, str]]) -> str:
     return _format_advisor_spec(cfg)
 
 
-# Lazily-loaded advisor/delegate configs — populated on first access (after
-# the init handshake has set fir_ext.config_dirs). Tests that want to inject
-# a value can assign to _ADVISOR / _DELEGATE directly.
+# Advisor/delegate config overrides. Normally UNSET, in which case the config
+# is re-read from disk on every access — aside.json is two stat calls and a
+# small JSON parse, which is free next to the LLM call it is about to route,
+# and it removes a genuine trap: `aside` is a builtin extension so `ext_reload`
+# refuses it, which meant an edit to aside.json could not take effect in a
+# running session AND `/aside-advisor` reported a stale memoized value with no
+# way to observe the live one. Reading per call makes `/aside-advisor` the
+# live view. Tests (and only tests) inject by assigning _ADVISOR / _DELEGATE
+# directly; a non-UNSET value short-circuits the read.
 #
 # Only a value that came from the bundled static default is eligible for
 # runtime dynamic resolution against ctx.available_models() — an explicit
-# aside.json value always wins. Identity, not a boolean flag, records that:
-# ``_*_DEFAULT_OBJ`` holds the exact object the loader produced when it fell
-# back to the bundled default; a directly-injected _ADVISOR / _DELEGATE
-# (tests, callers) is a different object and is therefore treated as
-# explicit and used verbatim.
+# aside.json value always wins. That is carried by the ``from_default``
+# boolean the loader already returns (see _load_role_config_source), reported
+# per call by ``_advisor_source`` / ``_delegate_source``. It deliberately is
+# NOT recorded as the identity of a memoized object: re-reading per call
+# yields a fresh object every time, so identity could never match. An
+# injected _ADVISOR / _DELEGATE counts as explicit and is used verbatim.
 _ADVISOR_UNSET = object()
 _ADVISOR: Any = _ADVISOR_UNSET
 _DELEGATE: Any = _ADVISOR_UNSET
-_ADVISOR_DEFAULT_OBJ: Any = _ADVISOR_UNSET
-_DELEGATE_DEFAULT_OBJ: Any = _ADVISOR_UNSET
+
+
+def _advisor_source() -> tuple[dict[str, str] | list[dict[str, str]] | None, bool]:
+    """Advisor config plus whether it came from the bundled default."""
+    if _ADVISOR is not _ADVISOR_UNSET:
+        return _ADVISOR, False
+    return _load_role_config_source("advisor", _DEFAULT_ADVISOR_CHAIN)
+
+
+def _delegate_source() -> tuple[dict[str, str] | list[dict[str, str]] | None, bool]:
+    """Delegate config plus whether it came from the bundled default."""
+    if _DELEGATE is not _ADVISOR_UNSET:
+        return _DELEGATE, False
+    return _load_role_config_source("delegate", _DEFAULT_DELEGATE_SPEC)
 
 
 def _advisor() -> dict[str, str] | list[dict[str, str]] | None:
-    global _ADVISOR, _ADVISOR_DEFAULT_OBJ
-    if _ADVISOR is _ADVISOR_UNSET:
-        _ADVISOR, from_default = _load_role_config_source("advisor", _DEFAULT_ADVISOR_CHAIN)
-        _ADVISOR_DEFAULT_OBJ = _ADVISOR if from_default else _ADVISOR_UNSET
-    return _ADVISOR
+    return _advisor_source()[0]
 
 
 def _delegate() -> dict[str, str] | list[dict[str, str]] | None:
-    global _DELEGATE, _DELEGATE_DEFAULT_OBJ
-    if _DELEGATE is _ADVISOR_UNSET:
-        _DELEGATE, from_default = _load_role_config_source("delegate", _DEFAULT_DELEGATE_SPEC)
-        _DELEGATE_DEFAULT_OBJ = _DELEGATE if from_default else _ADVISOR_UNSET
-    return _DELEGATE
+    return _delegate_source()[0]
 
 
 # ---------------------------------------------------------------------------
@@ -413,13 +435,28 @@ def _query_available_models(ctx: fir_ext.Context) -> list[dict]:
     return []
 
 
-# Per-session memo of models that returned a model-unavailability error this
-# session (keys are "provider/id"). Once a model 404s, escalation skips it for
-# the rest of the session instead of re-probing on every call: _degrade_role
-# treats memoized models as unavailable, so subsequent escalations degrade to
-# the next live flagship rather than repeating the failed call. The extension
-# process lives for the session, so module scope == session scope.
-_SESSION_UNAVAILABLE: set[str] = set()
+# Circuit breaker for models that failed a call this session, keyed by
+# "provider/id". This is a COOLDOWN, not a tombstone — and the distinction is
+# load-bearing. The original design assumed unavailability was a steady state
+# ("the model is dead, stop probing it"), so one failure banned a model for the
+# life of the session. But the head of the default chain is *intermittent*: it
+# fails some calls and answers others. Under a permanent memo a single blip
+# costs you your best advisor until the process restarts, silently and with no
+# way to clear it — and because `aside` is a builtin, `ext_reload` can't even
+# reset the module.
+#
+# So a failure opens the breaker for a backoff window instead. The window
+# doubles per consecutive failure (60s → 30min cap) and a successful call
+# resets it. That resolves "intermittent vs genuinely dead" empirically rather
+# than by assumption: a blip costs one skipped escalation and recovers within a
+# minute, while a genuinely dead model backs off to near-zero probe cost. The
+# probe is worth minimising because a failing side query is slow — the agent
+# layer retries with backoff before the error ever reaches us.
+_UNAVAILABLE_BASE_COOLDOWN = 60.0
+_UNAVAILABLE_MAX_COOLDOWN = 1800.0
+
+# model key -> (monotonic deadline, consecutive failure count)
+_UNAVAILABLE_UNTIL: dict[str, tuple[float, int]] = {}
 
 
 def _model_key(provider: str | None, model: str | None) -> str:
@@ -427,9 +464,35 @@ def _model_key(provider: str | None, model: str | None) -> str:
 
 
 def _mark_model_unavailable(provider: str | None, model: str | None) -> None:
-    """Record that provider/model is unavailable for the rest of this session."""
-    if provider and model:
-        _SESSION_UNAVAILABLE.add(_model_key(provider, model))
+    """Open the breaker for provider/model, backing off on repeat failures."""
+    if not provider or not model:
+        return
+    key = _model_key(provider, model)
+    _, failures = _UNAVAILABLE_UNTIL.get(key, (0.0, 0))
+    failures += 1
+    cooldown = min(
+        _UNAVAILABLE_BASE_COOLDOWN * (2 ** (failures - 1)),
+        _UNAVAILABLE_MAX_COOLDOWN,
+    )
+    _UNAVAILABLE_UNTIL[key] = (time.monotonic() + cooldown, failures)
+
+
+def _mark_model_available(provider: str | None, model: str | None) -> None:
+    """Close the breaker for provider/model — it just answered.
+
+    Clearing the failure count (rather than only the deadline) is what stops
+    an intermittent model from ratcheting itself into the 30-minute cap over a
+    long session: each recovery earns it a fresh, short first backoff.
+    """
+    if not provider or not model:
+        return
+    _UNAVAILABLE_UNTIL.pop(_model_key(provider, model), None)
+
+
+def _model_unavailable(provider: str | None, model: str | None) -> bool:
+    """True while provider/model's breaker is open."""
+    entry = _UNAVAILABLE_UNTIL.get(_model_key(provider, model))
+    return entry is not None and time.monotonic() < entry[0]
 
 
 def _degrade_role(
@@ -453,8 +516,7 @@ def _degrade_role(
     """
     if cfg is None or not available:
         return cfg
-    cfg_key = _model_key(cfg["provider"], cfg["model"])
-    in_available = cfg_key not in _SESSION_UNAVAILABLE and any(
+    in_available = not _model_unavailable(cfg["provider"], cfg["model"]) and any(
         m.get("provider") == cfg["provider"] and m.get("id") == cfg["model"] for m in available
     )
     if in_available:
@@ -464,8 +526,7 @@ def _degrade_role(
     ids = [
         m.get("id", "")
         for m in available
-        if m.get("provider") == "anthropic"
-        and _model_key("anthropic", m.get("id", "")) not in _SESSION_UNAVAILABLE
+        if m.get("provider") == "anthropic" and not _model_unavailable("anthropic", m.get("id", ""))
     ]
     best = _best_anthropic_haiku(ids) if role == "delegate" else _best_anthropic_flagship(ids)
     if best is None:
@@ -497,8 +558,8 @@ def _resolve_role_chain(
     """Resolve an ORDERED candidate chain for a role (Layer A).
 
     Each configured spec is passed through the existing availability/memo
-    filter (:func:`_degrade_role`): models already memoized unavailable this
-    session are skipped, and a spec whose own model has gone away degrades to
+    filter (:func:`_degrade_role`): models cooling off after a recent failure
+    are skipped, and a spec whose own model has gone away degrades to
     the highest available Anthropic model of its tier (recording ``_fallback``
     for the trace). The author's ORDER is preserved — the chain is not
     collapsed to a single "best" — and duplicate models (which degrade can
@@ -515,12 +576,12 @@ def _resolve_role_chain(
     seen: set[str] = set()
     for spec in specs:
         # When availability is unknown ([]), _degrade_role can't rank a live
-        # sibling, so it would return a memoized-dead model unchanged and we'd
+        # sibling, so it would return a cooling-off model unchanged and we'd
         # re-probe it every call. Skip it here. (When availability IS known,
-        # _degrade_role handles the memo itself by degrading to a live model
-        # of the same tier — e.g. memoized fable -> opus — so we must NOT skip
+        # _degrade_role handles the breaker itself by degrading to a live model
+        # of the same tier — e.g. cooling fable -> opus — so we must NOT skip
         # in that case or we'd lose that substitution.)
-        if not available and _model_key(spec["provider"], spec["model"]) in _SESSION_UNAVAILABLE:
+        if not available and _model_unavailable(spec["provider"], spec["model"]):
             continue
         resolved = _degrade_role(spec, available, role)
         if resolved is None:
@@ -610,14 +671,14 @@ def _resolve_role_chain_dynamic(
 
 def _resolve_advisor_chain(ctx: fir_ext.Context) -> list[dict[str, str]]:
     """Availability-aware advisor chain resolution (Layer A)."""
-    cfg = _advisor()
-    return _resolve_role_chain_dynamic(ctx, cfg, "advisor", cfg is _ADVISOR_DEFAULT_OBJ)
+    cfg, from_default = _advisor_source()
+    return _resolve_role_chain_dynamic(ctx, cfg, "advisor", from_default)
 
 
 def _resolve_delegate_chain(ctx: fir_ext.Context) -> list[dict[str, str]]:
     """Availability-aware delegate chain resolution (Layer A)."""
-    cfg = _delegate()
-    return _resolve_role_chain_dynamic(ctx, cfg, "delegate", cfg is _DELEGATE_DEFAULT_OBJ)
+    cfg, from_default = _delegate_source()
+    return _resolve_role_chain_dynamic(ctx, cfg, "delegate", from_default)
 
 
 # Substrings (case-insensitive) that signal a model-unavailability error from
@@ -647,15 +708,138 @@ _OVERFLOW_MARKERS = (
     "exceeds",
 )
 
+# User-cancellation markers. An aborted side query must never mark a model
+# as dead (the user hit Ctrl-C; the model said nothing about its own health)
+# and must never trigger a retry on the executor — firing another LLM call
+# after a cancel is actively hostile.
+_ABORT_MARKERS = (
+    "context canceled",
+    "context cancelled",
+    "stop_reason=aborted",
+    "operation was canceled",
+    "operation was cancelled",
+)
+
+
+def _is_request_shaped_error(msg: str) -> bool:
+    """True when *msg* is attributable to the REQUEST, not to the ROUTE.
+
+    Two classes qualify: context overflow (a different model receives the
+    identical oversized prompt, so retrying is futile *and* expensive — it
+    re-sends a whole context window of input tokens) and user cancellation.
+    Both must surface immediately with their own handling rather than
+    advancing the chain or falling through to the executor.
+    """
+    low = msg.lower()
+    return any(m in low for m in _OVERFLOW_MARKERS) or any(m in low for m in _ABORT_MARKERS)
+
+
+# Pattern that matches the block summary the host attaches to "no usable
+# content" errors, e.g.
+#   side-query: response had no usable content (blocks: [thinking(th=0,sig=940)])
+# Shared by two consumers: the card slug (so a failure shows its actual kind
+# instead of a flat ERR) and the transient empty-content classifier.
+_EMPTY_BLOCKS_RE = re.compile(r"no usable content \(blocks: \[([^\]]*)\]\)")
+_BLOCK_TYPE_RE = re.compile(r"(\w+)\((th=(\d+),sig=(\d+)|len=(\d+))\)")
+
+
+def _classify_empty_blocks(blocks_str: str) -> str:
+    """Classify an empty-content side_query failure by its block summary.
+
+    Inputs look like "thinking(th=0,sig=940), text(len=0)". We surface the
+    first non-empty block descriptor — sig_len > 0 with empty thinking is
+    the canonical redacted-thinking outcome. An empty input means the
+    response carried no blocks at all. This drives the card SLUG only; the
+    routing verdict is _is_empty_content_error's, which treats every one of
+    these as the same transient class.
+    """
+    if not blocks_str.strip():
+        return "empty:noblocks"
+    for m in _BLOCK_TYPE_RE.finditer(blocks_str):
+        kind = m.group(1)
+        if kind == "thinking":
+            th = int(m.group(3) or "0")
+            sig = int(m.group(4) or "0")
+            if th == 0 and sig > 0:
+                return "empty:redacted"
+            return "empty:thinking"
+        if kind == "text":
+            return "empty:text"
+        if kind == "toolCall":
+            return "empty:toolcall"
+    return "empty"
+
+
+# The synthesised error text the agent dependency (>= v0.1.3) produces when a
+# provider asserts a failure but supplies no diagnosis:
+#
+#   provider reported stop_reason=error with no error message
+#       (provider=anthropic model=claude-fable-5 blocks: [])
+#
+# This is the ONE signal that a candidate's call hard-failed, as opposed to a
+# live model producing nothing useful. Before v0.1.3 the two were
+# indistinguishable: a message with StopReasonError but an empty ErrorMessage
+# fell through to the degenerate-content arm of SimplePrompt, was re-rolled
+# three times, and surfaced as ``response had no usable content (blocks: [])
+# (stop_reason=error)`` — a failed call wearing the costume of an empty
+# generation, which is exactly why the advisor chain used to dead-end on it.
+# v0.1.3 intercepts StopReasonError first and synthesises the text above, so
+# the two classes are finally separable, and this extension classifies them
+# differently: hard failure cools the model off, empty content does not.
+#
+# Matched as the minimal stable SUBSTRING deliberately. The parenthesised
+# ``(provider=… model=… blocks: …)`` tail is the part most likely to drift
+# upstream, and a hard failure that managed to emit some blocks first
+# (partial stream, then a silent error) is the same provider assertion —
+# splitting it off would be machinery for a speculative subcase. Note the
+# text matches none of _MODEL_UNAVAILABLE_SIGNATURES (upstream deliberately
+# keeps it clear of every retryable-error pattern), so this rule is the only
+# thing that classifies it.
+_PROVIDER_ERROR_NO_MESSAGE = "provider reported stop_reason=error with no error message"
+
+
+def _is_provider_error_without_message(msg: str) -> bool:
+    """True when the provider asserted an error but gave no diagnosis.
+
+    Treated as unavailability — the breaker opens and the walk advances.
+    The alternative (advance without cooling off) would make the verdict hinge
+    on how chatty the provider happened to be: a 404 with prose cools the
+    model off, the identical failure without prose would not. Being wrong
+    costs one skipped escalation for ``_UNAVAILABLE_BASE_COOLDOWN``, reset by
+    the model's next success.
+
+    It is deliberately NOT retried on the same candidate: upstream classifies
+    this text as terminal (it matches none of ``ai.IsRetryableError``'s
+    patterns and fails on the first attempt, with no re-roll), and
+    re-litigating that here would just spend a round trip to reach the same
+    verdict with less information.
+    """
+    return _PROVIDER_ERROR_NO_MESSAGE in msg.lower()
+
 
 # Empty-content markers. The host raises this class when the provider returns
-# a SUCCESSFUL response (stop_reason=stop) carrying no usable text — typically
-# a lone redacted thinking block, e.g.
+# a response carrying no usable text — typically a lone redacted thinking
+# block, e.g.
 #   side-query: response had no usable content (blocks: [thinking(th=0,sig=940)])
 # or the no-blocks variant "(blocks: [])". Telemetry (2026-08-11) puts this at
 # ~57% of aside calls on one host and ~27% on another, with no config
 # correlation and no burst pattern — it is a TRANSIENT upstream blip: the same
 # question re-probed hours later succeeds immediately.
+#
+# The ``(blocks: [])`` variant is included, and that is a deliberate reversal
+# of an earlier structural rule that read an empty block list as proof of a
+# failed call. It WAS proof, against agent < v0.1.3, where a provider error
+# with no message was laundered into this exact wording. From v0.1.3 that
+# case is intercepted upstream and surfaces as _PROVIDER_ERROR_NO_MESSAGE
+# instead, so every remaining "no usable content" error comes from a stream
+# that did not error — a live model that genuinely rendered nothing. Treating
+# the whole class as transient is therefore both what the fleet telemetry
+# measured and what the dependency now guarantees.
+#
+# The class stays the catch-all for ambiguity by design: a provider that
+# reports neither an error nor a stop reason still lands here (``(blocks: [])
+# (stop_reason=)``) and degrades gracefully — retry, advance, executor
+# fallback — rather than dead-ending or cooling off a healthy model.
 #
 # NOTE (design): the durable fix belongs in fir's Go SideQuery streaming path —
 # one transport-level retry there would fix this for every side_query caller
@@ -680,10 +864,17 @@ def _is_empty_content_error(msg: str) -> bool:
     Covers both the block-summary form (``... (blocks: [thinking(th=0,sig=N)])``,
     including the empty ``(blocks: [])`` variant) and the bare
     no-blocks/blocking-path wording. This is its OWN failure class: unlike a
-    model-unavailability 404 it is transient, so the model is never memoized
-    as dead; unlike overflow/connection errors it IS retried.
+    model-unavailability 404 it is transient, so the model is never cooled
+    off; unlike overflow/cancellation errors it IS retried.
     """
     if not msg:
+        return False
+    if _is_provider_error_without_message(msg):
+        # DEFENSIVE, not load-bearing: today's synthesised text contains
+        # neither marker, so this cannot fire. It declares the precedence
+        # anyway — if upstream ever folds the block-summary wording into the
+        # synthesised message, a hard failure must not silently become a
+        # retryable blip. The pinning test locks that in.
         return False
     if _EMPTY_BLOCKS_RE.search(msg) is not None:
         return True
@@ -692,15 +883,43 @@ def _is_empty_content_error(msg: str) -> bool:
 
 
 def _is_model_unavailable_error(msg: str) -> bool:
-    """True when *msg* looks like a provider 'model unavailable' error.
+    """True when *msg* means 'this candidate cannot answer' — cool off and advance.
+
+    Two detectors: the structural provider-asserted-error check (see
+    :func:`_is_provider_error_without_message`), which is what works when the
+    provider's own error text never reaches us, and a substring match against
+    provider 'model unavailable' phrasings.
 
     Deliberately excludes context-overflow errors (which already have their
-    own hint path) so Layer B doesn't swallow them.
+    own hint path) so Layer B doesn't swallow them. That guard is load-bearing
+    rather than redundant: ``prompt exceeds maximum context length: 400012
+    tokens`` contains the substring `` 400`` and would otherwise be read as an
+    unavailability status code.
     """
     low = msg.lower()
     if any(m in low for m in _OVERFLOW_MARKERS):
         return False
+    if _is_provider_error_without_message(msg):
+        return True
     return any(s in low for s in _MODEL_UNAVAILABLE_SIGNATURES)
+
+
+# Cap for an error quoted inline in a routing note — long enough to identify
+# the fault, short enough to keep the note a single readable line.
+_SHORT_ERROR_CHARS = 120
+
+
+def _short_error(msg: str) -> str:
+    """Condense *msg* to one short line for inclusion in a routing note.
+
+    The note is what a future reader (or a future misdiagnosis) has to work
+    from, so it must say what actually went wrong rather than asserting an
+    unavailability we did not establish.
+    """
+    flat = " ".join(msg.split())
+    if len(flat) > _SHORT_ERROR_CHARS:
+        return flat[: _SHORT_ERROR_CHARS - 1].rstrip() + "…"
+    return flat
 
 
 # ---------------------------------------------------------------------------
@@ -770,39 +989,6 @@ def _slug_for_progress(partial: str) -> str:
     if n < 1024:
         return f"{n}c"
     return f"{n / 1024:.1f}kc"
-
-
-# Pattern that matches the block summary the host attaches to "no usable
-# content" errors, e.g.
-#   side-query: response had no usable content (blocks: [thinking(th=0,sig=940)])
-# Extracted so the card slug can show the actual failure kind
-# (empty:thinking / empty:redacted / empty:noblocks) instead of a flat ERR.
-_EMPTY_BLOCKS_RE = re.compile(r"no usable content \(blocks: \[([^\]]*)\]\)")
-_BLOCK_TYPE_RE = re.compile(r"(\w+)\((th=(\d+),sig=(\d+)|len=(\d+))\)")
-
-
-def _classify_empty_blocks(blocks_str: str) -> str:
-    """Build a card slug for an empty-content side_query failure.
-
-    Inputs look like "thinking(th=0,sig=940), text(len=0)". We surface the
-    first non-empty block descriptor — sig_len > 0 with empty thinking is
-    the canonical redacted-thinking outcome.
-    """
-    if not blocks_str.strip():
-        return "empty:noblocks"
-    for m in _BLOCK_TYPE_RE.finditer(blocks_str):
-        kind = m.group(1)
-        if kind == "thinking":
-            th = int(m.group(3) or "0")
-            sig = int(m.group(4) or "0")
-            if th == 0 and sig > 0:
-                return "empty:redacted"
-            return "empty:thinking"
-        if kind == "text":
-            return "empty:text"
-        if kind == "toolCall":
-            return "empty:toolcall"
-    return "empty"
 
 
 def _run_side_query_with_card(
@@ -923,27 +1109,54 @@ def _run_side_query_chain(
       * A candidate succeeds → ``(text, None, <that cfg>, "")``. The caller
         renders the routing trace from ``used_cfg`` (including a
         ``(fallback: … unavailable)`` note when Layer A degraded it).
-      * A candidate fails with a model-unavailability error → the model is
-        memoized and the walk ADVANCES to the next candidate.
+      * A candidate fails with a REQUEST-shaped error (context overflow, user
+        cancellation) → surfaced immediately. Another model receives the
+        identical oversized prompt, or the identical cancelled context, so
+        neither advancing nor retrying can help — and overflow already has a
+        dedicated hint path worth reaching fast. Checked FIRST, so neither the
+        empty-content retry nor the executor fallback can fire another LLM
+        call after a Ctrl-C.
       * A candidate returns EMPTY CONTENT → retried ONCE on the same candidate
         after ``_EMPTY_CONTENT_RETRY_BACKOFF``; still empty → the walk ADVANCES
-        to the next candidate WITHOUT memoizing the model (the blip is
-        transient, the model is not dead — memoizing would degrade the chain
-        for the whole session over a hiccup).
-      * A candidate fails with any OTHER error (overflow, connection) → that
-        error is surfaced immediately (no silent advance).
-      * The chain is exhausted after trying ≥1 candidate → retry on the
-        executor's own model (``model=None``); on success return
+        to the next candidate WITHOUT cooling the model off (the blip is
+        transient, the model is alive — cooling it off would degrade the chain
+        over a hiccup).
+      * A candidate fails with a model-unavailability error → the model is
+        cooled off for a backoff window and the walk ADVANCES to the next
+        candidate.
+      * A candidate fails with a ROUTE-shaped error (transport, auth) → the
+        model is NOT cooled off (we have no evidence it is dead) and the walk
+        STOPS, terminating on the executor. Walking the rest of an
+        all-Anthropic chain after a provider-wide fault (429, bad key) is N
+        doomed calls; the executor is the one route guaranteed to be
+        configured and warm.
+      * The chain ends (exhausted or stopped) after trying ≥1 candidate →
+        retry on the executor's own model (``model=None``); on success return
         ``(text, None, None, "[<role> unavailable — answered on executor
-        model]\\n\\n")``. Escalation NEVER disables itself on a dead chain.
-      * The chain is empty (nothing resolvable, or ``role_label`` is None) →
-        a plain executor call with no note.
+        model]\\n\\n")``, or a ``[<role> failed (…) — answered on executor
+        model]`` variant naming the fault when the chain was stopped rather
+        than exhausted. Escalation NEVER disables itself on a dead chain.
+      * The chain is EMPTY — nothing resolvable, e.g. every candidate is
+        cooling off after a recent failure — but escalation/delegation WAS
+        requested (``role_label`` is not None) → the executor answers and
+        still earns the unavailable note. Silence here would be the same
+        class of misdirection this walk exists to prevent: the caller asked
+        for advisor judgement, got the executor's own model back, and would
+        otherwise have no signal that the escalation never happened.
+      * No role at all (``role_label`` is None) → a plain executor call with
+        no note.
       * Both the chain AND the executor fallback fail → the errors are chained
         into one message so neither is lost.
     """
     advisor_errs: list[str] = []
-    dead_models: list[str] = []
+    failed_models: list[str] = []
+    # True while every candidate failure so far was the transient
+    # empty-content class — it selects honest wording for the executor note.
     empty_only = True
+    # Set when the walk stopped on a route-shaped fault rather than running
+    # the chain to exhaustion — it makes the executor note tell the truth
+    # about *why* we ended up here instead of claiming unavailability.
+    stop_err: str | None = None
     walk_key = f"aside/chain/{int(time.time() * 1000)}"
 
     def _attempt(
@@ -952,7 +1165,10 @@ def _run_side_query_chain(
         """One candidate probe, with a single retry on empty content.
 
         At most two attempts: the second happens ONLY when the first failed
-        with the transient empty-content class.
+        with the transient empty-content class. A request-shaped error breaks
+        out even when it wears empty-content wording — a cancelled call must
+        never earn another LLM call, and ``(blocks: []) (stop_reason=aborted)``
+        matches the empty-content pattern.
         """
         text: str | None = None
         err: str | None = None
@@ -970,7 +1186,7 @@ def _run_side_query_chain(
             text, err = _run_side_query_with_card(
                 ctx, question, model=model, provider=provider, effort=effort
             )
-            if err is None or not _is_empty_content_error(err):
+            if err is None or _is_request_shaped_error(err) or not _is_empty_content_error(err):
                 break
         return text, err
 
@@ -983,50 +1199,72 @@ def _run_side_query_chain(
             label=label,
         )
         if err is None:
+            # It answered — close its breaker so an intermittent model gets a
+            # fresh short backoff next time rather than ratcheting toward the
+            # cap over a long session.
+            _mark_model_available(cfg["provider"], cfg["model"])
             # A later candidate answered — surface which higher-priority model
             # it stood in for, reusing the "(fallback: … unavailable)" trace
             # style. Layer A may have already set _fallback (degrade); only
             # annotate when it hasn't.
-            if dead_models and "_fallback" not in cfg:
+            if failed_models and "_fallback" not in cfg:
                 # Copy before annotating — _degrade_role returns the shared
                 # _ADVISOR spec dict on the in-available path, so mutating it
                 # in place would corrupt the session config.
                 cfg = dict(cfg)
-                cfg["_fallback"] = dead_models[0]
+                cfg["_fallback"] = failed_models[0]
             return text, None, cfg, ""
+        if _is_request_shaped_error(err):
+            # Attributable to the request, not the route — surface as-is.
+            # Deliberately ahead of the empty-content check so a cancellation
+            # can never earn a retry.
+            return None, err, None, ""
         if _is_empty_content_error(err):
-            # Transient — retried once already. Advance, but do NOT memoize:
-            # the model is alive, the response was just empty.
+            # Transient — retried once already. Advance, but do NOT cool the
+            # model off: it is alive, the response was just empty.
             ctx.put_observable(
                 walk_key,
                 slug="advance:empty",
-                detail=f"{label} empty twice — advancing past it (not memoized)\n\n{err}",
+                detail=f"{label} empty twice — advancing past it (not cooled off)\n\n{err}",
             )
             advisor_errs.append(f"{label}: {err}")
-            dead_models.append(cfg["model"])
+            failed_models.append(cfg["model"])
             continue
         empty_only = False
         if _is_model_unavailable_error(err):
-            # Memoize so subsequent escalations skip this dead model and
-            # Layer A degrades past it instead of re-probing.
+            # Open the breaker so escalations in the next window skip this
+            # model and Layer A degrades past it instead of re-probing.
             _mark_model_unavailable(cfg["provider"], cfg["model"])
             advisor_errs.append(f"{label}: {err}")
-            dead_models.append(cfg["model"])
+            failed_models.append(cfg["model"])
             continue
-        # Non-unavailability, non-empty error (overflow, connection) — do not
-        # swallow it by advancing; surface it as-is.
-        return None, err, None, ""
+        # Route-shaped failure — the candidate could not answer, but nothing
+        # says it is dead. Stop the walk and let the executor terminal
+        # fallback answer rather than hard-failing the caller.
+        advisor_errs.append(f"{label}: {err}")
+        stop_err = err
+        break
 
-    # Chain exhausted or empty → executor terminal fallback (same empty-content
-    # retry applies: the executor model is the last hope, one blip must not
-    # sink the whole call).
+    # Chain exhausted, stopped or empty → executor terminal fallback (the same
+    # empty-content retry applies: the executor model is the last hope, one
+    # blip must not sink the whole call).
     text, err = _attempt(model=None, provider=None, effort=None, label="executor model")
     if err is None:
-        # A non-empty chain that we walked to exhaustion earns the note; an
-        # empty chain (no advisor, or nothing resolvable) answers silently.
-        if advisor_errs and role_label:
-            reason = "returned no usable content" if empty_only else "unavailable"
-            note = f"[{role_label} {reason} — answered on executor model]\n\n"
+        # Any requested-but-unfulfilled role earns the note — whether the
+        # chain died on this call (advisor_errs) or was already cooling off
+        # before it started (empty chain). Only a call with no role at all
+        # answers silently.
+        if role_label and (advisor_errs or not chain):
+            if stop_err is not None:
+                note = (
+                    f"[{role_label} failed ({_short_error(stop_err)}) — "
+                    "answered on executor model]\n\n"
+                )
+            else:
+                reason = (
+                    "returned no usable content" if advisor_errs and empty_only else "unavailable"
+                )
+                note = f"[{role_label} {reason} — answered on executor model]\n\n"
             return text, None, None, note
         return text, None, None, ""
 
@@ -1034,7 +1272,8 @@ def _run_side_query_chain(
     # error sets so neither is discarded.
     if advisor_errs and role_label:
         joined = "; ".join(advisor_errs)
-        combined = f"{role_label} chain exhausted: {joined}; executor fallback also failed: {err}"
+        how = "chain failed" if stop_err is not None else "chain exhausted"
+        combined = f"{role_label} {how}: {joined}; executor fallback also failed: {err}"
         return None, combined, None, ""
     return None, err, None, ""
 
@@ -1084,7 +1323,7 @@ def _run_aside(
     # Resolve advisor/delegate override if requested and configured. Layer A:
     # resolution produces an ORDERED candidate chain, each element passed
     # through the availability/memo filter (degrading to a live model of its
-    # tier when needed, skipping models already memoized unavailable).
+    # tier when needed, skipping models cooling off after a recent failure).
     chain: list[dict[str, str]] = []
     role_label: str | None = None
     if escalate and _advisor() is not None:
@@ -1295,15 +1534,7 @@ def _side_query_error(exc: Exception) -> dict:
     """
     msg = str(exc)
     hint = ""
-    _overflow_markers = (
-        "context window",
-        "context length",
-        "maximum context",
-        "token limit",
-        "too many tokens",
-        "exceeds",
-    )
-    if any(m in msg.lower() for m in _overflow_markers):
+    if any(m in msg.lower() for m in _OVERFLOW_MARKERS):
         hint = " (context window full — try fewer tools or a simpler question)"
     return _error(f"aside LLM call failed{hint}: {msg}")
 
