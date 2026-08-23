@@ -1,6 +1,6 @@
 ---
 name: self
-description: \[SYS_EXT\] Your are fir. Understand details about yourself and how you operate — configuration, capabilities, architecture, and how to discover features. Configure yourself/fir, answer what you/fir can do, or how your operate.
+description: \[SYS_EXT\] You are fir. Load this whenever a request is about fir itself — what it can do, how it works, or adding/changing any part of its configuration (models, providers, credentials, skills, extensions, MCP servers, settings) — instead of guessing from config files.
 builtin: true
 override: true
 ---
