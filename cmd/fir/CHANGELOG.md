@@ -2,10 +2,13 @@
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-08-25
+
 ### Added
 - **The interactive TUI footer now shows the version you are actually running** (`fir 0.99.1`, right-aligned on the pwd/branch/session line, matching `fir --version` with no leading `v`). The footer already told you when a *newer* release existed but never what was in front of you, so "which build is this window?" meant quitting or opening another shell — awkward on a fleet host with several long-lived sessions on different binaries. It reuses the package-level version `SetVersion` already stores, so nothing new is plumbed through from `main`. The version is the least important thing on that line and is dropped first when the width gets tight — extension statuses survive, then the pwd is truncated — and an empty version renders nothing at all. A latent overflow was fixed on the way: at width ≤ 0 the pwd line skipped truncation entirely and rendered wider than the terminal.
 
 ### Changed
+- **Model catalog regenerated** at release time: routine upstream refresh of model ids, pricing and limits.
 - **`ship-it` now finishes the job: it cuts and publishes a release, and worktree cleanup is no longer optional.** The skill previously stopped after the ff-merge and gated cleanup on an explicit `Mode: do, final.` tag in the task text — so the common case left a merged branch and a stale worktree lying around, and shipping a change still required a separate manual release pass. The mode gate is gone (cleanup is unconditional), and two orchestration steps sit between merge and cleanup: invoke the existing `release` skill (version from `CHANGELOG.md`'s `[Unreleased]` section, `make all`, `VERSION` + `CHANGELOG.md`, commit, tag, install), then complete its Publishing step — `make publish` plus the post-publish GitHub Actions monitoring, or `make deploy HOST=<host>` when the target is a specific host. Both steps *delegate* rather than restate: the release procedure lives in one place and this skill points at it, which is the same discipline `ship-it` already applies to `review-and-fix` and `merge-to-main`. One contradiction had to be resolved explicitly — the `release` skill gates publishing on user confirmation, which would stall an autonomous run, so `ship-it` declares its own invocation to be that confirmation. `ship-wt` was updated in step, since it embeds a verbatim description of what `ship-it` does into every task text it spawns and would otherwise keep emitting now-meaningless `final` tags.
 
 ## [1.0.0] - 2026-08-23
