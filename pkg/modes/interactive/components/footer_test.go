@@ -3,6 +3,9 @@ package components
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
+
+	"github.com/kfet/tui"
 )
 
 func TestFormatTokens_Small(t *testing.T) {
@@ -278,5 +281,154 @@ func TestFooterComponent_NoUpdateAvailable(t *testing.T) {
 	joined := strings.Join(f.Render(120), "\n")
 	if strings.Contains(joined, "⬆") {
 		t.Fatalf("should not show update indicator when binary is current, got %q", joined)
+	}
+}
+
+func TestVersionLabel(t *testing.T) {
+	tests := []struct {
+		name    string
+		version string
+		want    string
+	}{
+		{"empty", "", ""},
+		{"whitespace", "   ", ""},
+		{"plain", "0.99.1", "fir 0.99.1"},
+		{"leading v stripped", "v0.99.1", "fir 0.99.1"},
+		{"dev", "dev", "fir dev"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := versionLabel(tt.version); got != tt.want {
+				t.Errorf("versionLabel(%q) = %q, want %q", tt.version, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFooterComponent_VersionShown(t *testing.T) {
+	f := NewFooterComponent(func() FooterData {
+		return FooterData{
+			Pwd:           "/tmp/proj",
+			ModelID:       "test-model",
+			ContextWindow: 128000,
+			Version:       "0.99.1",
+		}
+	})
+
+	lines := f.Render(120)
+	if !strings.Contains(lines[0], "fir 0.99.1") {
+		t.Fatalf("expected version on pwd line, got %q", lines[0])
+	}
+	if w := tui.VisibleWidth(lines[0]); w > 120 {
+		t.Fatalf("pwd line width %d exceeds 120: %q", w, lines[0])
+	}
+	// Right-aligned: version ends the line.
+	if !strings.HasSuffix(strings.TrimSpace(tui.StripAnsi(lines[0])), "fir 0.99.1") {
+		t.Fatalf("expected version right-aligned, got %q", lines[0])
+	}
+}
+
+func TestFooterComponent_VersionAlongsideExtensionStatuses(t *testing.T) {
+	f := NewFooterComponent(func() FooterData {
+		return FooterData{
+			Pwd:               "/tmp/proj",
+			ModelID:           "test-model",
+			ContextWindow:     128000,
+			Version:           "0.99.1",
+			ExtensionStatuses: map[string]string{"a": "ext-ok"},
+		}
+	})
+
+	lines := f.Render(120)
+	if !strings.Contains(lines[0], "ext-ok") {
+		t.Fatalf("expected extension status retained, got %q", lines[0])
+	}
+	plain := strings.TrimSpace(tui.StripAnsi(lines[0]))
+	if !strings.HasSuffix(plain, "ext-ok  fir 0.99.1") {
+		t.Fatalf("expected version after extension status, got %q", plain)
+	}
+}
+
+func TestFooterComponent_VersionDroppedWhenTooNarrow(t *testing.T) {
+	data := func() FooterData {
+		return FooterData{
+			Pwd:               "/tmp/some/deeply/nested/project/dir",
+			ModelID:           "test-model",
+			ContextWindow:     128000,
+			Version:           "0.99.1",
+			ExtensionStatuses: map[string]string{"a": "ext-ok"},
+		}
+	}
+	f := NewFooterComponent(data)
+
+	lines := f.Render(40)
+	if strings.Contains(lines[0], "fir 0.99.1") {
+		t.Fatalf("version should be dropped before extension status, got %q", lines[0])
+	}
+	if !strings.Contains(lines[0], "ext-ok") {
+		t.Fatalf("extension status should survive when version is dropped, got %q", lines[0])
+	}
+	if w := tui.VisibleWidth(lines[0]); w > 40 {
+		t.Fatalf("pwd line width %d exceeds 40: %q", w, lines[0])
+	}
+}
+
+func TestFooterComponent_VersionTinyWidths(t *testing.T) {
+	f := NewFooterComponent(func() FooterData {
+		return FooterData{
+			Pwd:           "/tmp/proj",
+			ModelID:       "test-model",
+			ContextWindow: 128000,
+			Version:       "0.99.1",
+		}
+	})
+
+	for w := 0; w <= 25; w++ {
+		lines := f.Render(w)
+		if got := tui.VisibleWidth(lines[0]); got > w {
+			t.Fatalf("width %d: pwd line width %d exceeds it: %q", w, got, lines[0])
+		}
+	}
+}
+
+func TestFooterComponent_NoVersion(t *testing.T) {
+	f := NewFooterComponent(func() FooterData {
+		return FooterData{
+			Pwd:           "/tmp/proj",
+			ModelID:       "test-model",
+			ContextWindow: 128000,
+		}
+	})
+
+	lines := f.Render(120)
+	if strings.Contains(lines[0], "fir ") {
+		t.Fatalf("expected no version text when Version is empty, got %q", lines[0])
+	}
+	if plain := strings.TrimSpace(tui.StripAnsi(lines[0])); plain != "/tmp/proj" {
+		t.Fatalf("expected bare pwd with no separator, got %q", plain)
+	}
+}
+
+// A multi-byte pwd must not be sliced mid-rune by the middle-ellipsis
+// truncation, and must never render wider than the terminal.
+func TestFooterComponent_UnicodePwdTruncation(t *testing.T) {
+	f := NewFooterComponent(func() FooterData {
+		return FooterData{
+			Pwd:           "/home/user/Документы/проекты/очень/длинный/путь",
+			ModelID:       "test-model",
+			ContextWindow: 128000,
+			Version:       "0.99.1",
+		}
+	})
+
+	for w := 1; w <= 60; w++ {
+		lines := f.Render(w)
+		plain := tui.StripAnsi(lines[0])
+		if !utf8.ValidString(plain) {
+			t.Fatalf("width %d: pwd line is not valid UTF-8: %q", w, plain)
+		}
+		if got := tui.VisibleWidth(lines[0]); got > w {
+			t.Fatalf("width %d: pwd line width %d exceeds it: %q", w, got, plain)
+		}
 	}
 }

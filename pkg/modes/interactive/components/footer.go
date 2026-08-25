@@ -52,6 +52,8 @@ type FooterData struct {
 	// UpdateVersion is the newer release available for download (empty when
 	// the running binary is current or the check has not completed).
 	UpdateVersion string
+	// Version is the version of the running binary (empty renders nothing).
+	Version string
 }
 
 // FooterComponent renders a status footer with pwd, token stats, and context usage.
@@ -90,14 +92,20 @@ func (f *FooterComponent) Render(width int) []string {
 	if data.SessionName != "" {
 		pwd = pwd + " • " + data.SessionName
 	}
-	// Truncate pwd
-	if len(pwd) > width {
+	// Truncate pwd — rune-safe, and never wider than the terminal.
+	if width <= 0 {
+		pwd = ""
+	} else if tui.VisibleWidth(pwd) > width {
 		half := width/2 - 2
-		if half > 1 {
-			pwd = pwd[:half] + "..." + pwd[len(pwd)-(half-1):]
-		} else if width > 0 {
-			pwd = pwd[:width]
+		runes := []rune(pwd)
+		truncated := ""
+		if half > 1 && half <= len(runes) {
+			truncated = string(runes[:half]) + "..." + string(runes[len(runes)-(half-1):])
 		}
+		if truncated == "" || tui.VisibleWidth(truncated) > width {
+			truncated = tui.TruncateToWidth(pwd, width, "", false)
+		}
+		pwd = truncated
 	}
 
 	// Build stats parts
@@ -253,23 +261,37 @@ func (f *FooterComponent) Render(width int) []string {
 		}
 	}
 
-	if extStatus != "" {
+	// Right-hand block of the pwd line: extension statuses, then the running
+	// version. The version is the least important item, so it is only included
+	// when the whole line fits without truncating anything else.
+	rightBlock := extStatus
+	if ver := versionLabel(data.Version); ver != "" {
+		combined := ver
+		if rightBlock != "" {
+			combined = rightBlock + "  " + ver
+		}
+		if tui.VisibleWidth(pwd)+2+tui.VisibleWidth(combined) <= width {
+			rightBlock = combined
+		}
+	}
+
+	if rightBlock != "" {
 		pwdWidth := tui.VisibleWidth(pwd)
-		extWidth := tui.VisibleWidth(extStatus)
-		gap := width - pwdWidth - extWidth
+		rightWidth := tui.VisibleWidth(rightBlock)
+		gap := width - pwdWidth - rightWidth
 		if gap >= 2 {
-			dimPwd = dimPwd + strings.Repeat(" ", gap) + t.Fg("dim", extStatus)
+			dimPwd = dimPwd + strings.Repeat(" ", gap) + t.Fg("dim", rightBlock)
 		} else {
 			// Not enough room — truncate pwd to make space
-			avail := width - extWidth - 2
+			avail := width - rightWidth - 2
 			if avail > 3 {
 				pwd = tui.TruncateToWidth(pwd, avail, "…", false)
 				dimPwd = t.Fg("dim", pwd)
 				pwdWidth = tui.VisibleWidth(pwd)
-				gap = width - pwdWidth - extWidth
-				dimPwd = dimPwd + strings.Repeat(" ", max(1, gap)) + t.Fg("dim", extStatus)
+				gap = width - pwdWidth - rightWidth
+				dimPwd = dimPwd + strings.Repeat(" ", max(1, gap)) + t.Fg("dim", rightBlock)
 			}
-			// else: skip extension status, not enough space
+			// else: skip the right-hand block, not enough space
 		}
 	}
 
@@ -288,6 +310,17 @@ func updateBadge(version string) string {
 		return ""
 	}
 	return "⬆ " + strings.TrimPrefix(version, "v") + " · fir update"
+}
+
+// versionLabel renders the running binary's version for the footer, e.g.
+// "fir 0.99.1". It returns "" for an empty version so the footer shows no
+// stray separator. Any leading "v" is stripped to match `fir --version`.
+func versionLabel(version string) string {
+	version = strings.TrimSpace(version)
+	if version == "" {
+		return ""
+	}
+	return "fir " + strings.TrimPrefix(version, "v")
 }
 
 // formatTokens formats token counts for display.
