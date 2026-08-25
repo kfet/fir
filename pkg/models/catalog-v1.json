@@ -1,14 +1,54 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-08-24T01:01:37Z",
+  "generatedAt": "2026-08-25T01:01:31Z",
   "providers": {
+    "opencode-go": {
+      "models": [
+        {
+          "id": "longcat-2.0",
+          "name": "LongCat-2.0",
+          "api": "openai-completions",
+          "reasoning": true,
+          "input": [
+            "text"
+          ],
+          "cost": {
+            "input": 0.3,
+            "output": 1.2,
+            "cacheRead": 0.006,
+            "cacheWrite": 0
+          },
+          "contextWindow": 1000000,
+          "maxTokens": 131072
+        }
+      ]
+    },
     "openrouter": {
+      "models": [
+        {
+          "id": "mistralai/devstral-2512",
+          "name": "Mistral: Devstral 2 2512",
+          "api": "openai-completions",
+          "reasoning": false,
+          "input": [
+            "text"
+          ],
+          "cost": {
+            "input": 0.44,
+            "output": 2.2,
+            "cacheRead": 0.044,
+            "cacheWrite": 0
+          },
+          "contextWindow": 262144,
+          "maxTokens": 4096
+        }
+      ],
       "modelOverrides": {
         "deepseek/deepseek-v4-flash": {
           "cost": {
-            "input": 0.05866,
-            "output": 0.11732,
-            "cacheRead": 0.011732,
+            "input": 0.088606,
+            "output": 0.177212,
+            "cacheRead": 0.0177212,
             "cacheWrite": 0
           }
         },
@@ -23,14 +63,33 @@
         },
         "deepseek/deepseek-v4-pro": {
           "cost": {
-            "input": 0.519216,
-            "output": 1.038432,
-            "cacheRead": 0.043268,
+            "input": 0.790308,
+            "output": 1.580616,
+            "cacheRead": 0.065859,
+            "cacheWrite": 0
+          }
+        },
+        "minimax/minimax-m2.7": {
+          "cost": {
+            "input": 0.3,
+            "output": 1.2,
+            "cacheRead": 0.06,
+            "cacheWrite": 0
+          }
+        },
+        "moonshotai/kimi-k2.7-code": {
+          "cost": {
+            "input": 0.67,
+            "output": 3.4,
+            "cacheRead": 0.19,
             "cacheWrite": 0
           }
         },
         "moonshotai/kimi-k3": {
           "maxTokens": 1048576
+        },
+        "qwen/qwen3-235b-a22b-thinking-2507": {
+          "contextWindow": 131072
         },
         "qwen/qwen3.5-397b-a17b": {
           "cost": {
@@ -53,14 +112,124 @@
         "thedrummer/unslopnemo-12b": {
           "maxTokens": 32768
         },
+        "thinkingmachines/inkling": {
+          "cost": {
+            "input": 0.95,
+            "output": 4.05,
+            "cacheRead": 0.16,
+            "cacheWrite": 0
+          },
+          "maxTokens": 262144
+        },
+        "thinkingmachines/inkling-small:free": {
+          "contextWindow": 1048576
+        },
+        "thinkingmachines/inkling:free": {
+          "contextWindow": 1048576
+        },
+        "z-ai/glm-5.1": {
+          "cost": {
+            "input": 1.26,
+            "output": 3.96,
+            "cacheRead": 0.234,
+            "cacheWrite": 0
+          },
+          "maxTokens": 202752
+        },
+        "z-ai/glm-5.2": {
+          "cost": {
+            "input": 1.19,
+            "output": 3.74,
+            "cacheRead": 0.221,
+            "cacheWrite": 0
+          },
+          "maxTokens": 262144
+        },
         "~deepseek/deepseek-v4-flash-latest": {
           "cost": {
-            "input": 0.04,
-            "output": 0.08,
-            "cacheRead": 0.008,
+            "input": 0.035,
+            "output": 0.12,
+            "cacheRead": 0.01,
             "cacheWrite": 0
           },
           "maxTokens": 1048576
+        }
+      }
+    },
+    "poe": {
+      "models": [
+        {
+          "id": "glm-5.3-el",
+          "name": "GLM-5.3-EL",
+          "api": "openai-completions",
+          "reasoning": false,
+          "reasoningEffortValues": [
+            "low",
+            "high",
+            "max"
+          ],
+          "input": [
+            "text"
+          ],
+          "cost": {
+            "input": 1.4141,
+            "output": 4.4444,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          },
+          "contextWindow": 1000000,
+          "maxTokens": 8192
+        }
+      ]
+    },
+    "vercel-ai-gateway": {
+      "models": [
+        {
+          "id": "openai/gpt-oss-safeguard-120b",
+          "name": "GPT OSS Safeguard 120B",
+          "api": "anthropic-messages",
+          "reasoning": true,
+          "input": [
+            "text"
+          ],
+          "cost": {
+            "input": 0.15,
+            "output": 0.6,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          },
+          "contextWindow": 128000,
+          "maxTokens": 16000
+        }
+      ],
+      "modelOverrides": {
+        "deepseek/deepseek-v4-pro-0813": {
+          "cost": {
+            "input": 0.66,
+            "output": 1.98,
+            "cacheRead": 0.066,
+            "cacheWrite": 0
+          }
+        },
+        "nvidia/nemotron-3.5-lightning": {
+          "cost": {
+            "input": 0.05,
+            "output": 0.2,
+            "cacheRead": 0.01,
+            "cacheWrite": 0
+          },
+          "contextWindow": 262144,
+          "maxTokens": 131072
+        },
+        "openai/gpt-oss-safeguard-20b": {
+          "cost": {
+            "input": 0.07,
+            "output": 0.2,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          },
+          "contextWindow": 128000,
+          "maxTokens": 16000
         }
       }
     }
