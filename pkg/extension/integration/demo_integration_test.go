@@ -17,6 +17,7 @@ import (
 	"runtime"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -72,6 +73,12 @@ type demoProc struct {
 	rec    *recorded
 	nextID int
 
+	// closed is set during teardown, before stdin is closed. The pump
+	// goroutine can still be handling a late outbound request at that
+	// point; writes that lose the race must not fail an already-finished
+	// test.
+	closed atomic.Bool
+
 	// channels for async recv
 	mu      sync.Mutex
 	waiters map[int]chan jrpcMsg
@@ -79,8 +86,16 @@ type demoProc struct {
 
 func (d *demoProc) send(msg any) {
 	d.t.Helper()
+	if d.closed.Load() {
+		return
+	}
 	if err := d.enc.Encode(msg); err != nil {
-		d.t.Fatalf("send: %v", err)
+		if d.closed.Load() {
+			return // raced with teardown; the test is already done
+		}
+		// Errorf, not Fatalf: send is also called from the pump goroutine,
+		// where Fatalf would only exit that goroutine.
+		d.t.Errorf("send: %v", err)
 	}
 }
 
@@ -352,12 +367,6 @@ func startDemo(t *testing.T) (*demoProc, context.CancelFunc) {
 		cancel()
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		_ = stdin.Close()
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
-	})
-
 	rec := newRecorded()
 	proc := &demoProc{
 		t:       t,
@@ -366,6 +375,13 @@ func startDemo(t *testing.T) (*demoProc, context.CancelFunc) {
 		nextID:  1,
 		waiters: make(map[int]chan jrpcMsg),
 	}
+
+	t.Cleanup(func() {
+		proc.closed.Store(true)
+		_ = stdin.Close()
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	})
 
 	// Start the background pump goroutine.
 	scanner := bufio.NewScanner(stdout)
@@ -755,3 +771,28 @@ func TestDemo_Event_TurnStart(t *testing.T)    { testNoActionEvent(t, "turn_star
 func TestDemo_Event_TurnEnd(t *testing.T)      { testNoActionEvent(t, "turn_end") }
 func TestDemo_Event_MessageStart(t *testing.T) { testNoActionEvent(t, "message_start") }
 func TestDemo_Event_MessageEnd(t *testing.T)   { testNoActionEvent(t, "message_end") }
+
+// A write that loses the race with teardown must not fail the test: the pump
+// goroutine can still be answering a late outbound request when t.Cleanup
+// closes stdin, and that used to surface as a spurious
+// "send: write |1: file already closed" failure on an already-finished test.
+func TestDemoProc_SendAfterTeardownDoesNotFail(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = r.Close() }()
+
+	ok := t.Run("late-send", func(t *testing.T) {
+		d := &demoProc{t: t, enc: json.NewEncoder(w), rec: newRecorded(), nextID: 1}
+		// Teardown ordering: closed is set, then the pipe is closed.
+		d.closed.Store(true)
+		if err := w.Close(); err != nil {
+			t.Fatal(err)
+		}
+		d.send(map[string]any{"jsonrpc": "2.0", "id": 1, "result": "late"})
+	})
+	if !ok {
+		t.Fatal("send after teardown failed the test; it must be a silent no-op")
+	}
+}

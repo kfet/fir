@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-08-25
+
+### Fixed
+- **A demo extension integration test could fail *after* it had already passed.** `demoProc.send` called `t.Fatalf` on write errors, but it also runs on the background pump goroutine that answers the extension's outbound calls — so a late request answered just after `t.Cleanup` closed stdin surfaced as `send: write |1: file already closed` against a finished test, failing CI at random with no real defect (hit on the v1.1.0 CI run). Teardown now sets a `closed` flag *before* closing the pipe, `send` treats a write that loses that race as a silent no-op, and error reporting moved from `Fatalf` to `Errorf`, which is the only one of the two that means anything off the test goroutine. Pinned by a deterministic regression test that fails against the old `Fatalf` path.
+
 ## [1.1.0] - 2026-08-25
 
 ### Added
