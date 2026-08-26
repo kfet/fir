@@ -9,6 +9,10 @@
 
 Refreshes every 5 minutes. Uses a shared file cache with flock so multiple
 fir sessions avoid redundant API calls and respect rate limits together.
+
+Also listens for ``provider_error`` and, when a Claude subscription (OAuth)
+account hits a usage limit, notifies the user when that limit resets — reusing
+the cache this extension already maintains, so the error path stays local.
 """
 
 from __future__ import annotations
@@ -18,6 +22,7 @@ import fcntl
 import json
 import os
 import random
+import re
 import tempfile
 import threading
 import time
@@ -32,6 +37,29 @@ REFRESH_INTERVAL_SECONDS = 30  # how frequently to refresh stats from cache
 CACHE_SECONDS_TTL = 300  # seconds — shared across all fir sessions
 BACKOFF_BASE = 120  # initial backoff after 429 (seconds)
 BACKOFF_MAX = 3600  # max backoff (60 minutes — oauth/usage can 429 for 30min+)
+
+# -- rate-limit reset reporting ---------------------------------------------
+# A window's utilization at or above this is taken as the plausible cause of a
+# rate-limit error. Below it the cache is no evidence at all — it may belong to
+# a different account than the one that was just limited.
+NEAR_LIMIT_UTILIZATION = 95.0
+# Resets further out than the longest window (7 days, plus slack) are corrupt.
+MAX_RESET_HORIZON = 8 * 24 * 3600
+# How far a cached window's reset may sit from an instant parsed out of the
+# error text and still be considered the same window.
+WINDOW_MATCH_SLOP = 300
+# A provider-indicated retry delay shorter than this is a transient backoff,
+# not a usage-window reset — reporting it as one would be a lie.
+MIN_RETRY_AFTER_AS_RESET = 60.0
+
+WINDOW_LABELS = {"five_hour": "5-hour", "seven_day": "7-day"}
+
+# Reset instants as they appear in Anthropic rate-limit bodies:
+# "Claude AI usage limit reached|1740506400", `"resetsAt": 1740506400`,
+# `"resets_at": "2026-02-25T18:00:00Z"`.
+_RESET_PIPE_RE = re.compile(r"\|\s*(\d{10,13})\b")
+_RESET_EPOCH_RE = re.compile(r'"resets?_?[aA]t"\s*:\s*"?(\d{10,13})"?')
+_RESET_ISO_RE = re.compile(r'"resets?_?[aA]t"\s*:\s*"(\d{4}-\d{2}-\d{2}[Tt][^"]+)"')
 
 # Cache dict keys
 _K_FETCHED_AT = "fetched_at"
@@ -253,6 +281,24 @@ def _fmt_countdown(total_min: int) -> str:
     return f"{d}d{rem // 60}h"
 
 
+def _parse_iso(value: object) -> datetime | None:
+    """Parse an ISO-8601 instant, returning None on anything unparseable.
+
+    ``datetime.fromisoformat`` only learned to accept a trailing ``Z`` in
+    3.11, and fir supports Python 3.9 — so normalise it here rather than
+    silently dropping every ``resets_at`` the API returns in UTC.
+    """
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00").replace("z", "+00:00"))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
 # ---------------------------------------------------------------------------
 # Provider fetch functions
 # ---------------------------------------------------------------------------
@@ -288,10 +334,10 @@ def _fetch_anthropic_usage(token: str) -> str | None:
         label = key.replace("_", " ").title().replace("Five Hour", "5h").replace("Seven Day", "7d")
 
         reset_str = ""
-        if resets_at := val.get("resets_at"):
-            with contextlib.suppress(Exception):
-                dt = datetime.fromisoformat(resets_at).astimezone(local_tz)
-                reset_str = _fmt_countdown(max(0, int((dt - now).total_seconds()) // 60))
+        if (dt := _parse_iso(val.get("resets_at"))) is not None:
+            reset_str = _fmt_countdown(
+                max(0, int((dt.astimezone(local_tz) - now).total_seconds()) // 60)
+            )
 
         parts.append(
             (util, f"{label} {util:.0f}% ({reset_str})" if reset_str else f"{label} {util:.0f}%")
@@ -327,6 +373,125 @@ def _fetch_poe_usage(api_key: str) -> str | None:
         bal_str = str(balance)
 
     return f"🅿 {bal_str}pts{result.status_suffix()}"
+
+
+# ---------------------------------------------------------------------------
+# Rate-limit reset reporting
+# ---------------------------------------------------------------------------
+#
+# When a Claude subscription account hits its 5-hour or 7-day usage limit, the
+# error says only that a limit was hit. Everything needed to say *when it
+# resets* is already here: the oauth/usage cache this extension maintains, and
+# the reset instant Anthropic often puts in the error body itself. Sources are
+# consulted cheapest-and-most-authoritative first, and nothing is said at all
+# unless one of them yields a plausible instant.
+
+
+def _cached_usage_windows() -> dict[str, dict]:
+    """Read the cached oauth/usage windows — a local file read, never a fetch.
+
+    Deliberately bypasses :func:`_cached_fetch`: that refreshes on expiry,
+    which would put a blocking HTTP call on the error path. The background
+    refresh loop keeps this file within its TTL anyway, and a window's
+    ``resets_at`` does not move while the window is open.
+    """
+    cached = _read_json(_cache_dir() / "anthropic-usage-cache.json") or {}
+    data = cached.get(_K_DATA)
+    if not isinstance(data, dict):
+        return {}
+    return {k: v for k, v in data.items() if isinstance(v, dict) and v.get("resets_at")}
+
+
+def _reset_from_text(text: str) -> float | None:
+    """Extract a reset instant (epoch seconds) from an error body."""
+    for pattern in (_RESET_PIPE_RE, _RESET_EPOCH_RE):
+        if m := pattern.search(text):
+            raw = m.group(1)
+            return int(raw) / 1000 if len(raw) > 10 else float(raw)
+    if m := _RESET_ISO_RE.search(text):
+        dt = _parse_iso(m.group(1))
+        if dt is not None:
+            return dt.timestamp()
+    return None
+
+
+def _reset_plausible(reset: float, now: float) -> bool:
+    """Reject resets already in the past (stale) or absurdly far out (corrupt)."""
+    return now < reset <= now + MAX_RESET_HORIZON
+
+
+def _reset_from_windows(windows: dict[str, dict], now: float) -> tuple[float, str] | None:
+    """Pick the window that most likely caused the error: the earliest future
+    reset among windows at or above the near-limit utilization."""
+    best: tuple[float, str] | None = None
+    for name, win in windows.items():
+        util = win.get("utilization")
+        if not isinstance(util, (int, float)) or util < NEAR_LIMIT_UTILIZATION:
+            continue
+        dt = _parse_iso(win.get("resets_at"))
+        if dt is None or not _reset_plausible(dt.timestamp(), now):
+            continue
+        if best is None or dt.timestamp() < best[0]:
+            best = (dt.timestamp(), WINDOW_LABELS.get(name, ""))
+    return best
+
+
+def _window_label_for(windows: dict[str, dict], reset: float) -> str:
+    """Label a reset instant by matching it against the cached windows.
+
+    Returns "" when no window matches — the window is never guessed at.
+    """
+    for name, win in windows.items():
+        dt = _parse_iso(win.get("resets_at"))
+        if dt is not None and abs(dt.timestamp() - reset) < WINDOW_MATCH_SLOP:
+            return WINDOW_LABELS.get(name, "")
+    return ""
+
+
+def _format_reset_notice(reset: float, label: str, now: float) -> str:
+    """Render the user-visible notice, in local time with a relative hint."""
+    local = datetime.fromtimestamp(reset).astimezone()
+    stamp = f"{local:%b} {local.day}, {local.hour % 12 or 12}:{local:%M %p %Z}"
+    countdown = _fmt_countdown(max(0, int((reset - now) // 60)))
+    return f"Anthropic {label or 'usage'} limit reached — resets {stamp} (in {countdown})"
+
+
+def _rate_limit_notice(
+    params: fir_ext.ProviderErrorParams, windows: dict[str, dict], now: float
+) -> str | None:
+    """Build the notice for a rate-limit provider_error, or None to stay quiet."""
+    reset = _reset_from_text(params.get("error_text") or "")
+    if reset is not None and _reset_plausible(reset, now):
+        return _format_reset_notice(reset, _window_label_for(windows, reset), now)
+
+    if found := _reset_from_windows(windows, now):
+        return _format_reset_notice(found[0], found[1], now)
+
+    # Last resort: a provider-indicated delay long enough to be a window reset
+    # rather than a transient backoff.
+    retry_after_ms = params.get("retry_after_ms") or 0
+    if retry_after_ms / 1000 >= MIN_RETRY_AFTER_AS_RESET:
+        reset = now + retry_after_ms / 1000
+        if _reset_plausible(reset, now):
+            return _format_reset_notice(reset, _window_label_for(windows, reset), now)
+    return None
+
+
+@fir_ext.on("provider_error")
+def on_provider_error(params: fir_ext.ProviderErrorParams, ctx: fir_ext.Context) -> None:
+    """Tell the user when an Anthropic subscription usage limit resets."""
+    if not params or params.get("kind") != "rate_limit":
+        return
+    if "anthropic" not in (params.get("provider") or "").lower():
+        return
+    # OAuth/subscription path only: an API-key account has no oauth/usage
+    # windows and no token here. Only the presence of a token is consulted —
+    # its value is never read into a message or a log.
+    if not _find_anthropic_token():
+        return
+    if notice := _rate_limit_notice(params, _cached_usage_windows(), time.time()):
+        with contextlib.suppress(Exception):
+            ctx.notify(notice, level="warning")
 
 
 # ---------------------------------------------------------------------------
