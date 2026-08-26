@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Added
+- **A Claude subscription rate limit now says when it resets.** The `provider-usage` extension already polls `oauth/usage` and caches the `five_hour` / `seven_day` windows, so it now also listens for `provider_error` and, on an Anthropic OAuth rate limit, notifies (level `warning`): `Anthropic 5-hour limit reached — resets Feb 25, 6:00 PM EET (in 42m)`. The instant comes from the error body when it carries one, else from the cache, else from a provider-indicated delay long enough to be a window reset rather than a transient backoff — the error path only ever reads the cache file, never refreshes it. Nothing is said when no reset time is known, the window label is never guessed, and API-key accounts are untouched.
+
+### Fixed
+- **`resets_at` timestamps were silently dropped on Python 3.9.** The status-bar countdown parsed them with `datetime.fromisoformat`, which only learned to accept a trailing `Z` in 3.11 — and the failure was swallowed by a bare suppress, so on a stock macOS Python the usage indicator just quietly lost its `(1h20m)` suffix. Parsing now normalises the offset.
+
 ## [1.1.1] - 2026-08-25
 
 ### Fixed
@@ -15,11 +21,6 @@
 ### Changed
 - **Model catalog regenerated** at release time: routine upstream refresh of model ids, pricing and limits.
 - **`ship-it` now finishes the job: it cuts and publishes a release, and worktree cleanup is no longer optional.** The skill previously stopped after the ff-merge and gated cleanup on an explicit `Mode: do, final.` tag in the task text — so the common case left a merged branch and a stale worktree lying around, and shipping a change still required a separate manual release pass. The mode gate is gone (cleanup is unconditional), and two orchestration steps sit between merge and cleanup: invoke the existing `release` skill (version from `CHANGELOG.md`'s `[Unreleased]` section, `make all`, `VERSION` + `CHANGELOG.md`, commit, tag, install), then complete its Publishing step — `make publish` plus the post-publish GitHub Actions monitoring, or `make deploy HOST=<host>` when the target is a specific host. Both steps *delegate* rather than restate: the release procedure lives in one place and this skill points at it, which is the same discipline `ship-it` already applies to `review-and-fix` and `merge-to-main`. One contradiction had to be resolved explicitly — the `release` skill gates publishing on user confirmation, which would stall an autonomous run, so `ship-it` declares its own invocation to be that confirmation. `ship-wt` was updated in step, since it embeds a verbatim description of what `ship-it` does into every task text it spawns and would otherwise keep emitting now-meaningless `final` tags.
-### Added
-- **A Claude subscription rate limit now says when it resets.** The `provider-usage` extension already polls `oauth/usage` and caches the `five_hour` / `seven_day` windows, so it now also listens for `provider_error` and, on an Anthropic OAuth rate limit, notifies (level `warning`): `Anthropic 5-hour limit reached — resets Feb 25, 6:00 PM EET (in 42m)`. The instant comes from the error body when it carries one, else from the cache, else from a provider-indicated delay long enough to be a window reset rather than a transient backoff — the error path only ever reads the cache file, never refreshes it. Nothing is said when no reset time is known, the window label is never guessed, and API-key accounts are untouched.
-
-### Fixed
-- **`resets_at` timestamps were silently dropped on Python 3.9.** The status-bar countdown parsed them with `datetime.fromisoformat`, which only learned to accept a trailing `Z` in 3.11 — and the failure was swallowed by a bare suppress, so on a stock macOS Python the usage indicator just quietly lost its `(1h20m)` suffix. Parsing now normalises the offset.
 
 ## [1.0.0] - 2026-08-23
 
