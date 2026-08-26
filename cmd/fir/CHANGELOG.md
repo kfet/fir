@@ -2,11 +2,16 @@
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-08-26
+
 ### Added
 - **A Claude subscription rate limit now says when it resets.** The `provider-usage` extension already polls `oauth/usage` and caches the `five_hour` / `seven_day` windows, so it now also listens for `provider_error` and, on an Anthropic OAuth rate limit, notifies (level `warning`): `Anthropic 5-hour limit reached — resets Feb 25, 6:00 PM EET (in 42m)`. The instant comes from the error body when it carries one, else from the cache, else from a provider-indicated delay long enough to be a window reset rather than a transient backoff — the error path only ever reads the cache file, never refreshes it. Nothing is said when no reset time is known, the window label is never guessed, and API-key accounts are untouched.
 
 ### Fixed
 - **`resets_at` timestamps were silently dropped on Python 3.9.** The status-bar countdown parsed them with `datetime.fromisoformat`, which only learned to accept a trailing `Z` in 3.11 — and the failure was swallowed by a bare suppress, so on a stock macOS Python the usage indicator just quietly lost its `(1h20m)` suffix. Parsing now normalises the offset.
+
+### Changed
+- **Model catalog regenerated** at release time: routine upstream refresh of model ids, pricing and limits.
 
 ## [1.1.1] - 2026-08-25
 
