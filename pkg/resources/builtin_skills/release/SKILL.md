@@ -45,6 +45,18 @@ Alternatively, `make deploy` pushes binaries directly to remote hosts via scp (n
 
 If any step fails, stop and report the error. Do not push or publish unless the user confirms.
 
+**Before publishing, re-check that `origin/main` has not moved** since you
+started — another agent may be releasing the same repo concurrently. `git
+fetch origin` and confirm your branch is not behind.
+
+**If the push is rejected:** discard the *release*, keep the *work*. Delete
+the tag (`git tag -d vVERSION`), unwind the release commit, rebase onto the
+new `origin/main`, then redo the release from the start — re-pick the
+version (theirs may have taken it), re-derive the CHANGELOG section from
+`## [Unreleased]`, and re-run `make all` on the merged tree. Never rebase a
+finalised release commit and push it: the version, changelog and test run
+are assertions about a tree that no longer exists.
+
 ## Post-publish: Track All GitHub Actions
 
 After `make publish` succeeds, poll GitHub Actions until every triggered workflow finishes:
