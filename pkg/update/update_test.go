@@ -149,6 +149,38 @@ func TestCheckLatest_SkipsEmptyVersion(t *testing.T) {
 	}
 }
 
+func TestCheckLatest_DisabledByEnv(t *testing.T) {
+	// A stale cache plus a real version would otherwise force a network
+	// round-trip; FIR_NO_UPDATE_CHECK must short-circuit before that.
+	dir := t.TempDir()
+	writeCache(filepath.Join(dir, "update-check.json"), &cacheEntry{
+		CheckedAt:     time.Now().Add(-48 * time.Hour),
+		LatestVersion: "v9.9.9",
+	})
+	for _, v := range []string{"1", "true", "yes"} {
+		t.Setenv("FIR_NO_UPDATE_CHECK", v)
+		if !ChecksDisabled() {
+			t.Fatalf("ChecksDisabled() = false for %q", v)
+		}
+		rel, err := CheckLatestFresh(context.Background(), "v0.4.0", dir)
+		if err != nil {
+			t.Fatalf("unexpected error for %q: %v", v, err)
+		}
+		if rel != nil {
+			t.Errorf("expected nil release for %q, got %+v", v, rel)
+		}
+	}
+}
+
+func TestCheckLatest_EnvOffValuesKeepChecksOn(t *testing.T) {
+	for _, v := range []string{"", "0", "false"} {
+		t.Setenv("FIR_NO_UPDATE_CHECK", v)
+		if ChecksDisabled() {
+			t.Errorf("ChecksDisabled() = true for %q, want false", v)
+		}
+	}
+}
+
 func TestCheckLatest_CachedUpToDate(t *testing.T) {
 	dir := t.TempDir()
 	writeCache(filepath.Join(dir, "update-check.json"), &cacheEntry{

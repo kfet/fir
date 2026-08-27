@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+- **Both install paths now warn when several `fir` binaries exist on one machine.** A host can accumulate copies in `~/.local/bin`, `~/go/bin` and a Homebrew prefix; PATH order silently picks one, `fir update` only ever rewrites the copy it ran from, and a `brew upgrade` can land a different version on a shadowed path with nothing said. `install.sh` (kfet/fir-dist) now scans every PATH entry plus the well-known install locations (`/usr/local/bin`, `~/.local/bin`, `~/go/bin`, `~/bin`, and `brew --prefix`/bin when brew exists), collapses symlinks so one file reached two ways is not a duplicate, and — only when more than one distinct binary exists — lists each path with its version, marks the one PATH resolves and calls the rest shadowed (versions are probed concurrently, so N binaries cost one probe's wall time). The Homebrew formula gained a display-time `caveats` method (via the `brews.caveats` field in `.goreleaser.yaml`) that says the same thing when a non-Homebrew `fir` is on PATH and returns nothing when the install is clean. Neither can fail an install.
+- **`FIR_NO_UPDATE_CHECK=1`** switches off every update check, including the explicit one behind `fir --version`, which then prints version and licence and exits without touching the network. The duplicate-install scans set it when probing other binaries for their versions.
+
 ## [1.2.0] - 2026-08-26
 
 ### Added

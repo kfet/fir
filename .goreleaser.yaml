@@ -69,6 +69,51 @@ brews:
       email: bot@goreleaser.com
     commit_msg_template: "fir: update to {{ .Tag }}"
     skip_upload: auto
+    # Duplicate-install warning, computed at display time.
+    #
+    # GoReleaser emits this block verbatim inside `def caveats; <<~EOS ... EOS; end`,
+    # so the whole body is ONE Ruby interpolation: it returns the warning string
+    # when a non-Homebrew fir is on PATH, and nil otherwise — leaving a
+    # whitespace-only caveats string, which Homebrew suppresses. A clean install
+    # stays silent and never execs anything.
+    #
+    # Constraints when editing: no line may be `EOS` (it would close the
+    # heredoc), and no `{{` may appear (GoReleaser templating).
+    caveats: |
+      #{
+        begin
+          linked = "#{HOMEBREW_PREFIX}/bin/fir"
+          ours = File.exist?(linked) ? File.realpath(linked) : nil
+          brewed = [HOMEBREW_PREFIX.to_s, HOMEBREW_CELLAR.to_s]
+          others = ENV.fetch("PATH", "").split(File::PATH_SEPARATOR).reject(&:empty?).uniq.filter_map do |dir|
+            candidate = File.join(dir, "fir")
+            next unless File.file?(candidate) && File.executable?(candidate)
+            real = File.realpath(candidate)
+            next if real == ours || brewed.any? { |prefix| real.start_with?(prefix) }
+            real
+          end.uniq
+          if others.empty?
+            nil
+          else
+            # One thread per candidate: probing N binaries costs one probe's
+            # wall time, not N. FIR_NO_UPDATE_CHECK stops fir >= 1.3 phoning
+            # home; older copies ignore it but now stall concurrently.
+            listed = others.map do |path|
+              Thread.new do
+                found = Utils.popen_read({ "FIR_NO_UPDATE_CHECK" => "1" }, path, "--version").lines.first.to_s.strip
+                found = "unknown version" if found.empty?
+                "  #{path} (#{found})"
+              end
+            end.map(&:value)
+            "Another fir is on your PATH and may shadow this one:\n" +
+              listed.join("\n") + "\n  #{linked} (#{version}) <- installed here\n\n" +
+              "PATH order decides which one runs, and each updates separately. Remove the\n" +
+              "other copy, or put #{HOMEBREW_PREFIX}/bin first on PATH."
+          end
+        rescue StandardError
+          nil
+        end
+      }
     test: |
       system "#{bin}/fir", "--version"
     # The downloaded artifact is named fir-<os>-<arch> (archives.formats=binary

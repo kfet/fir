@@ -74,8 +74,28 @@ func CheckLatestFresh(ctx context.Context, currentVersion, cacheDir string) (*Re
 	return checkLatest(ctx, currentVersion, cacheDir, true)
 }
 
+// checkDisabled reports whether the operator has switched update checks off.
+// FIR_NO_UPDATE_CHECK=1 is the escape hatch: it makes every check (including
+// the explicit one behind `fir --version`) a no-op, so `fir --version` costs
+// nothing but a process start. Tooling that probes several fir binaries for
+// their versions — install.sh's duplicate-install scan, the Homebrew formula's
+// caveats — sets it so the probe never touches the network.
+func checkDisabled() bool {
+	switch os.Getenv("FIR_NO_UPDATE_CHECK") {
+	case "", "0", "false":
+		return false
+	default:
+		return true
+	}
+}
+
+// ChecksDisabled reports whether update checks are switched off via
+// FIR_NO_UPDATE_CHECK. Callers use it to stay silent rather than reporting a
+// misleading "you are on the latest version".
+func ChecksDisabled() bool { return checkDisabled() }
+
 func checkLatest(ctx context.Context, currentVersion, cacheDir string, forceRefresh bool) (*Release, error) {
-	if currentVersion == "" || currentVersion == "dev" {
+	if currentVersion == "" || currentVersion == "dev" || checkDisabled() {
 		return nil, nil
 	}
 

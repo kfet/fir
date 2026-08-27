@@ -525,6 +525,11 @@ func run() error {
 		}
 		fmt.Println("License: MIT — " + url)
 		// Report whether a newer release is available (best-effort, cached).
+		// Skipped entirely when update checks are disabled, so probing a
+		// binary's version costs no network round-trip.
+		if update.ChecksDisabled() {
+			return nil
+		}
 		checkCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		rel, err := update.CheckLatestFresh(checkCtx, version, resolveAgentDir())
