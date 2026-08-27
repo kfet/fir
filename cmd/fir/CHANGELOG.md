@@ -2,13 +2,15 @@
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-08-27
+
 ### Fixed
 - **In-flight tool progress is now visible in ACP clients.** A tool's status message was only put in the `tool_call_update` *content*, but clients render their live spinner label from the update's `title` — so a running `pipe`/`wait` showed a generic animating verb instead of what it was doing. The status message now goes out as the title as well as the content, and the completion update restores the call's original title so a finished call is not left labelled with its last progress message.
-
 - **A cancelled turn leaked per-tool-call state.** Tool calls that never receive an end event (cancelled or errored turn) left their pending args and title in the ACP session's maps for its whole lifetime; the end of a turn now clears them.
 
 ### Changed
 - **Progress strings are front-loaded.** Clients truncate the spinner label to ~12 runes, so `wait`, `pipe` and `aside` now lead with the useful part: `rl-reset 7/60` instead of `wait poll 7: step 1/1 Bash`.
+- **Model catalog regenerated** at release time: routine upstream refresh of model ids, pricing and limits.
 
 ## [1.2.0] - 2026-08-26
 
