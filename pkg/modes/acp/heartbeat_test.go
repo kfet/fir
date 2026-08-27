@@ -155,3 +155,70 @@ func TestToolExecutionUpdate_EmitsInProgress(t *testing.T) {
 		t.Fatalf("expected 1 in_progress update from a tool progress event, got %d", got)
 	}
 }
+
+// Clients render the live spinner label from the update's Title, so a tool's
+// status message must go out as the Title (as well as the content).
+func TestToolExecutionUpdate_StatusMessageBecomesTitle(t *testing.T) {
+	t.Setenv("FIR_ACP_TOOL_HEARTBEAT", "0s")
+
+	mock := newMockConn()
+	pa := &firAgent{conn: mock, sessions: make(map[string]*firSession)}
+	entry := &firSession{termState: newTerminalState()}
+
+	pa.handleEvent("s1", entry, session.AgentSessionEvent{
+		AgentEvent: &agent.AgentEvent{
+			Type:          agent.EventToolExecutionUpdate,
+			ToolCallID:    "tc-5",
+			ToolName:      "pipe",
+			StatusMessage: "rl-reset 7/60",
+		},
+	})
+
+	var found bool
+	for _, u := range mock.getUpdates() {
+		tc := u.Update.ToolCallUpdate
+		if tc == nil || string(tc.ToolCallId) != "tc-5" {
+			continue
+		}
+		if tc.Title == nil {
+			t.Fatalf("tool_call_update for tc-5 has nil Title")
+		}
+		if *tc.Title != "rl-reset 7/60" {
+			t.Fatalf("Title = %q, want %q", *tc.Title, "rl-reset 7/60")
+		}
+		if len(tc.Content) != 1 {
+			t.Fatalf("expected status message content to be kept, got %d items", len(tc.Content))
+		}
+		found = true
+	}
+	if !found {
+		t.Fatalf("no tool_call_update emitted for tc-5")
+	}
+}
+
+// An update with no status message must not clobber the tool call's title.
+func TestToolExecutionUpdate_NoStatusMessageLeavesTitleNil(t *testing.T) {
+	t.Setenv("FIR_ACP_TOOL_HEARTBEAT", "0s")
+
+	mock := newMockConn()
+	pa := &firAgent{conn: mock, sessions: make(map[string]*firSession)}
+	entry := &firSession{termState: newTerminalState()}
+
+	pa.handleEvent("s1", entry, session.AgentSessionEvent{
+		AgentEvent: &agent.AgentEvent{
+			Type:       agent.EventToolExecutionUpdate,
+			ToolCallID: "tc-6",
+			ToolName:   "pipe",
+		},
+	})
+
+	for _, u := range mock.getUpdates() {
+		tc := u.Update.ToolCallUpdate
+		if tc == nil || string(tc.ToolCallId) != "tc-6" {
+			continue
+		}
+		if tc.Title != nil {
+			t.Fatalf("Title = %q, want nil for an update with no status message", *tc.Title)
+		}
+	}
+}

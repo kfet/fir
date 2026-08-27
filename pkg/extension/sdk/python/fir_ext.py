@@ -2973,8 +2973,11 @@ class Context:
         """Send a transient progress message to the UI.
 
         Updates the spinner text inside the tool's display component
-        (e.g. "Calling Read..." or "Synthesizing..."). Fire-and-forget —
+        (e.g. "Read config.toml" or "Synthesizing..."). Fire-and-forget —
         does not wait for a response.
+
+        Front-load the message: some clients truncate the spinner label to
+        about 12 runes, so put the identifying part first.
         """
         _write_message(
             {"jsonrpc": "2.0", "method": "report_progress", "params": {"message": message}},

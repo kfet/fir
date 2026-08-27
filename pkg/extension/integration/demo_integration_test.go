@@ -272,6 +272,11 @@ func (d *demoProc) sendEvent(method string, params any) {
 	d.send(map[string]any{"jsonrpc": "2.0", "method": "event/" + method, "params": params})
 }
 
+// rpcTimeout bounds a single request/response exchange with the extension.
+// Generous on purpose: the happy path returns immediately, while a tight cap
+// flakes under the race detector and parallel `make all` load.
+const rpcTimeout = 20 * time.Second
+
 // callTool sends a tool_call request and returns the response.
 func (d *demoProc) callTool(name string, params map[string]any) jrpcMsg {
 	id := d.nextid()
@@ -285,7 +290,7 @@ func (d *demoProc) callTool(name string, params map[string]any) jrpcMsg {
 			"params":       params,
 		},
 	})
-	msg, ok := d.recv(id, 5*time.Second)
+	msg, ok := d.recv(id, rpcTimeout)
 	if !ok {
 		d.t.Fatalf("callTool %q: timed out", name)
 	}
@@ -301,7 +306,7 @@ func (d *demoProc) callHook(hookMethod string, params map[string]any) jrpcMsg {
 		"method":  hookMethod,
 		"params":  params,
 	})
-	msg, ok := d.recv(id, 5*time.Second)
+	msg, ok := d.recv(id, rpcTimeout)
 	if !ok {
 		d.t.Fatalf("callHook %q: timed out", hookMethod)
 	}
@@ -403,7 +408,7 @@ func TestDemo_Init(t *testing.T) {
 		"jsonrpc": "2.0", "id": initID, "method": "init",
 		"params": map[string]any{"version": "1", "cwd": "/tmp"},
 	})
-	resp, ok := proc.recv(initID, 5*time.Second)
+	resp, ok := proc.recv(initID, rpcTimeout)
 	if !ok {
 		t.Fatal("init: timed out")
 	}
@@ -462,7 +467,7 @@ func doInit(proc *demoProc) {
 		"jsonrpc": "2.0", "id": initID, "method": "init",
 		"params": map[string]any{"version": "1", "cwd": "/tmp"},
 	})
-	if _, ok := proc.recv(initID, 5*time.Second); !ok {
+	if _, ok := proc.recv(initID, rpcTimeout); !ok {
 		proc.t.Fatal("doInit: timed out")
 	}
 }
@@ -485,8 +490,8 @@ func TestDemo_Tool_WordCount(t *testing.T) {
 	}
 
 	// word_count calls set_label and notify
-	waitOutbound(t, proc.rec, func(r *recorded) bool { return r.labels["last_wc"] == "3" }, 3*time.Second)
-	waitOutbound(t, proc.rec, func(r *recorded) bool { return len(r.notifies) > 0 }, 3*time.Second)
+	waitOutbound(t, proc.rec, func(r *recorded) bool { return r.labels["last_wc"] == "3" }, rpcTimeout)
+	waitOutbound(t, proc.rec, func(r *recorded) bool { return len(r.notifies) > 0 }, rpcTimeout)
 
 	proc.rec.mu.Lock()
 	if label := proc.rec.labels["last_wc"]; label != "3" {
@@ -510,7 +515,7 @@ func TestDemo_Tool_ShellRun(t *testing.T) {
 		t.Fatalf("shell_run error: %s", resp.Error)
 	}
 	// shell_run calls exec — the pump already handled it; verify the record
-	waitOutbound(t, proc.rec, func(r *recorded) bool { return len(r.execs) > 0 }, 3*time.Second)
+	waitOutbound(t, proc.rec, func(r *recorded) bool { return len(r.execs) > 0 }, rpcTimeout)
 
 	proc.rec.mu.Lock()
 	if len(proc.rec.execs) == 0 {
@@ -542,7 +547,7 @@ func TestDemo_Tool_ChangeModel(t *testing.T) {
 	if resp.Error != nil {
 		t.Fatalf("change_model error: %s", resp.Error)
 	}
-	waitOutbound(t, proc.rec, func(r *recorded) bool { return len(r.models) > 0 }, 3*time.Second)
+	waitOutbound(t, proc.rec, func(r *recorded) bool { return len(r.models) > 0 }, rpcTimeout)
 
 	proc.rec.mu.Lock()
 	if len(proc.rec.models) == 0 {
@@ -565,7 +570,7 @@ func TestDemo_Tool_InjectMessage_Custom(t *testing.T) {
 	if resp.Error != nil {
 		t.Fatalf("inject_message error: %s", resp.Error)
 	}
-	waitOutbound(t, proc.rec, func(r *recorded) bool { return len(r.messages) > 0 }, 3*time.Second)
+	waitOutbound(t, proc.rec, func(r *recorded) bool { return len(r.messages) > 0 }, rpcTimeout)
 
 	proc.rec.mu.Lock()
 	if len(proc.rec.messages) == 0 {
@@ -588,7 +593,7 @@ func TestDemo_Tool_InjectMessage_User(t *testing.T) {
 	if resp.Error != nil {
 		t.Fatalf("inject_message error: %s", resp.Error)
 	}
-	waitOutbound(t, proc.rec, func(r *recorded) bool { return len(r.userMessages) > 0 }, 3*time.Second)
+	waitOutbound(t, proc.rec, func(r *recorded) bool { return len(r.userMessages) > 0 }, rpcTimeout)
 
 	proc.rec.mu.Lock()
 	if len(proc.rec.userMessages) == 0 {
@@ -646,7 +651,7 @@ func TestDemo_Event_SessionStart(t *testing.T) {
 
 	waitOutbound(t, proc.rec, func(r *recorded) bool {
 		return slices.Contains(r.statuses, "demo ready")
-	}, 5*time.Second)
+	}, rpcTimeout)
 
 	proc.rec.mu.Lock()
 	if !slices.Contains(proc.rec.statuses, "demo ready") {
@@ -664,7 +669,7 @@ func TestDemo_Event_SessionShutdown(t *testing.T) {
 
 	waitOutbound(t, proc.rec, func(r *recorded) bool {
 		return slices.Contains(r.statuses, "")
-	}, 5*time.Second)
+	}, rpcTimeout)
 
 	proc.rec.mu.Lock()
 	if !slices.Contains(proc.rec.statuses, "") {
@@ -682,7 +687,7 @@ func TestDemo_Event_AgentStart(t *testing.T) {
 
 	waitOutbound(t, proc.rec, func(r *recorded) bool {
 		return slices.Contains(r.sessionNames, "demo session")
-	}, 5*time.Second)
+	}, rpcTimeout)
 
 	proc.rec.mu.Lock()
 	if !slices.Contains(proc.rec.sessionNames, "demo session") {
@@ -698,13 +703,13 @@ func TestDemo_Event_AgentEnd(t *testing.T) {
 
 	// Prime last_wc so the clear_label call targets a known key.
 	proc.callTool("word_count", map[string]any{"text": "a b c"})
-	waitOutbound(t, proc.rec, func(r *recorded) bool { return r.labels["last_wc"] == "3" }, 3*time.Second)
+	waitOutbound(t, proc.rec, func(r *recorded) bool { return r.labels["last_wc"] == "3" }, rpcTimeout)
 
 	proc.sendEvent("agent_end", nil)
 
 	// agent_end should call notify and clear_label("last_wc")
-	waitOutbound(t, proc.rec, func(r *recorded) bool { return len(r.notifies) > 0 }, 5*time.Second)
-	waitOutbound(t, proc.rec, func(r *recorded) bool { return r.labels["last_wc"] == "" }, 5*time.Second)
+	waitOutbound(t, proc.rec, func(r *recorded) bool { return len(r.notifies) > 0 }, rpcTimeout)
+	waitOutbound(t, proc.rec, func(r *recorded) bool { return r.labels["last_wc"] == "" }, rpcTimeout)
 
 	proc.rec.mu.Lock()
 	if len(proc.rec.notifies) == 0 {
@@ -725,7 +730,7 @@ func TestDemo_Event_ToolExecutionStartEnd(t *testing.T) {
 		"tool_call_id": "tc-42",
 		"tool_name":    "bash",
 	})
-	waitOutbound(t, proc.rec, func(r *recorded) bool { return r.labels["tc-42"] != "" }, 5*time.Second)
+	waitOutbound(t, proc.rec, func(r *recorded) bool { return r.labels["tc-42"] != "" }, rpcTimeout)
 
 	proc.rec.mu.Lock()
 	if label := proc.rec.labels["tc-42"]; label == "" {
@@ -740,7 +745,7 @@ func TestDemo_Event_ToolExecutionStartEnd(t *testing.T) {
 		"tool_name":    "bash",
 		"is_error":     false,
 	})
-	waitOutbound(t, proc.rec, func(r *recorded) bool { return r.labels["tc-42"] == "" }, 5*time.Second)
+	waitOutbound(t, proc.rec, func(r *recorded) bool { return r.labels["tc-42"] == "" }, rpcTimeout)
 
 	proc.rec.mu.Lock()
 	if proc.rec.labels["tc-42"] != "" {

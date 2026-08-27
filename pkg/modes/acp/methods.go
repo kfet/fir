@@ -911,7 +911,12 @@ func (pa *firAgent) handleEvent(sessionID string, entry *firSession, event sessi
 		var updateOpts []acpsdk.ToolCallUpdateOpt
 		updateOpts = append(updateOpts, acpsdk.WithUpdateStatus("in_progress"))
 		if ev.StatusMessage != "" {
-			updateOpts = append(updateOpts, acpsdk.WithUpdateContent([]acpsdk.ToolCallContent{textContent(ev.StatusMessage)}))
+			// Title drives the live spinner label in most ACP clients; content
+			// is kept for clients that render the update body instead.
+			updateOpts = append(updateOpts,
+				acpsdk.WithUpdateTitle(ev.StatusMessage),
+				acpsdk.WithUpdateContent([]acpsdk.ToolCallContent{textContent(ev.StatusMessage)}),
+			)
 		}
 		_ = pa.conn.SessionUpdate(context.Background(), entry.notification(acpsdk.SessionId(sessionID), acpsdk.UpdateToolCall(acpsdk.ToolCallId(ev.ToolCallID), updateOpts...)))
 

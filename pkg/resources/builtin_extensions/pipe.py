@@ -257,10 +257,9 @@ def _run_pipe(steps: list[dict], label: str, ctx: fir_ext.Context) -> dict:
         params = _substitute(raw_params, prior_text)
         cont = bool(step.get("continue_on_error", False))
 
-        progress = f"pipe[{i + 1}/{len(steps)}] {name}"
-        if label:
-            progress = f"{label}: {progress}"
-        ctx.report_progress(progress)
+        # Front-loaded: clients truncate the spinner label to ~12 runes, so the
+        # label and step counter must come first.
+        ctx.report_progress(f"{label or 'pipe'} {i + 1}/{len(steps)} {name}")
 
         try:
             result = ctx.call_tool(name, params, **_step_call_kwargs(step))
@@ -395,7 +394,12 @@ def _inject_env(params: Any, poll: int, state_path: str) -> Any:
 
 
 def _run_probe(
-    steps: list[dict], label: str, poll: int, state_path: str, ctx: fir_ext.Context
+    steps: list[dict],
+    label: str,
+    poll: int,
+    max_polls: int,
+    state_path: str,
+    ctx: fir_ext.Context,
 ) -> tuple[bool, str, bool]:
     """Run the probe chain once (reusing pipe's execution path).
 
@@ -414,10 +418,9 @@ def _run_probe(
         params = _inject_env(params, poll, state_path)
         cont = bool(step.get("continue_on_error", False))
 
-        progress = f"wait poll {poll}: step {i + 1}/{len(steps)} {name}"
-        if label:
-            progress = f"{label}: {progress}"
-        ctx.report_progress(progress)
+        # Front-loaded: clients truncate the spinner label to ~12 runes, so the
+        # label and poll counter must come first (e.g. "rl-reset 7/60").
+        ctx.report_progress(f"{label or 'wait'} {poll}/{max_polls} {name}")
 
         try:
             result = ctx.call_tool(name, params, **_step_call_kwargs(step))
@@ -648,7 +651,7 @@ def _run_wait(
         while True:
             polls += 1
             total += 1
-            reached, vtext, vis_error = _run_probe(steps, label, total, state_path, ctx)
+            reached, vtext, vis_error = _run_probe(steps, label, total, max_polls, state_path, ctx)
             segment = _now() - start
             elapsed = prior_elapsed + segment
 
@@ -732,8 +735,7 @@ def _run_wait(
                 )
 
             ctx.report_progress(
-                f"wait: poll {total} ({polls}/{max_polls} this run), "
-                f"{int(elapsed)}s, last={last_verdict}"
+                f"{label or 'wait'} {total}/{max_polls} {int(elapsed)}s last={last_verdict}"
             )
             _sleep_sliced(interval)
     finally:

@@ -1017,11 +1017,16 @@ Response: `{"ok": true}`
 #### `report_progress`
 
 Send a transient progress message to the UI.  Updates the spinner text inside
-the tool's display component (e.g. "Calling Read..." or "Synthesizing...").
+the tool's display component (e.g. "Read config.toml" or "Synthesizing...").
 Only meaningful while an extension tool is executing; ignored otherwise.
 
+In ACP mode the message is sent as the `tool_call_update` title (and content),
+which is what clients render as the live spinner label.  Some clients truncate
+that label to about 12 runes, so front-load the identifying part of the
+message.
+
 ```json
-{"jsonrpc":"2.0","id":1019,"method":"report_progress","params":{"message":"Calling Read..."}}
+{"jsonrpc":"2.0","id":1019,"method":"report_progress","params":{"message":"Read config.toml"}}
 ```
 
 Response: `{"ok": true}`

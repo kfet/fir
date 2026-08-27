@@ -1398,7 +1398,8 @@ def _run_aside(
         params = spec.get("params") or {}
 
         # Report progress to the UI spinner.
-        label = f"Calling {name}" + (f" — {title}" if title else "")
+        # Front-loaded: clients truncate the spinner label to ~12 runes.
+        label = name + (f" — {title}" if title else "")
         ctx.report_progress(label)
 
         # Call the tool via the bridge.
