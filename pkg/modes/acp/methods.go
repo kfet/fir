@@ -898,7 +898,12 @@ func (pa *firAgent) handleEvent(sessionID string, entry *firSession, event sessi
 			startOpts = append(startOpts, acpsdk.WithStartContent(initContent))
 		}
 
-		_ = pa.conn.SessionUpdate(context.Background(), entry.notification(acpsdk.SessionId(sessionID), acpsdk.StartToolCall(acpsdk.ToolCallId(ev.ToolCallID), BuildToolTitleWithHint(ev.ToolName, argsMap, ev.DisplayHint), startOpts...)))
+		title := BuildToolTitleWithHint(ev.ToolName, argsMap, ev.DisplayHint)
+		// Progress updates overwrite the title (that is what clients render as
+		// the spinner label), so remember it and restore it when the call ends.
+		entry.pendingTitles.Store(ev.ToolCallID, title)
+
+		_ = pa.conn.SessionUpdate(context.Background(), entry.notification(acpsdk.SessionId(sessionID), acpsdk.StartToolCall(acpsdk.ToolCallId(ev.ToolCallID), title, startOpts...)))
 
 		// Keep the tool call visibly alive while it runs (see heartbeat.go).
 		pa.startToolHeartbeat(sessionID, entry, ev.ToolCallID)
@@ -945,6 +950,14 @@ func (pa *firAgent) handleEvent(sessionID string, entry *firSession, event sessi
 		var updateOpts []acpsdk.ToolCallUpdateOpt
 		updateOpts = append(updateOpts, acpsdk.WithUpdateStatus(status), acpsdk.WithUpdateRawOutput(ev.Result))
 
+		// Restore the title, which in-flight progress updates overwrote, so a
+		// finished call is not left labelled with its last progress message.
+		if v, ok := entry.pendingTitles.LoadAndDelete(ev.ToolCallID); ok {
+			if title, _ := v.(string); title != "" {
+				updateOpts = append(updateOpts, acpsdk.WithUpdateTitle(title))
+			}
+		}
+
 		if !usedAcpTerminal {
 			content, locations := BuildToolCallContent(ev.ToolName, argsMap, ev.Result, ev.IsError)
 			if len(content) > 0 {
@@ -961,6 +974,9 @@ func (pa *firAgent) handleEvent(sessionID string, entry *firSession, event sessi
 		// The turn is over (normally, or via cancel/error). Never leave a
 		// heartbeat goroutine reporting on work that has stopped.
 		pa.stopSessionHeartbeats(sessionID)
+		// A cancelled turn can leave tool calls without an end event; their
+		// per-call state would then live as long as the session.
+		entry.clearPendingToolState()
 
 	case agent.EventMessageEnd:
 		// Surface inference errors (e.g. Bedrock API failures) to the ACP client.

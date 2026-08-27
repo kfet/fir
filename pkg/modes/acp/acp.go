@@ -59,6 +59,7 @@ type firSession struct {
 	plan             *planTracker
 	termState        *terminalState
 	pendingArgs      sync.Map // toolCallID → map[string]any
+	pendingTitles    sync.Map // toolCallID → string (title sent at tool call start)
 	resumeMu         sync.Mutex
 	lastResumeList   []store.SessionListInfo
 	configAccessor   thinkingAccessor            // nil → use session (for testing)
@@ -70,6 +71,20 @@ type firSession struct {
 	// session (creation or a prompt). Accessed atomically. The idle reaper
 	// uses it to decide when a session has been idle longer than the TTL.
 	lastActiveNs int64
+}
+
+// clearPendingToolState drops the per-tool-call state kept for in-flight
+// calls. Called when a turn ends, since a cancelled turn may never deliver
+// the tool end events that would otherwise clean up.
+func (s *firSession) clearPendingToolState() {
+	s.pendingArgs.Range(func(k, _ any) bool {
+		s.pendingArgs.Delete(k)
+		return true
+	})
+	s.pendingTitles.Range(func(k, _ any) bool {
+		s.pendingTitles.Delete(k)
+		return true
+	})
 }
 
 // touch records the session as active as of time t (atomic).

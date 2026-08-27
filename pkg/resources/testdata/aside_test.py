@@ -584,6 +584,13 @@ class TestAdvisorEscalation(unittest.TestCase):
             escalate=False,
         )
 
+        # Progress is front-loaded — clients truncate the spinner label to
+        # ~12 runes, so the tool name must come first, not "Calling ".
+        self.assertEqual(
+            ctx_gather.report_progress.call_args_list[0].args[0],
+            "Bash — Find large Go files",
+        )
+
         # Assertion: no model override in the side_query call (escalate=False).
         self.assertEqual(
             ctx_gather.side_query.call_args.kwargs,

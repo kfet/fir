@@ -1226,5 +1226,46 @@ class TestMetaChannel(unittest.TestCase):
         self.assertEqual(seen["cmd"], "use alpha")
 
 
+# ---------------------------------------------------------------------------
+# Progress strings
+# ---------------------------------------------------------------------------
+
+
+class TestProgressStrings(unittest.TestCase):
+    """Clients truncate the spinner label to ~12 runes, so the identifying
+    part of a progress message must come first."""
+
+    def setUp(self):
+        self.mod = _load_pipe()
+
+    def test_pipe_progress_leads_with_label_and_counter(self):
+        ctx = _make_ctx([_text_result("a"), _text_result("b")])
+        self.mod._run_pipe(
+            [{"tool": "Read", "params": {}}, {"tool": "Bash", "params": {}}], "sync", ctx
+        )
+        msgs = [c.args[0] for c in ctx.report_progress.call_args_list]
+        self.assertEqual(msgs, ["sync 1/2 Read", "sync 2/2 Bash"])
+
+    def test_pipe_progress_without_label_falls_back(self):
+        ctx = _make_ctx([_text_result("a")])
+        self.mod._run_pipe([{"tool": "Read", "params": {}}], "", ctx)
+        msgs = [c.args[0] for c in ctx.report_progress.call_args_list]
+        self.assertEqual(msgs, ["pipe 1/1 Read"])
+
+    def test_wait_prefix_uses_label(self):
+        self.assertEqual(self.mod._wait_prefix("rl-reset", 7, 60), "rl-reset 7/60")
+
+    def test_wait_prefix_without_label(self):
+        self.assertEqual(self.mod._wait_prefix("", 7, 60), "wait 7/60")
+
+    def test_probe_progress_starts_with_prefix(self):
+        ctx = _make_ctx([_text_result("WAIT:done")])
+        self.mod._run_probe(
+            [{"tool": "Bash", "params": {"command": "true"}}], "rl-reset 7/60", 7, "/tmp/s", ctx
+        )
+        msgs = [c.args[0] for c in ctx.report_progress.call_args_list]
+        self.assertEqual(msgs, ["rl-reset 7/60 Bash"])
+
+
 if __name__ == "__main__":
     unittest.main()

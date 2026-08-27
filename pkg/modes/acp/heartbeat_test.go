@@ -196,6 +196,98 @@ func TestToolExecutionUpdate_StatusMessageBecomesTitle(t *testing.T) {
 	}
 }
 
+// A cancelled turn never delivers tool end events; the per-call state kept for
+// those tool calls must not outlive the turn.
+func TestAgentEnd_ClearsPendingToolState(t *testing.T) {
+	t.Setenv("FIR_ACP_TOOL_HEARTBEAT", "0s")
+
+	mock := newMockConn()
+	pa := &firAgent{conn: mock, sessions: make(map[string]*firSession)}
+	entry := &firSession{termState: newTerminalState()}
+
+	pa.handleEvent("s1", entry, session.AgentSessionEvent{
+		AgentEvent: &agent.AgentEvent{
+			Type:       agent.EventToolExecutionStart,
+			ToolCallID: "tc-8",
+			ToolName:   "Bash",
+			Args:       map[string]any{"command": "sleep 600"},
+		},
+	})
+	if _, ok := entry.pendingTitles.Load("tc-8"); !ok {
+		t.Fatalf("expected pendingTitles to hold tc-8 while it runs")
+	}
+
+	pa.handleEvent("s1", entry, session.AgentSessionEvent{
+		AgentEvent: &agent.AgentEvent{Type: agent.EventAgentEnd},
+	})
+
+	if _, ok := entry.pendingTitles.Load("tc-8"); ok {
+		t.Fatalf("pendingTitles must be cleared when the turn ends")
+	}
+	if _, ok := entry.pendingArgs.Load("tc-8"); ok {
+		t.Fatalf("pendingArgs must be cleared when the turn ends")
+	}
+}
+
+// Progress updates overwrite the title, so the completion update must put the
+// original title back — a finished call must not read "rl-reset 7/60".
+func TestToolExecutionEnd_RestoresTitle(t *testing.T) {
+	t.Setenv("FIR_ACP_TOOL_HEARTBEAT", "0s")
+
+	mock := newMockConn()
+	pa := &firAgent{conn: mock, sessions: make(map[string]*firSession)}
+	entry := &firSession{termState: newTerminalState()}
+
+	start := session.AgentSessionEvent{
+		AgentEvent: &agent.AgentEvent{
+			Type:       agent.EventToolExecutionStart,
+			ToolCallID: "tc-7",
+			ToolName:   "Bash",
+			Args:       map[string]any{"command": "make all"},
+		},
+	}
+	pa.handleEvent("s1", entry, start)
+
+	var startTitle string
+	for _, u := range mock.getUpdates() {
+		if tc := u.Update.ToolCall; tc != nil && string(tc.ToolCallId) == "tc-7" {
+			startTitle = tc.Title
+		}
+	}
+	if startTitle == "" {
+		t.Fatalf("no tool_call start with a title emitted")
+	}
+
+	pa.handleEvent("s1", entry, session.AgentSessionEvent{
+		AgentEvent: &agent.AgentEvent{
+			Type:          agent.EventToolExecutionUpdate,
+			ToolCallID:    "tc-7",
+			ToolName:      "Bash",
+			StatusMessage: "rl-reset 7/60",
+		},
+	})
+	pa.handleEvent("s1", entry, session.AgentSessionEvent{
+		AgentEvent: &agent.AgentEvent{
+			Type:       agent.EventToolExecutionEnd,
+			ToolCallID: "tc-7",
+			ToolName:   "Bash",
+			Result:     "done",
+		},
+	})
+
+	updates := mock.getUpdates()
+	last := updates[len(updates)-1].Update.ToolCallUpdate
+	if last == nil || string(last.ToolCallId) != "tc-7" {
+		t.Fatalf("expected final update for tc-7, got %+v", updates[len(updates)-1].Update)
+	}
+	if last.Title == nil || *last.Title != startTitle {
+		t.Fatalf("final Title = %v, want %q", last.Title, startTitle)
+	}
+	if _, ok := entry.pendingTitles.Load("tc-7"); ok {
+		t.Fatalf("pendingTitles must be cleaned up after the call ends")
+	}
+}
+
 // An update with no status message must not clobber the tool call's title.
 func TestToolExecutionUpdate_NoStatusMessageLeavesTitleNil(t *testing.T) {
 	t.Setenv("FIR_ACP_TOOL_HEARTBEAT", "0s")

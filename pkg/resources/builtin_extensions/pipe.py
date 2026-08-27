@@ -393,15 +393,25 @@ def _inject_env(params: Any, poll: int, state_path: str) -> Any:
     return params
 
 
+def _wait_prefix(label: str, poll: int, max_polls: int) -> str:
+    """Front-loaded progress label, e.g. ``"rl-reset 7/60"``.
+
+    Clients truncate the spinner label to about 12 runes, so the caller's label
+    and the poll counter must come first."""
+    return f"{label or 'wait'} {poll}/{max_polls}"
+
+
 def _run_probe(
     steps: list[dict],
-    label: str,
+    prefix: str,
     poll: int,
-    max_polls: int,
     state_path: str,
     ctx: fir_ext.Context,
 ) -> tuple[bool, str, bool]:
     """Run the probe chain once (reusing pipe's execution path).
+
+    *prefix* is the already front-loaded progress label (see ``_wait_prefix``);
+    *poll* is the cumulative poll number exposed to the probe as ``$WAIT_POLL``.
 
     Returns ``(reached_verdict, verdict_text, verdict_is_error)`` where the
     verdict is the LAST step. ``reached_verdict`` is False if an earlier step
@@ -418,9 +428,7 @@ def _run_probe(
         params = _inject_env(params, poll, state_path)
         cont = bool(step.get("continue_on_error", False))
 
-        # Front-loaded: clients truncate the spinner label to ~12 runes, so the
-        # label and poll counter must come first (e.g. "rl-reset 7/60").
-        ctx.report_progress(f"{label or 'wait'} {poll}/{max_polls} {name}")
+        ctx.report_progress(f"{prefix} {name}")
 
         try:
             result = ctx.call_tool(name, params, **_step_call_kwargs(step))
@@ -651,7 +659,8 @@ def _run_wait(
         while True:
             polls += 1
             total += 1
-            reached, vtext, vis_error = _run_probe(steps, label, total, max_polls, state_path, ctx)
+            prefix = _wait_prefix(label, polls, max_polls)
+            reached, vtext, vis_error = _run_probe(steps, prefix, total, state_path, ctx)
             segment = _now() - start
             elapsed = prior_elapsed + segment
 
@@ -734,9 +743,7 @@ def _run_wait(
                     resume=handle,
                 )
 
-            ctx.report_progress(
-                f"{label or 'wait'} {total}/{max_polls} {int(elapsed)}s last={last_verdict}"
-            )
+            ctx.report_progress(f"{prefix} {int(elapsed)}s last={last_verdict}")
             _sleep_sliced(interval)
     finally:
         # A timeout hands ownership of the scratch file to its checkpoint;
