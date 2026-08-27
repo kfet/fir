@@ -1,6 +1,7 @@
 package interactive
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -24,6 +25,7 @@ import (
 	"github.com/kfet/fir/pkg/resources/clipboard"
 	"github.com/kfet/fir/pkg/session"
 	"github.com/kfet/fir/pkg/session/store"
+	"github.com/kfet/fir/pkg/update"
 	"github.com/kfet/tui"
 )
 
@@ -881,6 +883,74 @@ func TestInteractiveMode_ReexecCommand_BarePrompt(t *testing.T) {
 	}
 	if sc == nil || len(sc.QueueMessages) != 1 || sc.QueueMessages[0] != "rerun this task" {
 		t.Fatalf("QueueMessages = %#v, want [\"rerun this task\"]", sc)
+	}
+}
+
+// TestInteractiveMode_UpdateCommand_ReexecsIntoUpdatedBinary is the
+// regression test for "reexec failed: exec <dir>/.fir.old": the self-updater
+// renames the running binary to .<name>.old and deletes it, so the restart
+// must target the path SelfUpdate reports, not os.Executable().
+func TestInteractiveMode_UpdateCommand_ReexecsIntoUpdatedBinary(t *testing.T) {
+	tm := newTestModeWithSession(t)
+	tm.mode.session.SessionStore.AppendAIMessage(ai.NewUserMsg("persist", 0))
+
+	updated := filepath.Join(t.TempDir(), "fir")
+	if err := os.WriteFile(updated, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write binary: %v", err)
+	}
+
+	oldVersion := binaryVersion()
+	SetVersion("v1.0.0")
+	t.Cleanup(func() { SetVersion(oldVersion) })
+
+	tm.mode.fetchLatestRelease = func(context.Context) (*update.Release, error) {
+		return &update.Release{Version: "v999.0.0"}, nil
+	}
+	tm.mode.selfUpdate = func(context.Context, *update.Release) (string, error) {
+		return updated, nil
+	}
+
+	tm.mode.handleUpdateCommand()
+
+	if tm.mode.reexecBinary != updated {
+		t.Fatalf("reexecBinary = %q, want %q", tm.mode.reexecBinary, updated)
+	}
+	if len(tm.mode.reexecArgs) == 0 || tm.mode.reexecArgs[0] != updated {
+		t.Fatalf("reexecArgs = %v, want first arg %q", tm.mode.reexecArgs, updated)
+	}
+	self, err := os.Executable()
+	if err == nil && tm.mode.reexecBinary == self {
+		t.Fatalf("reexec target fell back to os.Executable() (%q)", self)
+	}
+}
+
+func TestInteractiveMode_UpdateCommand_NoReexecOnFailure(t *testing.T) {
+	tm := newTestModeWithSession(t)
+	tm.mode.session.SessionStore.AppendAIMessage(ai.NewUserMsg("persist", 0))
+
+	oldVersion := binaryVersion()
+	SetVersion("v1.0.0")
+	t.Cleanup(func() { SetVersion(oldVersion) })
+
+	tm.mode.fetchLatestRelease = func(context.Context) (*update.Release, error) {
+		return &update.Release{Version: "v999.0.0"}, nil
+	}
+	tm.mode.selfUpdate = func(context.Context, *update.Release) (string, error) {
+		return "", fmt.Errorf("download failed")
+	}
+
+	tm.mode.handleUpdateCommand()
+
+	if tm.mode.reexecBinary != "" {
+		t.Fatalf("reexecBinary = %q, want empty after a failed update", tm.mode.reexecBinary)
+	}
+}
+
+func TestInteractiveMode_ScheduleReexec_NoSession(t *testing.T) {
+	m := NewInteractiveMode(nil, nil, nil, InteractiveModeOptions{})
+	m.scheduleReexec("/bin/true", "")
+	if m.reexecBinary != "" {
+		t.Fatalf("reexecBinary = %q, want empty without a session", m.reexecBinary)
 	}
 }
 

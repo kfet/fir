@@ -150,38 +150,45 @@ func fetchLatestWithSource(ctx context.Context, source selfupdate.Source) (*Rele
 }
 
 // SelfUpdate downloads the release binary for the current platform and
-// atomically replaces the running executable.
-func SelfUpdate(ctx context.Context, rel *Release) error {
+// atomically replaces the running executable. It returns the path of the
+// replaced executable (symlinks resolved), which is the path a caller must
+// use to restart into the new binary.
+//
+// The path matters: the underlying updater renames the running binary to
+// <dir>/.<name>.old before moving the new one into place and then deletes
+// it, so after this call os.Executable() (i.e. /proc/self/exe) points at a
+// deleted file. Restarting must use the returned path, not os.Executable().
+func SelfUpdate(ctx context.Context, rel *Release) (string, error) {
 	if rel.inner == nil {
 		// Re-fetch to get asset URLs (cache-only releases don't have them).
 		fetched, err := FetchLatest(ctx)
 		if err != nil {
-			return err
+			return "", err
 		}
 		rel = fetched
 	}
 	if rel.inner == nil {
-		return fmt.Errorf("no release assets available")
+		return "", fmt.Errorf("no release assets available")
 	}
 
 	source, err := newGitHubSource("")
 	if err != nil {
-		return err
+		return "", err
 	}
 	updater, err := newUpdater(source)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	exePath, err := selfupdate.ExecutablePath()
 	if err != nil {
-		return fmt.Errorf("locate current executable: %w", err)
+		return "", fmt.Errorf("locate current executable: %w", err)
 	}
 
 	if err := updater.UpdateTo(ctx, rel.inner, exePath); err != nil {
-		return err
+		return "", err
 	}
-	return nil
+	return exePath, nil
 }
 
 // UpdateNotice returns a one-line message when a newer version is available.

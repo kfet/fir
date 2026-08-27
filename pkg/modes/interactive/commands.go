@@ -886,7 +886,7 @@ func (m *InteractiveMode) buildSessionInfoLines() []string {
 	var lines []string
 	lines = append(lines, t.Bold("Session Info"))
 	lines = append(lines, "")
-	lines = append(lines, t.Fg("dim", "Version: ")+version)
+	lines = append(lines, t.Fg("dim", "Version: ")+binaryVersion())
 	lines = append(lines, t.Fg("dim", "Mode: ")+"interactive")
 	if bin, err := os.Executable(); err == nil {
 		lines = append(lines, t.Fg("dim", "Binary: ")+bin)
@@ -1349,27 +1349,38 @@ func (m *InteractiveMode) handleUpdateCommand() {
 
 	m.showMessage("Checking for updates...")
 
+	fetchLatest := m.fetchLatestRelease
+	if fetchLatest == nil {
+		fetchLatest = update.FetchLatest
+	}
+	selfUpdate := m.selfUpdate
+	if selfUpdate == nil {
+		selfUpdate = update.SelfUpdate
+	}
+
 	checkCtx, cancelCheck := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancelCheck()
 
-	rel, err := update.FetchLatest(checkCtx)
+	rel, err := fetchLatest(checkCtx)
 	if err != nil {
 		m.showWarning(fmt.Sprintf("Failed to check for updates: %v", err))
 		return
 	}
 
-	if !update.IsNewer(rel.Version, version) {
-		m.showMessage(fmt.Sprintf("Already on the latest version (%s).", version))
+	cur := binaryVersion()
+	if !update.IsNewer(rel.Version, cur) {
+		m.showMessage(fmt.Sprintf("Already on the latest version (%s).", cur))
 		return
 	}
 
-	m.showMessage(fmt.Sprintf("Updating fir %s → %s...", version, rel.Version))
+	m.showMessage(fmt.Sprintf("Updating fir %s → %s...", cur, rel.Version))
 
 	// Separate, generous bound for the binary download so slow links don't
 	// trip a deadline mid-transfer (absolute cap, not a stall timer).
 	dlCtx, cancelDL := context.WithTimeout(context.Background(), 15*time.Minute)
 	defer cancelDL()
-	if err := update.SelfUpdate(dlCtx, rel); err != nil {
+	exePath, err := selfUpdate(dlCtx, rel)
+	if err != nil {
 		m.showWarning(fmt.Sprintf("Update failed: %v", err))
 		return
 	}
@@ -1377,17 +1388,16 @@ func (m *InteractiveMode) handleUpdateCommand() {
 	m.showMessage(fmt.Sprintf("Updated to fir %s. Restarting...", rel.Version))
 
 	// Give the user a moment to see the message, then reexec.
+	//
+	// Restart into exePath, NOT os.Executable(): the updater renamed the
+	// running binary to <dir>/.<name>.old and deleted it, so /proc/self/exe
+	// now resolves to a path that no longer exists.
 	time.Sleep(500 * time.Millisecond)
-	m.handleReexecCommand("/reexec")
+	m.scheduleReexec(exePath, "")
 }
 
 func (m *InteractiveMode) handleReexecCommand(text string) {
-	if m.session == nil {
-		m.showWarning("No session available")
-		return
-	}
-	if m.session.IsStreaming() {
-		m.showWarning("Wait for the current response to finish.")
+	if !m.reexecReady() {
 		return
 	}
 
@@ -1461,6 +1471,33 @@ func (m *InteractiveMode) handleReexecCommand(text string) {
 		binary = abs
 	}
 
+	m.scheduleReexec(binary, continuePrompt)
+}
+
+// reexecReady reports whether a reexec can be scheduled right now, warning
+// the user when it cannot.
+func (m *InteractiveMode) reexecReady() bool {
+	if m.session == nil {
+		m.showWarning("No session available")
+		return false
+	}
+	if m.session.IsStreaming() {
+		m.showWarning("Wait for the current response to finish.")
+		return false
+	}
+	return true
+}
+
+// scheduleReexec persists the session sidecar and records the intent to
+// exec into binary once Run() returns. binary must be an absolute, validated
+// path to the executable to restart into; callers that accept user input
+// validate it first, while the /update flow passes the path of the binary it
+// just replaced (see handleUpdateCommand).
+func (m *InteractiveMode) scheduleReexec(binary, continuePrompt string) {
+	if !m.reexecReady() {
+		return
+	}
+
 	sessionFile := m.session.SessionStore.GetSessionFile()
 	sessionDir := m.session.SessionStore.GetSessionDir()
 	if sessionFile == "" {
@@ -1507,6 +1544,15 @@ func (m *InteractiveMode) handleReexecCommand(text string) {
 func (m *InteractiveMode) ReexecIfRequested() {
 	if m.reexecBinary == "" {
 		return
+	}
+
+	// The binary can vanish between scheduling and exec (e.g. an external
+	// upgrade replacing it). Say something actionable rather than emitting a
+	// bare ENOENT from exec. Any other stat error falls through to exec,
+	// which reports the real errno.
+	if _, err := os.Stat(m.reexecBinary); os.IsNotExist(err) {
+		fmt.Fprintf(os.Stderr, "reexec failed: %s no longer exists (binary was replaced); the session was saved — restart fir manually to resume\n", m.reexecBinary)
+		os.Exit(1)
 	}
 
 	reexec.Exec(m.reexecBinary, m.reexecArgs)

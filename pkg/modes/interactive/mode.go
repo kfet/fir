@@ -30,11 +30,20 @@ import (
 	"github.com/kfet/tui"
 )
 
-// version is set via SetVersion before Run.
-var version = "dev"
+// version is set via SetVersion before Run. It is read from the TUI render
+// goroutine, so it is stored atomically.
+var version atomic.Pointer[string]
 
 // SetVersion sets the version string shown by /session.
-func SetVersion(v string) { version = v }
+func SetVersion(v string) { version.Store(&v) }
+
+// binaryVersion returns the version string set via SetVersion ("dev" if unset).
+func binaryVersion() string {
+	if v := version.Load(); v != nil {
+		return *v
+	}
+	return "dev"
+}
 
 // InteractiveMode manages the interactive TUI session.
 type InteractiveMode struct {
@@ -111,6 +120,11 @@ type InteractiveMode struct {
 	reexecBinary   string
 	reexecArgs     []string
 	lastEscapeTime time.Time
+
+	// Self-update seams. Nil means "use the real thing"; tests override them
+	// to exercise /update without touching the network or the binary.
+	fetchLatestRelease func(context.Context) (*update.Release, error)
+	selfUpdate         func(context.Context, *update.Release) (string, error)
 
 	// reexecSidecar is the full sidecar read during Init(); consumed by
 	// restoreReexecSidecar in Run().  ReexecExtData() exposes the extension

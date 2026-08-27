@@ -707,7 +707,7 @@ func runUpdate() error {
 	// stall timer, so keep it large enough for a multi-MB binary on a slow net.
 	dlCtx, cancelDL := context.WithTimeout(context.Background(), 15*time.Minute)
 	defer cancelDL()
-	if err := update.SelfUpdate(dlCtx, rel); err != nil {
+	if _, err := update.SelfUpdate(dlCtx, rel); err != nil {
 		return fmt.Errorf("update failed: %w", err)
 	}
 
