@@ -2,8 +2,13 @@
 
 ## [Unreleased]
 
+## [1.2.2] - 2026-08-27
+
 ### Fixed
 - **`/update` failed to restart, dying with `reexec failed: exec …/.fir.old`.** The self-updater renames the running binary to `.<name>.old`, moves the new one into place and deletes the old file — so by the time the restart ran, `os.Executable()` (`/proc/self/exe`) pointed at a deleted path. The update flow now restarts into the path `SelfUpdate` reports it replaced, so the queued messages and extension state saved for the restart are actually consumed. If a reexec target has vanished anyway, fir now says the binary was replaced and to restart manually instead of emitting a bare exec failure.
+
+### Changed
+- **Model catalog regenerated** at release time: routine upstream refresh of model ids, pricing and limits.
 
 ## [1.2.1] - 2026-08-27
 
