@@ -8,8 +8,33 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/kfet/fir/pkg/config"
+	firpkg "github.com/kfet/fir/pkg/pkg"
 	"github.com/kfet/fir/pkg/resources"
 )
+
+// loadCLISkills loads skills exactly the way a live session does: user +
+// project + builtin defaults, plus the extra dirs/files from settings.json
+// ("skills": [...]) and any installed packages. Without this the CLI silently
+// ignored configured skill paths that the agent itself could see.
+func loadCLISkills() []resources.Skill {
+	cwd, _ := os.Getwd()
+	agentDir := resolveAgentDir()
+	sm := config.NewSettingsManager(cwd, agentDir)
+	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{
+		Cwd:             cwd,
+		AgentDir:        agentDir,
+		SettingsManager: sm,
+		PackageResolver: firpkg.New(agentDir, cwd, sm),
+	})
+	if err := rl.Reload(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: load resources: %v\n", err)
+	}
+	skills, _ := rl.GetSkills()
+	out := make([]resources.Skill, len(skills))
+	copy(out, skills)
+	return out
+}
 
 // runSkills implements the "fir skills" subcommand family.
 func runSkills() error {
@@ -63,16 +88,7 @@ func runSkills() error {
 
 // runSkillsList lists all loaded skills in a table.
 func runSkillsList() error {
-	cwd, _ := os.Getwd()
-	agentDir := resolveAgentDir()
-
-	result := resources.LoadSkills(resources.LoadSkillsOptions{
-		Cwd:             cwd,
-		AgentDir:        agentDir,
-		IncludeDefaults: true,
-	})
-
-	skills := result.Skills
+	skills := loadCLISkills()
 	sort.Slice(skills, func(i, j int) bool {
 		if skills[i].Name != skills[j].Name {
 			return skills[i].Name < skills[j].Name
@@ -197,25 +213,19 @@ func runSkillsInstall(name string, user, force bool) error {
 
 // runSkillsShow prints metadata (and optionally the body) for a single skill.
 func runSkillsShow(name string, full, pathOnly bool) error {
-	cwd, _ := os.Getwd()
-	agentDir := resolveAgentDir()
-	result := resources.LoadSkills(resources.LoadSkillsOptions{
-		Cwd:             cwd,
-		AgentDir:        agentDir,
-		IncludeDefaults: true,
-	})
+	allSkills := loadCLISkills()
 
 	// Match by ID first (exact), then by bare name. If the bare name is
 	// ambiguous (multiple origins), require the caller to disambiguate.
 	var match *resources.Skill
 	var byName []*resources.Skill
-	for i := range result.Skills {
-		if result.Skills[i].ID == name {
-			match = &result.Skills[i]
+	for i := range allSkills {
+		if allSkills[i].ID == name {
+			match = &allSkills[i]
 			break
 		}
-		if result.Skills[i].Name == name {
-			byName = append(byName, &result.Skills[i])
+		if allSkills[i].Name == name {
+			byName = append(byName, &allSkills[i])
 		}
 	}
 	if match == nil && len(byName) == 1 {
@@ -232,7 +242,7 @@ func runSkillsShow(name string, full, pathOnly bool) error {
 	if match == nil {
 		var suggestions []string
 		needle := strings.ToLower(name)
-		for _, s := range result.Skills {
+		for _, s := range allSkills {
 			if strings.Contains(strings.ToLower(s.Name), needle) || strings.Contains(strings.ToLower(s.ID), needle) {
 				suggestions = append(suggestions, s.ID)
 			}

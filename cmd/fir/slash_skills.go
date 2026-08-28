@@ -12,7 +12,6 @@ package main
 
 import (
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 
@@ -37,14 +36,7 @@ func hasSlashSkillPrefix(s string) bool {
 // loadAllSkills returns every discoverable skill (project + user + builtin),
 // sorted by ID. Same-named skills are kept (each carries a unique ID).
 func loadAllSkills() []resources.Skill {
-	cwd, _ := os.Getwd()
-	res := resources.LoadSkills(resources.LoadSkillsOptions{
-		Cwd:             cwd,
-		AgentDir:        resolveAgentDir(),
-		IncludeDefaults: true,
-	})
-	out := make([]resources.Skill, len(res.Skills))
-	copy(out, res.Skills)
+	out := loadCLISkills()
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
 }
