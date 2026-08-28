@@ -230,7 +230,8 @@ func (sa *serverAuth) matches(cfg ServerConfig) bool {
 		want.Token == sa.cfg.Token &&
 		want.ClientID == sa.cfg.ClientID &&
 		want.ClientSecret == sa.cfg.ClientSecret &&
-		slices.Equal(want.Scopes, sa.cfg.Scopes)
+		slices.Equal(want.Scopes, sa.cfg.Scopes) &&
+		slices.Equal(want.AuthorizationServers, sa.cfg.AuthorizationServers)
 }
 
 // ensureLoadedLocked lazily pulls the persisted credential. Called with mu held.
@@ -241,9 +242,51 @@ func (sa *serverAuth) ensureLoadedLocked() {
 	sa.loaded = true
 	sa.cred = sa.store.Load(sa.name, sa.resource)
 	sa.gen++
+	if sa.cred != nil && !sa.credIssuerAllowed(sa.cred.Issuer) {
+		// The user has since forced a different authorization server. The
+		// stored token was minted by the old issuer and must not be reused —
+		// matches() only catches that within one process, because a restart
+		// rebuilds serverAuth from the new config and has nothing to compare
+		// against. Drop it from memory only: the store's resource binding is
+		// its own invariant, and leaving the row alone means flipping the
+		// forced issuer back restores a still-valid refresh token instead of
+		// forcing a gratuitous browser trip. The next login overwrites it.
+		firlog.Debug("mcp oauth: discarding credential minted by a non-forced issuer",
+			"server", sa.name, "issuer", sa.cred.Issuer)
+		sa.cred = nil
+	}
 	if sa.cred != nil {
 		firlog.Debug("mcp oauth: loaded stored credential", "server", sa.name)
 	}
+}
+
+// credIssuerAllowed reports whether a stored credential's recorded issuer is
+// one the current config would use. It is a no-op unless authorization servers
+// are forced: without a forced list any issuer is by definition the one
+// discovery would have picked.
+//
+// Comparison is on canonicalResource of both sides, which absorbs the
+// cosmetic differences a hand-written config can have against the issuer the
+// authorization server reports (trailing slash, default port, case). It cannot
+// be looser than that: oauthex enforces the RFC 8414 issuer match at login, so
+// a credential minted under a forced entry records exactly that issuer. An
+// empty recorded issuer means unknown provenance and is refused.
+func (sa *serverAuth) credIssuerAllowed(issuer string) bool {
+	if len(sa.cfg.AuthorizationServers) == 0 {
+		return true
+	}
+	got, err := canonicalResource(issuer)
+	if err != nil {
+		// Includes the empty issuer: canonicalResource rejects a URL with no
+		// scheme or host, so unknown provenance lands here.
+		return false
+	}
+	for _, want := range sa.cfg.AuthorizationServers {
+		if c, err := canonicalResource(want); err == nil && c == got {
+			return true
+		}
+	}
+	return false
 }
 
 // acquire takes the auth lock, honouring ctx. It fails immediately when an
@@ -422,6 +465,10 @@ func (sa *serverAuth) forget() {
 // Persisting immediately is not optional: many authorization servers rotate
 // the refresh token on every use, and dropping the rotated value would strand
 // the user at the next restart.
+//
+// No issuer check is needed here: a credential only reaches this point after
+// ensureLoadedLocked's gate, so its TokenURL belongs to an issuer the current
+// config permits.
 func (sa *serverAuth) refreshLocked(ctx context.Context) error {
 	if sa.cred == nil || sa.cred.Token == nil || sa.cred.Token.RefreshToken == "" {
 		return errors.New("no refresh token")
@@ -558,9 +605,19 @@ func (sa *serverAuth) loginLocked(ctx context.Context, ui pinoauth.LoginCallback
 	progress(ui, fmt.Sprintf("Discovering OAuth configuration for %s…", sa.resource))
 	prm, err := discoverResourceMetadata(ctx, sa.hc, sa.resource, sa.challenge)
 	if err != nil {
-		return err
+		if len(sa.cfg.AuthorizationServers) == 0 {
+			return err
+		}
+		// Forced issuers: the protected-resource metadata is exactly what the
+		// user is routing around, so its absence must not abort the login. It
+		// is still attempted rather than skipped, because scopes_supported is
+		// useful even when authorization_servers is not; resolveScope
+		// tolerates the nil.
+		firlog.Debug("mcp oauth: ignoring protected-resource metadata failure, issuers are forced",
+			"server", sa.name, "err", err)
+		prm = nil
 	}
-	asm, err := discoverAuthServer(ctx, sa.hc, issuerCandidates(sa.resource, prm))
+	asm, err := discoverAuthServer(ctx, sa.hc, sa.resolveIssuers(prm))
 	if err != nil {
 		return err
 	}
@@ -667,6 +724,19 @@ func (sa *serverAuth) resolveScope(prm *oauthex.ProtectedResourceMetadata) strin
 		return strings.Join(prm.ScopesSupported, " ")
 	}
 	return ""
+}
+
+// resolveIssuers picks the authorization-server issuers to try, in order. An
+// explicitly configured list wins outright — it *replaces* the candidates the
+// protected-resource metadata would yield rather than extending them, because
+// it exists precisely for servers whose metadata is absent, wrong or
+// unreachable. Otherwise the normal chain applies: the PRM's
+// authorization_servers, else the resource's own origin.
+func (sa *serverAuth) resolveIssuers(prm *oauthex.ProtectedResourceMetadata) []string {
+	if len(sa.cfg.AuthorizationServers) > 0 {
+		return sa.cfg.AuthorizationServers
+	}
+	return issuerCandidates(sa.resource, prm)
 }
 
 // authorizeParams are the inputs to the authorization-endpoint URL.

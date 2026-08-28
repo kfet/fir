@@ -4,7 +4,9 @@ package mcp
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -73,6 +75,17 @@ type AuthConfig struct {
 	// protected-resource metadata's scopes_supported, and otherwise omits the
 	// scope parameter entirely.
 	Scopes []string `json:"scopes,omitempty"`
+	// AuthorizationServers forces the OAuth issuer(s) to use, for servers
+	// whose RFC 9728 protected-resource metadata is absent, wrong or
+	// unreachable. When non-empty it *replaces* the candidate list derived
+	// from that metadata — it is not merged with it — and the entries are
+	// tried in order, the first one publishing usable RFC 8414 / OpenID
+	// Connect metadata winning. Each entry must be an https URL (http is
+	// allowed only for loopback) with no query or fragment.
+	//
+	// Only meaningful when the resolved mode runs the OAuth chain, i.e.
+	// AuthModeAuto or AuthModeOAuth.
+	AuthorizationServers []string `json:"authorization_servers,omitempty"`
 }
 
 // ResolveMode returns the effective AuthMode for a config, applying the
@@ -92,7 +105,8 @@ func (a *AuthConfig) Validate() error {
 	if a == nil {
 		return nil
 	}
-	switch a.ResolveMode() {
+	mode := a.ResolveMode()
+	switch mode {
 	case AuthModeAuto, AuthModeOAuth, AuthModeNone:
 	case AuthModeBearer:
 		if expandEnvRef(a.Token) == "" {
@@ -101,7 +115,46 @@ func (a *AuthConfig) Validate() error {
 	default:
 		return fmt.Errorf("unsupported auth.mode %q; valid values: oauth, bearer, none", a.Mode)
 	}
+	if len(a.AuthorizationServers) > 0 {
+		// Nothing in bearer or none mode ever runs the OAuth chain, so a
+		// forced issuer list there is silently dead config. Say so instead.
+		// Note this fires for {"token": …, "authorization_servers": […]},
+		// which infers bearer mode — that ambiguity deserves a loud error.
+		if mode == AuthModeBearer || mode == AuthModeNone {
+			return fmt.Errorf("auth.authorization_servers is not used in mode %q; remove it or use mode %q", mode, AuthModeOAuth)
+		}
+		for _, issuer := range a.AuthorizationServers {
+			if err := validateIssuerURL(issuer); err != nil {
+				return fmt.Errorf("auth.authorization_servers: %w", err)
+			}
+		}
+	}
 	return nil
+}
+
+// validateIssuerURL checks one forced authorization-server issuer. The URL
+// rules mirror requireSecureTransport (https, or http on loopback for local
+// dev) plus RFC 8414 §2, which forbids query and fragment components in an
+// issuer identifier — a query string would also silently break the well-known
+// path derivation in asCandidates.
+func validateIssuerURL(issuer string) error {
+	if issuer == "" {
+		return errors.New("entries must not be empty")
+	}
+	u, err := url.Parse(issuer)
+	if err != nil {
+		return fmt.Errorf("parse %q: %w", issuer, err)
+	}
+	if u.Scheme == "" || u.Hostname() == "" {
+		return fmt.Errorf("%q must be an absolute URL with a host", issuer)
+	}
+	if u.RawQuery != "" || u.Fragment != "" {
+		return fmt.Errorf("%q must not carry a query or fragment (RFC 8414 §2)", issuer)
+	}
+	if u.Scheme == "https" || (u.Scheme == "http" && isLoopbackHost(u.Hostname())) {
+		return nil
+	}
+	return fmt.Errorf("%q must use https (http is allowed only for loopback)", issuer)
 }
 
 // BearerToken returns the resolved static bearer token, expanding a ${VAR} or

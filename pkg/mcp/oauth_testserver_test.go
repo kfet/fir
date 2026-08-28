@@ -365,6 +365,10 @@ type mcpOptions struct {
 	// forbid answers every request with 403 rather than 401, modelling an
 	// authenticated-but-insufficiently-authorized caller.
 	forbid bool
+	// bogusAuthServers, when non-empty, is advertised as the PRM's
+	// authorization_servers instead of the real fake AS, modelling a server
+	// whose metadata names an issuer that does not work.
+	bogusAuthServers []string
 }
 
 // fakeMCPServer is an MCP server behind a bearer-token gate, with RFC 9728
@@ -409,7 +413,9 @@ func newFakeMCPServer(t *testing.T, as *fakeAuthServer, opts mcpOptions) *fakeMC
 			return
 		}
 		body := map[string]any{"resource": fms.resource()}
-		if as != nil {
+		if len(opts.bogusAuthServers) > 0 {
+			body["authorization_servers"] = opts.bogusAuthServers
+		} else if as != nil {
 			body["authorization_servers"] = []string{as.URL()}
 		}
 		if len(opts.scopes) > 0 {

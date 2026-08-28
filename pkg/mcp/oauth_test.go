@@ -702,6 +702,8 @@ func TestAuthConfigRoundTripsThroughJSON(t *testing.T) {
 	    "pat":    {"transport": "streamable", "url": "https://b.example/mcp", "auth": {"token": "${TOK}"}},
 	    "client": {"transport": "streamable", "url": "https://c.example/mcp",
 	               "auth": {"client_id": "cid", "scopes": ["x", "y"]}},
+	    "forced": {"transport": "streamable", "url": "https://e.example/mcp",
+	               "auth": {"authorization_servers": ["https://as.example"]}},
 	    "off":    {"transport": "streamable", "url": "https://d.example/mcp", "auth": {"mode": "none"}}
 	  }
 	}`), 0o600))
@@ -712,6 +714,8 @@ func TestAuthConfigRoundTripsThroughJSON(t *testing.T) {
 	require.Equal(t, "${TOK}", cfg.MCPServers["pat"].Auth.Token)
 	require.Equal(t, AuthModeBearer, cfg.MCPServers["pat"].Auth.ResolveMode())
 	require.Equal(t, []string{"x", "y"}, cfg.MCPServers["client"].Auth.Scopes)
+	require.Equal(t, []string{"https://as.example"}, cfg.MCPServers["forced"].Auth.AuthorizationServers)
+	require.Equal(t, AuthModeAuto, cfg.MCPServers["forced"].Auth.ResolveMode())
 	require.Equal(t, AuthModeNone, cfg.MCPServers["off"].Auth.ResolveMode())
 
 	// A config change must invalidate cached auth state (URL binding).
@@ -1086,4 +1090,178 @@ func TestMCPOAuth_ChallengeHeaderPointsDiscoveryAtANonStandardPath(t *testing.T)
 	registrations, _, issued := as.counters()
 	require.Equal(t, 1, registrations)
 	require.Equal(t, 1, issued)
+}
+
+// --- Forced authorization servers ------------------------------------------
+
+func TestResolveIssuersPrecedence(t *testing.T) {
+	sa := &serverAuth{resource: "https://mcp.example.com/mcp"}
+	// No PRM at all: fall back to the resource's own origin.
+	require.Equal(t, []string{"https://mcp.example.com"}, sa.resolveIssuers(nil))
+
+	prm := &oauthex.ProtectedResourceMetadata{
+		AuthorizationServers: []string{"https://advertised.example"},
+	}
+	require.Equal(t, []string{"https://advertised.example"}, sa.resolveIssuers(prm))
+
+	// A configured list replaces the advertised one outright — not merged.
+	sa.cfg.AuthorizationServers = []string{"https://forced.example", "https://backup.example"}
+	require.Equal(t, []string{"https://forced.example", "https://backup.example"}, sa.resolveIssuers(prm))
+	require.Equal(t, []string{"https://forced.example", "https://backup.example"}, sa.resolveIssuers(nil))
+}
+
+func TestMCPOAuth_ForcedAuthorizationServersOverrideWrongMetadata(t *testing.T) {
+	// The MCP server advertises an issuer that does not work; the forced list
+	// names the one that does. A successful login proves the config won.
+	as := newFakeAuthServer(t, asOptions{})
+	srv := newFakeMCPServer(t, as, mcpOptions{
+		bogusAuthServers: []string{"https://wrong.invalid"},
+	})
+
+	mgr, _ := newTestManager(t, srv.config(&AuthConfig{
+		AuthorizationServers: []string{as.URL()},
+	}))
+	require.NoError(t, loginAndConnect(t, mgr, browserCallbacks(t, nil)))
+	requireToolsWork(t, mgr)
+
+	registrations, _, issued := as.counters()
+	require.Equal(t, 1, registrations)
+	require.Equal(t, 1, issued)
+}
+
+func TestMCPOAuth_ForcedAuthorizationServersSurviveMissingResourceMetadata(t *testing.T) {
+	// No RFC 9728 document anywhere and no challenge header to point at one:
+	// discovery has nothing to go on but the forced list.
+	as := newFakeAuthServer(t, asOptions{})
+	srv := newFakeMCPServer(t, as, mcpOptions{noPRM: true, noChallenge: true})
+
+	mgr, _ := newTestManager(t, srv.config(&AuthConfig{
+		Mode:                 AuthModeOAuth,
+		AuthorizationServers: []string{as.URL()},
+		Scopes:               []string{"mcp:read"},
+	}))
+	require.NoError(t, loginAndConnect(t, mgr, browserCallbacks(t, nil)))
+	requireToolsWork(t, mgr)
+
+	_, _, issued := as.counters()
+	require.Equal(t, 1, issued)
+}
+
+func TestMCPOAuth_ForcedIssuerChangeInvalidatesStoredCredential(t *testing.T) {
+	const resource = "https://mcp.example.com/mcp"
+	storage := auth.NewAuthStorage(filepath.Join(t.TempDir(), "auth.json"))
+	store := newCredentialStore(storage)
+
+	save := func(issuer string) {
+		require.NoError(t, store.Save("srv", &oauthCredential{
+			Resource: resource,
+			Issuer:   issuer,
+			TokenURL: "https://forced.example/token",
+			Token: &pinoauth.Token{
+				AccessToken: "stored-token", RefreshToken: "r",
+				ExpiresAt: time.Now().Add(time.Hour),
+			},
+		}))
+	}
+	newAuthMode := func(mode AuthMode, forced []string) *serverAuth {
+		sa, err := newServerAuth("srv", ServerConfig{
+			Transport: "streamable", URL: resource,
+			Auth: &AuthConfig{Mode: mode, AuthorizationServers: forced},
+		}, store)
+		require.NoError(t, err)
+		return sa
+	}
+	newAuth := func(forced []string) *serverAuth {
+		return newAuthMode(AuthModeAuto, forced)
+	}
+	load := func(sa *serverAuth) *oauthCredential {
+		sa.mu.lock()
+		defer sa.mu.unlock()
+		sa.ensureLoadedLocked()
+		return sa.cred
+	}
+
+	// A credential minted by a forced issuer is reused. The trailing slash
+	// proves the comparison is canonicalised rather than byte-exact.
+	save("https://forced.example")
+	cred := load(newAuth([]string{"https://forced.example/", "https://other.example"}))
+	require.NotNil(t, cred)
+	require.Equal(t, "stored-token", cred.Token.AccessToken)
+
+	// The user repoints the forced list: the old credential must not be used.
+	sa := newAuth([]string{"https://elsewhere.example"})
+	require.Nil(t, load(sa))
+	// …but it is only dropped from memory, so flipping back restores it.
+	require.True(t, storage.Has(storageKey("srv")), "the stored row is left alone")
+	require.NotNil(t, load(newAuth([]string{"https://forced.example"})))
+
+	// A credential with no recorded issuer has unknown provenance.
+	save("")
+	require.Nil(t, load(newAuth([]string{"https://forced.example"})))
+	// With nothing forced, any issuer is by definition what discovery picked.
+	require.NotNil(t, load(newAuth(nil)))
+
+	// An unusable stored credential leaves the auth state demanding a login
+	// rather than silently sending an unauthenticated request.
+	save("https://forced.example")
+	sa = newAuthMode(AuthModeOAuth, []string{"https://elsewhere.example"})
+	_, _, err := sa.accessToken(context.Background())
+	var authErr *AuthRequiredError
+	require.ErrorAs(t, err, &authErr)
+	require.Equal(t, "no stored credential", authErr.Reason)
+}
+
+func TestAuthConfigValidateAuthorizationServers(t *testing.T) {
+	ok := func(servers ...string) error {
+		return (&AuthConfig{AuthorizationServers: servers}).Validate()
+	}
+	require.NoError(t, ok("https://as.example"))
+	require.NoError(t, ok("https://as.example/tenant/1", "https://backup.example"))
+	require.NoError(t, ok("http://localhost:9000"), "loopback http is allowed for local dev")
+	require.NoError(t, ok("http://127.0.0.1:9000/as"))
+	require.NoError(t, (&AuthConfig{
+		Mode: AuthModeOAuth, AuthorizationServers: []string{"https://as.example"},
+	}).Validate())
+
+	require.ErrorContains(t, ok(""), "must not be empty")
+	require.ErrorContains(t, ok("as.example"), "must be an absolute URL")
+	// A port with no host: url.Host is ":443" and passes a bare non-empty
+	// check, so the guard is on Hostname() instead.
+	require.ErrorContains(t, ok("https://:443"), "must be an absolute URL")
+	require.ErrorContains(t, ok("://nope"), "auth.authorization_servers")
+	require.ErrorContains(t, ok("http://as.example"), "must use https")
+	require.ErrorContains(t, ok("https://as.example?tenant=1"), "query or fragment")
+	require.ErrorContains(t, ok("https://as.example#frag"), "query or fragment")
+
+	// Meaningless where the OAuth chain never runs — including the bearer
+	// mode inferred from a bare token, which would otherwise ignore it.
+	for _, a := range []*AuthConfig{
+		{Mode: AuthModeBearer, Token: "t", AuthorizationServers: []string{"https://as.example"}},
+		{Token: "t", AuthorizationServers: []string{"https://as.example"}},
+		{Mode: AuthModeNone, AuthorizationServers: []string{"https://as.example"}},
+	} {
+		require.ErrorContains(t, a.Validate(), "auth.authorization_servers is not used in mode")
+	}
+
+	// The field participates in cached-credential invalidation.
+	cfg := ServerConfig{Transport: "streamable", URL: "https://mcp.example.com/mcp",
+		Auth: &AuthConfig{AuthorizationServers: []string{"https://as.example"}}}
+	sa, err := newServerAuth("srv", cfg, credentialStore{})
+	require.NoError(t, err)
+	require.True(t, sa.matches(cfg))
+	changed := cfg
+	changed.Auth = &AuthConfig{AuthorizationServers: []string{"https://other.example"}}
+	require.False(t, sa.matches(changed))
+	dropped := cfg
+	dropped.Auth = nil
+	require.False(t, sa.matches(dropped))
+
+	// The validation is not merely advisory: newServerAuth is the only
+	// production constructor of the state that reaches resolveIssuers, and it
+	// refuses a bad entry, so an unvalidated issuer can never be dialled.
+	bad := cfg
+	bad.Auth = &AuthConfig{AuthorizationServers: []string{"http://evil.example"}}
+	_, err = newServerAuth("srv", bad, credentialStore{})
+	require.ErrorContains(t, err, `server "srv"`)
+	require.ErrorContains(t, err, "must use https")
 }

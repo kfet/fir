@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Added
+- **`auth.authorization_servers` for remote MCP servers.** An ordered list of OAuth issuer URLs that *replaces* the ones a server advertises in its RFC 9728 protected-resource metadata, for servers whose metadata is absent, wrong or unreachable. When set, a failed metadata fetch is no longer fatal (scope discovery still uses the document when it is there), and a stored token minted by an issuer no longer on the list is never reused — including across a restart.
+
 ## [1.2.2] - 2026-08-27
 
 ### Fixed

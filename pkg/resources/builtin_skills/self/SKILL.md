@@ -528,11 +528,14 @@ These tools make teleoperation cheap, which is a trap: for substantial work on a
         "no-dcr":      {"transport": "streamable", "url": "https://b.example/mcp",
                         "auth": {"client_id": "abc123", "scopes": ["mcp:read"]}},
         "no-auth":     {"transport": "streamable", "url": "https://c.example/mcp",
-                        "auth": {"mode": "none"}}
+                        "auth": {"mode": "none"}},
+        "bad-metadata":{"transport": "streamable", "url": "https://d.example/mcp",
+                        "auth": {"authorization_servers": ["https://login.d.example"],
+                                 "scopes": ["mcp:read"]}}
       }
     }
     ```
-    `mode` is `oauth` (force login before the first request), `bearer` (static token; inferred when `token` is set), or `none` (opt out entirely — a 401 surfaces verbatim). `token` accepts `${VAR}`/`$VAR` so a secret need not be written to disk. `client_id`/`client_secret` cover authorization servers without dynamic registration. `scopes` overrides the scope fir requests (otherwise: challenge `scope`, then `scopes_supported`, then no `scope` parameter at all).
+    `mode` is `oauth` (force login before the first request), `bearer` (static token; inferred when `token` is set), or `none` (opt out entirely — a 401 surfaces verbatim). `token` accepts `${VAR}`/`$VAR` so a secret need not be written to disk. `client_id`/`client_secret` cover authorization servers without dynamic registration. `scopes` overrides the scope fir requests (otherwise: challenge `scope`, then `scopes_supported`, then no `scope` parameter at all). `authorization_servers` forces the OAuth issuer(s) for a server whose protected-resource metadata is absent, wrong or unreachable — it *replaces* the advertised list (tried in order, https-or-loopback, no query/fragment), makes a failed metadata fetch non-fatal, and invalidates any stored token minted by an issuer no longer on the list; it is rejected in `bearer`/`none` mode, where the OAuth chain never runs.
 - **MCP inspection** — use `/mcp` to see all configured MCP servers with their connection status, transport, capabilities (resources, prompts), and a full list of exposed tools with descriptions. Use `/mcp <name>` for detailed info about a specific server. Use `/mcp reload` to re-read `mcp.json` and `mcp.d/*.json` configs from disk and apply the diff to running servers without a full session reload; it reports collisions when multiple files define the same server name.
 
 ## settings.json Reference

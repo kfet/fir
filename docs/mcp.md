@@ -167,6 +167,16 @@ Every field is an escape hatch. Omit the whole object unless you need one.
 | `client_id` | string | Pre-registered OAuth client, for authorization servers without dynamic registration |
 | `client_secret` | string | Accompanies `client_id` for confidential clients. Native apps normally have none. Supports `${VAR}` expansion |
 | `scopes` | array of strings | Overrides the requested scope. Otherwise fir uses the challenge's `scope`, then the protected resource's `scopes_supported`, and otherwise omits the `scope` parameter entirely |
+| `authorization_servers` | array of strings | Forces the OAuth issuer(s), for servers whose `/.well-known/oauth-protected-resource` document is absent, wrong or unreachable. **Replaces** the advertised `authorization_servers` list — it is not merged with it. Tried in order; the first issuer publishing usable RFC 8414 / OpenID Connect metadata wins. Each entry must be an `https` URL (plain `http` only for loopback) with no query or fragment. Only valid where the OAuth chain actually runs — the default mode or `"oauth"`; it is rejected with `"bearer"` and `"none"` |
+
+When the metadata is wrong about the issuer it is often wrong about `scopes_supported` too, so
+`authorization_servers` is usually paired with `scopes`. fir still *attempts* the
+protected-resource fetch when issuers are forced — it is the only source of advertised scopes —
+but a failure is no longer fatal.
+
+Changing `authorization_servers` invalidates any stored token for that server: a credential
+minted by an issuer no longer on the list is never reused, even across a restart. The stored row
+is left in place, so putting the old issuer back recovers the credential without a fresh login.
 
 ```json
 {
@@ -185,6 +195,14 @@ Every field is an escape hatch. Omit the whole object unless you need one.
       "transport": "streamable",
       "url": "https://c.example/mcp",
       "auth": {"mode": "none"}
+    },
+    "bad-metadata": {
+      "transport": "streamable",
+      "url": "https://d.example/mcp",
+      "auth": {
+        "authorization_servers": ["https://login.d.example"],
+        "scopes": ["mcp:read"]
+      }
     }
   }
 }
