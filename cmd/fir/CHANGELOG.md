@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- **`fir update` corrupted Homebrew installs.** On a brew-managed install (`brew install kfet/ai/fir`), `/opt/homebrew/bin/fir` is a symlink into the Cellar, so self-update rewrote the binary *inside the keg* while Homebrew still recorded the old version — the next `brew upgrade` silently reverted it. `fir update` now detects a brew-managed executable and delegates to `brew update && brew upgrade kfet/ai/fir`, streaming brew's output. Detection is deliberately conservative (anything uncertain falls through to self-update); the sole hard failure is a Cellar-resident binary with no `brew` on PATH, which stops with an explanation rather than corrupting the keg.
+
 ## [1.3.4] - 2026-08-29
 
 ### Changed

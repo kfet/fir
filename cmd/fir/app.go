@@ -685,6 +685,23 @@ func run() error {
 // Downloads and replaces the running binary from the latest GitHub release.
 func runUpdate() error {
 
+	// A brew-managed install must be upgraded by brew: self-updating would
+	// rewrite the binary inside the Cellar behind Homebrew's back, and the
+	// next `brew upgrade` would silently revert it. Detection is conservative
+	// — anything uncertain falls through to the self-update path below.
+	detectCtx, cancelDetect := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancelDetect()
+	if inst, err := update.DetectBrewInstall(detectCtx); err == nil && inst != nil {
+		fmt.Fprintf(os.Stderr,
+			"fir is Homebrew-managed (%s); upgrading via brew instead of self-update.\n",
+			inst.Formula)
+		// No timeout: `brew upgrade` can legitimately run for minutes.
+		if err := update.UpgradeViaBrew(context.Background(), inst, os.Stdout, os.Stderr); err != nil {
+			return fmt.Errorf("update failed: %w", err)
+		}
+		return nil
+	}
+
 	// Short bound for the metadata/version check.
 	checkCtx, cancelCheck := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancelCheck()
