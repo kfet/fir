@@ -134,21 +134,27 @@ so this holds today; a root-based CI image would break it. Recorded in
 
 ## Commits
 
+Hashes are deliberately not listed — they change on every rebase, and this
+file has already carried a stale set once. Run `git log --oneline main..HEAD`.
+The subjects, in order:
+
 ```
-198130c7 refactor(pkg): delete dead code and dedupe the local-path seam
-405a6623 fix(pkg): make install dedup agree with uninstall on unreadable entries
-18b430e0 test(pkg): take pkg/pkg to 100% statement coverage
-11fa15a6 chore(coverage): seal pkg/pkg in the ledger, document the ratchet
-f3f4a138 docs(pkg): record the unprivileged-suite constraint and report the result
-f8b42808 test(apikind): cover the ApiSpec handler registry, promote it out of the ledger
-86753937 test(envkeys): cover credential detection, promote it out of the ledger
-0e199738 fix(sdk): stop leaking a full SDK copy when the extract race is lost
-c195a371 test(declcfg): cover the substitution grammar, promote it out of the ledger
-1dde52e1 test(agent/tools): cover the schema codec, promote it out of the ledger
-ab707966 test(log): cover rotation failure paths, promote it out of the ledger
-707e4226 chore(coverage): record the cleared on-ramp and ratchet the floor
-5217cfc8 docs(coverage): stop the ledger header keeping its own list of sealed packages
-890a8a9f test: review pass — fix a misreporting panic helper, drop three redundancies
+refactor(pkg): delete dead code and dedupe the local-path seam
+fix(pkg): make install dedup agree with uninstall on unreadable entries
+test(pkg): take pkg/pkg to 100% statement coverage
+chore(coverage): seal pkg/pkg in the ledger, document the ratchet
+docs(pkg): record the unprivileged-suite constraint and report the result
+test(apikind): cover the ApiSpec handler registry, promote it out of the ledger
+test(envkeys): cover credential detection, promote it out of the ledger
+fix(sdk): stop leaking a full SDK copy when the extract race is lost
+test(declcfg): cover the substitution grammar, promote it out of the ledger
+test(agent/tools): cover the schema codec, promote it out of the ledger
+test(log): cover rotation failure paths, promote it out of the ledger
+chore(coverage): record the cleared on-ramp and ratchet the floor
+docs(coverage): stop the ledger header keeping its own list of sealed packages
+test: review pass — fix a misreporting panic helper, drop three redundancies
+docs(coverage): correct the report against the post-rebase tree
+test(log): fold the gzip round-trip into its error test, mirroring copyFile
 ```
 
 ## Review pass
