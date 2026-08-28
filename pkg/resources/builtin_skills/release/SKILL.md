@@ -84,9 +84,16 @@ After `make publish` succeeds, poll GitHub Actions until every triggered workflo
 
 ```bash
 SHA=$(git rev-parse HEAD)   # the release commit; runs are matched on this
-# No 2>&1 here: this output must parse as JSON, and merging stderr into it
-# turns a transient gh error into unparseable garbage.
-runs=$(gh run list --limit 10 --json status,conclusion,name,headSha,createdAt,databaseId) || {
+
+# env -u ...: a shell that exports CLICOLOR_FORCE / FORCE_COLOR / CLICOLOR makes
+# `gh` emit ANSI escapes *into its --json output*, so jq fails with
+# "Invalid numeric literal". NO_COLOR=1 does NOT override CLICOLOR_FORCE, and
+# gh's own --jq is colourised too — unsetting the forcing vars is the fix.
+# No 2>&1 either: merging stderr into output that must parse as JSON turns a
+# transient gh error into unparseable garbage.
+GH="env -u CLICOLOR_FORCE -u FORCE_COLOR -u CLICOLOR gh"
+
+runs=$($GH run list --limit 15 --json status,conclusion,name,headSha,databaseId) || {
   echo "PROBE ERROR: gh run list failed"; exit 1; }
 echo "$runs" | jq -e . >/dev/null || { echo "PROBE ERROR: output is not JSON"; exit 1; }
 echo "$runs" | jq -r --arg sha "$SHA" '.[] | select(.headSha==$sha) | "\(.name) \(.status) \(.conclusion)"'
@@ -101,7 +108,7 @@ This must **not** use `--branch` filtering — tag-triggered workflows (like `re
 Loop every 30 seconds. Stop when all runs for the release commit SHA are `completed`. If any conclude with `failure` or `cancelled`, report the failure details:
 
 ```bash
-gh run view <run-id> --log-failed | tail -40
+$GH run view <run-id> --log-failed | tail -40
 ```
 
 ### Probe hygiene (applies to any poll loop)
@@ -118,10 +125,17 @@ gh run view <run-id> --log-failed | tail -40
 
 Concretely: check the command's exit code before piping to `jq`; validate with
 `jq -e .` before extracting fields; never pipe a command's stderr (`2>&1`) into
-something that must parse as structured data. If you cannot distinguish "not
-ready" from "broken", the loop is wrong — a broken probe polls happily until
+something that must parse as structured data; and **never assume a `--json` flag
+yields clean JSON** — a colour-forcing environment, a pager, or a progress
+spinner can all corrupt it, and the tool still exits 0. If you cannot distinguish
+"not ready" from "broken", the loop is wrong — a broken probe polls happily until
 timeout while the thing it watches has long since finished. Also bound the loop
 (a wall-clock cap and a max poll count) so even a mis-classified probe cannot
 run for the better part of an hour.
+
+When a probe *does* come back unparseable, look at the raw bytes
+(`printf '%s' "$out" | od -c | head`) before assuming it was transient. An ANSI
+escape or a BOM at byte 0 is a permanent, reproducible fault that no amount of
+retrying will clear.
 
 Do not ask the user whether to monitor — always do it automatically after a successful publish.

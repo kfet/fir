@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- **`release` skill: `gh --json` output could still be unparseable.** A shell exporting `CLICOLOR_FORCE`/`FORCE_COLOR` makes `gh` write ANSI escapes into its `--json` output while still exiting 0, so `jq` fails with "Invalid numeric literal" — this, not a transient error, was the real cause of the 45-minute poll hang fixed in 1.3.1. `NO_COLOR=1` does *not* override `CLICOLOR_FORCE`, and `gh --jq` is colourised too; the snippet now unsets the forcing variables. *Probe hygiene* gains the general rule: never assume a `--json` flag yields clean JSON, and inspect the raw bytes before writing an unparseable probe off as transient.
+
 ## [1.3.1] - 2026-08-28
 
 ### Fixed
