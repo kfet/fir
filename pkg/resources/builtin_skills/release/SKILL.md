@@ -18,6 +18,11 @@ If the user provides a version, use it. Otherwise, auto-determine:
 4. If there are only `### Fixed` or `### Changed` entries → **patch** bump (e.g. 0.1.0 → 0.1.1).
 5. If the section is empty → ask the user whether to proceed or abort.
 
+A regenerated model catalog (step 1) does **not** count towards the bump — it is
+routine data, not a user-visible feature, so it never turns a patch into a minor.
+By convention it still gets the one-line `### Changed` catalog entry the previous
+releases carry; that line alone is not grounds for a minor bump either.
+
 ## Steps
 
 1. **Regenerate models** — run `make generate-models` to pull the latest model definitions. If this produces changes, they will be included in the release commit automatically.
@@ -29,7 +34,23 @@ If the user provides a version, use it. Otherwise, auto-determine:
 7. **Commit** — stage **all** uncommitted changes with `git add -A`, then commit with `git commit -m "release: vVERSION"`. Check `git status` first.
 8. **Tag** — use `git tag -a vVERSION -m "release: vVERSION"` (pass `-m` to avoid opening an editor).
 9. **Install** — `make install` to install the new version.
-10. **Verify** — run the binary with `--version` and confirm it prints the new version.
+10. **Verify** — run **the binary `make install` just wrote**, by absolute path, and confirm it prints the new version:
+
+    ```bash
+    # go install honours GOBIN when set, else GOPATH/bin.
+    installdir="$(go env GOBIN)"; [ -n "$installdir" ] || installdir="$(go env GOPATH)/bin"
+    "$installdir/fir" --version
+    ```
+
+    Then reconcile PATH: compare `command -v fir` against `$installdir/fir`. If
+    they differ (and are not the same file — a symlink is fine), PATH is serving
+    a **stale, shadowing** binary and a bare `fir --version` will silently report
+    the old version. `make install` warns about this; do not ignore the warning.
+    Report which path holds which version. Only if the shadowing path is
+    user-writable and clearly meant to be the same install, offer to overwrite it
+    (`cp "$installdir/fir" "$(command -v fir)"`, keeping a `.prev` backup as
+    `make deploy` does) — never do so silently, and never assume it is writable.
+    Never accept a bare `fir --version` as proof.
 
 ## Important notes
 
@@ -62,15 +83,45 @@ are assertions about a tree that no longer exists.
 After `make publish` succeeds, poll GitHub Actions until every triggered workflow finishes:
 
 ```bash
-gh run list --limit 10 --json status,conclusion,name,headSha,createdAt,databaseId 2>&1
+SHA=$(git rev-parse HEAD)   # the release commit; runs are matched on this
+# No 2>&1 here: this output must parse as JSON, and merging stderr into it
+# turns a transient gh error into unparseable garbage.
+runs=$(gh run list --limit 10 --json status,conclusion,name,headSha,createdAt,databaseId) || {
+  echo "PROBE ERROR: gh run list failed"; exit 1; }
+echo "$runs" | jq -e . >/dev/null || { echo "PROBE ERROR: output is not JSON"; exit 1; }
+echo "$runs" | jq -r --arg sha "$SHA" '.[] | select(.headSha==$sha) | "\(.name) \(.status) \(.conclusion)"'
 ```
+
+`$SHA` must be set, and the selection must be non-empty: zero matching runs is
+"probe not working yet", **not** "all runs finished". Treat an empty match as
+not-ready early on, and as an error if it persists.
 
 This must **not** use `--branch` filtering — tag-triggered workflows (like `release`) don't appear under a branch filter. Instead, match runs by `headSha` against the release commit.
 
 Loop every 30 seconds. Stop when all runs for the release commit SHA are `completed`. If any conclude with `failure` or `cancelled`, report the failure details:
 
 ```bash
-gh run view <run-id> --log-failed 2>&1 | tail -40
+gh run view <run-id> --log-failed | tail -40
 ```
+
+### Probe hygiene (applies to any poll loop)
+
+**A probe that errored or produced unparseable output is a FAILURE, not a
+"keep waiting".** Treat these as three distinct outcomes and never collapse them:
+
+- **ready** → stop, success.
+- **not ready** → the probe ran, parsed cleanly, and the state is genuinely
+  still in progress. Only this continues the loop.
+- **errored / unparseable** → a broken probe. Retry at most 2–3 *consecutive*
+  times (network blips are real), then **stop and report**. Never let it fall
+  through to "continue" indefinitely.
+
+Concretely: check the command's exit code before piping to `jq`; validate with
+`jq -e .` before extracting fields; never pipe a command's stderr (`2>&1`) into
+something that must parse as structured data. If you cannot distinguish "not
+ready" from "broken", the loop is wrong — a broken probe polls happily until
+timeout while the thing it watches has long since finished. Also bound the loop
+(a wall-clock cap and a max poll count) so even a mis-classified probe cannot
+run for the better part of an hour.
 
 Do not ask the user whether to monitor — always do it automatically after a successful publish.

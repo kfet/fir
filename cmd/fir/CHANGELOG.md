@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Fixed
+- **`release` skill: post-publish workflow poll could hang for 45 minutes.** The prescribed `gh run list --json … 2>&1` merged stderr into output that must parse as JSON, so a transient `gh` error made `jq` fail and the probe read "broken" as "not ready". The snippet now checks the exit code and validates JSON, and a new *Probe hygiene* section states that an errored or unparseable probe is a failure — never a reason to keep polling.
+- **`release` skill: `--version` verification could pass on a stale binary.** Step 10 now runs the exact path `make install` writes — resolved as `go install` resolves it (`GOBIN` if set, else `GOPATH/bin`) — and reconciles it against `command -v fir`, instead of trusting a bare `fir --version` that PATH may resolve to a shadowing copy.
+- **`merge-to-main` skill: no check that local `main` is current**, which allowed a release to be cut on a base 10 commits behind `origin/main`. A new step 0 fetches and verifies before merging.
+- **`merge-to-main` / `rebase-on-main` skills: CHANGELOG entries could land in an already-released section.** Rebasing across a release boundary relocates `[Unreleased]` entries conflict-free, and the existing diff check still looks clean. Both skills now require confirming entries sit under `## [Unreleased]`, not merely that they exist.
+
+### Changed
+- **`make install` warns when `fir` on PATH is not the binary it just installed** (silent when fir is absent from PATH or is a symlink to the go-install target), so a shadowing copy can no longer make a fresh install look like it did nothing.
+
 ## [1.3.0] - 2026-08-28
 
 ### Added

@@ -66,6 +66,15 @@ fmt:
 
 install:
 	go install -ldflags="$(LDFLAGS)" ./cmd/fir/
+	@# Warn when PATH serves a different `fir` than the one just installed —
+	@# a shadowing copy makes `fir --version` silently report the old build.
+	@# Silent when fir isn't on PATH (CI/containers) or is a symlink to the
+	@# install target. GOBIN wins over GOPATH/bin when set, as `go install` does.
+	@target=$$(go env GOBIN); [ -n "$$target" ] || target="$(GOBIN)"; \
+	resolved=$$(command -v fir 2>/dev/null); \
+	if [ -n "$$resolved" ] && ! [ "$$resolved" -ef "$$target/fir" ]; then \
+		echo "WARNING: 'fir' on PATH is $$resolved, which shadows the just-installed $$target/fir"; \
+	fi
 	@$(MAKE) --no-print-directory install-completions
 
 # install-completions drops shell completion files into common locations.
