@@ -2,10 +2,15 @@
 
 ## [Unreleased]
 
+## [1.3.3] - 2026-08-28
+
 ### Fixed
 - **`/mcp reload` now picks up a token minted by another process.** `fir mcp login <server>` in a second terminal writes `auth.json` from outside the session, whose credential store was read once at startup and whose per-server credential cache never looked at disk again — so a reload diffed configs, saw no change, and left the server down until a full restart. `Manager.Reload` re-reads the store and invalidates the cache before diffing (skipped for a memory-only store, and non-blocking so a reload never parks behind an interactive login). The reload path that creates the *first* manager re-reads too.
 - **A corrupt `auth.json` no longer wipes in-memory credentials on reload.** `AuthStorage.Reload` replaced its whole credential map with an empty one when the file failed to parse; now it keeps what it holds and records the error, so a mid-session reload cannot log the session out of every provider. A subsequent login still repairs the damaged file.
 - **Flaky supervisor tests under parallel `make all`.** `remote_test.TestSupervisorExecution` charged a login shell's profile sourcing against fixed 20–30s bounds, so machine load could turn an exit-code assertion into a timeout. The bounds that are not about expiry are now generous, and the SIGTERM test scales its wait to the measured startup cost.
+
+### Changed
+- **Model catalog regenerated** at release time: routine upstream refresh of model ids, pricing and limits.
 
 ## [1.3.2] - 2026-08-28
 
