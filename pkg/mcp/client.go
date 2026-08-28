@@ -401,6 +401,23 @@ func transportLabel(t string) string {
 	return t
 }
 
+// refreshCredentials re-reads the persisted credential store and invalidates
+// every cached per-server credential, so the next connect sees tokens minted by
+// another process.
+//
+// No-op for a memory-only store (SetAuth never called): there the in-memory
+// tokens are the only copy, and dropping them would log the session out.
+func (m *Manager) refreshCredentials() {
+	if m.credStore.storage == nil {
+		return
+	}
+	m.credStore.storage.Reload()
+	m.auths.Range(func(_, v any) bool {
+		v.(*serverAuth).invalidate()
+		return true
+	})
+}
+
 // serverAuthFor returns the OAuth state for a server, creating it on first
 // use. Returns nil when the server needs no auth handling (stdio transport or
 // auth mode "none"), and an error when its auth config is invalid.
@@ -1259,6 +1276,14 @@ func (m *Manager) dialOnce(ctx context.Context, name string, cfg ServerConfig) (
 func (m *Manager) Reload(ctx context.Context, newConfigs map[string]ServerConfig) ([]agent.AgentTool, error) {
 	m.reloadMu.Lock()
 	defer m.reloadMu.Unlock()
+
+	// A reload is the user's explicit "pick up what changed" signal, and what
+	// changed may be credentials rather than config: `fir mcp login <server>`
+	// run in a second terminal writes auth.json from another process, which
+	// this one's in-memory view knows nothing about. Re-read before deciding
+	// which servers to reconnect, so a server that is down for want of a token
+	// comes back up here instead of only after a full session restart.
+	m.refreshCredentials()
 
 	oldConfigs := m.configsSnapshot()
 

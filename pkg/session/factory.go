@@ -347,8 +347,18 @@ func ReloadMCP(ctx context.Context, mgrPtr **mcp.Manager, sess *AgentSession, cw
 		_, err = (*mgrPtr).Reload(ctx, servers)
 		return err
 	}
-	// No manager yet — create one if configs appeared.
+	// No manager yet — create one if configs appeared. Re-read credentials
+	// first: Manager.Reload does this for an existing manager, but a manager
+	// created here inherits the session's long-lived AuthStorage, whose
+	// in-memory view was loaded at session start. Without this, a reload that
+	// brings up the *first* MCP server would miss a token minted out-of-band
+	// by `fir mcp login`.
 	if len(servers) > 0 {
+		if reg := sess.ModelRegistryRef(); reg != nil {
+			if as := reg.AuthStorage(); as != nil {
+				as.Reload()
+			}
+		}
 		*mgrPtr = StartMCPManager(ctx, sess, servers)
 	}
 	return nil

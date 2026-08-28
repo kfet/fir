@@ -1091,6 +1091,13 @@ class TestSupervisorExecution(unittest.TestCase):
     coreutils looks like.
     """
 
+    # The bound to pass when a test is not about expiry at all. It has to
+    # cover a login shell's profile sourcing on a machine running the rest of
+    # `make all` in parallel; a bound that expires there turns an assertion
+    # about exit codes into an assertion about machine load. Nothing waits on
+    # it on the happy path, so it is generous for free.
+    NO_EXPIRY = 120
+
     def setUp(self):
         import tempfile
 
@@ -1124,14 +1131,14 @@ class TestSupervisorExecution(unittest.TestCase):
         hardcode. Measuring keeps the two in proportion.
         """
         start = time.time()
-        rc, _out, err, _t = self._run("true\n", 30)
+        rc, _out, err, _t = self._run("true\n", self.NO_EXPIRY)
         self.assertEqual(0, rc, err)
         return time.time() - start
 
     def _argv(self, timeout_s, grace):
         return [_bash(), *remote._supervisor_argv(timeout_s, grace)[1:]]
 
-    def _run(self, script, timeout_s, grace=1, local_timeout=60):
+    def _run(self, script, timeout_s, grace=1, local_timeout=300):
         # argv[2] is quoted for a remote shell; running it locally through
         # subprocess (no shell) means we pass the unquoted original.
         argv = self._argv(timeout_s, grace)
@@ -1140,7 +1147,7 @@ class TestSupervisorExecution(unittest.TestCase):
             return remote._run_local(argv, script, local_timeout)
 
     def test_normal_command_works_on_a_host_without_gnu_timeout(self):
-        rc, out, err, timed_out = self._run("echo hello\necho oops >&2\n", 30)
+        rc, out, err, timed_out = self._run("echo hello\necho oops >&2\n", self.NO_EXPIRY)
         self.assertEqual(0, rc, err)
         self.assertFalse(timed_out)
         self.assertIn("hello", out)
@@ -1148,33 +1155,33 @@ class TestSupervisorExecution(unittest.TestCase):
         self.assertNotIn("poisoned", err)
 
     def test_login_shell_semantics_are_preserved(self):
-        rc, out, _err, _t = self._run("shopt -q login_shell && echo login-shell\n", 30)
+        rc, out, _err, _t = self._run("shopt -q login_shell && echo login-shell\n", self.NO_EXPIRY)
         self.assertEqual(0, rc)
         self.assertIn("login-shell", out)
 
     def test_dollar_zero_is_unchanged_from_before_the_bound_existed(self):
         """The script is still the stdin of a `bash -l -s`, not a staged file."""
-        rc, out, _err, _t = self._run('echo "[$0]"\n', 30)
+        rc, out, _err, _t = self._run('echo "[$0]"\n', self.NO_EXPIRY)
         self.assertEqual(0, rc)
         self.assertEqual("[bash]", out.strip())
 
     def test_hostile_quoting_survives_verbatim(self):
         script = "echo \"it's fine\"; printf '%s\\n' 'a b'  # 'unbalanced\n"
-        rc, out, _err, _t = self._run(script, 30)
+        rc, out, _err, _t = self._run(script, self.NO_EXPIRY)
         self.assertEqual(0, rc)
         self.assertIn("it's fine", out)
         self.assertIn("a b", out)
 
     def test_exit_code_is_the_commands_own(self):
-        rc, _out, _err, _t = self._run("exit 7\n", 30)
+        rc, _out, _err, _t = self._run("exit 7\n", self.NO_EXPIRY)
         self.assertEqual(7, rc)
 
     def test_death_by_signal_keeps_128_plus_signal(self):
-        rc, _out, _err, _t = self._run("kill -9 $$\n", 30)
+        rc, _out, _err, _t = self._run("kill -9 $$\n", self.NO_EXPIRY)
         self.assertEqual(137, rc)
 
     def test_nothing_is_staged_on_disk(self):
-        self._run("true\n", 30)
+        self._run("true\n", self.NO_EXPIRY)
         # Ignore this class's own fixtures (the poisoned-PATH bin, the empty
         # login HOME) — the assertion is about the supervisor staging nothing.
         fixtures = {"bin", "home"}
@@ -1247,18 +1254,22 @@ class TestSupervisorExecution(unittest.TestCase):
         self.addCleanup(stdout.close)
         stdin.write("sleep 300 &\necho PID:$!\nsleep 300\n")
         stdin.close()
-        ready, _, _ = select.select([stdout], [], [], 20)
-        self.assertTrue(ready, "supervisor produced no output within 20s")
+        # Wait for the child's first line, which lands only after the login
+        # shell has sourced its profile — scaled to what that costs here, so
+        # load inflates the wait and the thing waited on together.
+        wait_s = max(60, math.ceil(self._startup_cost() * 8))
+        ready, _, _ = select.select([stdout], [], [], wait_s)
+        self.assertTrue(ready, f"supervisor produced no output within {wait_s}s")
         pid = int(stdout.readline().split(":")[1])
         proc.terminate()  # the supervisor itself, in its own session
-        self.assertEqual(124, proc.wait(timeout=30))
+        self.assertEqual(124, proc.wait(timeout=60))
         self._assert_gone(pid)
 
     def _assert_gone(self, pid):
         """A backgrounded grandchild must die with the group, not linger."""
         import time as _time
 
-        deadline = _time.time() + 20
+        deadline = _time.time() + 30
         while _time.time() < deadline:
             try:
                 os.kill(pid, 0)

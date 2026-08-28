@@ -120,6 +120,36 @@ func TestAuthStorage_Reload(t *testing.T) {
 	}
 }
 
+// A corrupt store must not wipe live credentials: Reload now runs mid-session
+// (/mcp reload re-reads the store to pick up an out-of-band login), and
+// swapping in an empty map would log the session out of every provider.
+func TestAuthStorage_Reload_CorruptFileKeepsCredentials(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "auth.json")
+
+	s := NewAuthStorage(path)
+	s.Set("anthropic", AuthCredential{Type: "api_key", Key: "key1"})
+
+	if err := os.WriteFile(path, []byte("{not json"), 0o600); err != nil {
+		t.Fatalf("corrupt auth.json: %v", err)
+	}
+	s.Reload()
+
+	cred := s.Get("anthropic")
+	if cred == nil || cred.Key != "key1" {
+		t.Fatalf("credential lost on corrupt reload: %+v", cred)
+	}
+	if errs := s.DrainErrors(); len(errs) == 0 {
+		t.Error("corrupt reload should record an error")
+	}
+
+	// Writes still work afterwards, repairing the damaged file.
+	s.Set("openai", AuthCredential{Type: "api_key", Key: "key2"})
+	s2 := NewAuthStorage(path)
+	if c := s2.Get("openai"); c == nil || c.Key != "key2" {
+		t.Errorf("login after a corrupt read must persist, got %+v", c)
+	}
+}
+
 func TestAuthStorage_EmptyFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "auth.json")

@@ -72,6 +72,18 @@ func (m authMutex) lockCtx(ctx context.Context) error {
 	}
 }
 
+// tryLock acquires without blocking, reporting whether it succeeded. For
+// callers that must not wait behind an interactive login (see
+// serverAuth.invalidate).
+func (m authMutex) tryLock() bool {
+	select {
+	case m.ch <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
 func (m authMutex) unlock() { <-m.ch }
 
 // tokenRefreshWindow is how far ahead of expiry a token is refreshed. Wide
@@ -446,6 +458,43 @@ func (sa *serverAuth) clearPending() {
 	sa.mu.lock()
 	defer sa.mu.unlock()
 	sa.pending = nil
+}
+
+// invalidate drops the lazily-loaded credential so the next use re-reads it
+// from storage. Unlike forget it does not clear the discovered challenge or
+// touch storage: this is a cache invalidation, not a logout. It exists so an
+// explicit reload picks up a token minted out-of-band by another process
+// (`fir mcp login` in a second terminal) — without it, a serverAuth that
+// already looked and found nothing never looks again.
+//
+// Non-blocking: if the auth lock is held — an interactive login is running, or
+// a request is mid-refresh — the cache is left alone. Whoever holds the lock is
+// about to write a fresher credential than the one on disk anyway, and
+// Manager.Reload must never park behind a human in a browser. Skipping is
+// degraded, not silent: the reload still re-dials the server, that dial reports
+// AuthRequiredError, and a second /mcp reload picks the token up.
+//
+// gen++ is deliberate. An in-flight request that already sent the old token
+// will reach handleUnauthorized with a stale generation and take the "someone
+// else recovered, retry with theirs" branch, using whatever was just re-read
+// from disk. If that is the freshly minted token, exactly right; if disk still
+// holds the same rejected token, the cost is one wasted retry and a plain 401
+// instead of an AuthRequiredError, which the next dial corrects. Without gen++
+// that request would instead fall through to the drop path and delete a
+// just-minted credential from storage — strictly worse.
+//
+// Note this also re-reads for healthy connected servers, replacing a live
+// credential with the persisted one. They are the same unless an earlier
+// refresh failed to persist, in which case the reload downgrades the session to
+// login-required — the same exposure a restart has.
+func (sa *serverAuth) invalidate() {
+	if !sa.mu.tryLock() {
+		return
+	}
+	defer sa.mu.unlock()
+	sa.cred = nil
+	sa.loaded = false
+	sa.gen++
 }
 
 // forget drops the cached credential without touching storage. The caller

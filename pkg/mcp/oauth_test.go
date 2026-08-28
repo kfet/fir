@@ -881,6 +881,59 @@ func TestMCPOAuth_LoginServerRevivesAFailedServer(t *testing.T) {
 	requireToolsWork(t, mgr)
 }
 
+// --- Reload picks up an out-of-band login -----------------------------------
+
+func TestMCPOAuth_ReloadPicksUpCredentialMintedByAnotherProcess(t *testing.T) {
+	as := newFakeAuthServer(t, asOptions{})
+	srv := newFakeMCPServer(t, as, mcpOptions{})
+	authPath := filepath.Join(t.TempDir(), "auth.json")
+	cfgs := map[string]ServerConfig{"srv": srv.config(nil)}
+
+	// The running session: non-interactive, so the initial dial fails for want
+	// of a credential and the server sits down.
+	session := NewManager(map[string]ServerConfig{"srv": srv.config(nil)}, false)
+	session.SetAuth(auth.NewAuthStorage(authPath))
+	t.Cleanup(func() { _ = session.Close() })
+	require.Error(t, connectAndWait(t, session))
+	require.False(t, session.hasSession("srv"))
+
+	// A second process — `fir mcp login srv` — mints a token into the same
+	// auth.json. The running session's in-memory view is now stale.
+	cli := NewManager(map[string]ServerConfig{"srv": srv.config(nil)}, false)
+	cli.SetAuth(auth.NewAuthStorage(authPath))
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	require.NoError(t, cli.LoginServer(ctx, "srv", browserCallbacks(t, nil)))
+	require.NoError(t, cli.Close())
+
+	// /mcp reload — same config, so nothing but the credential has changed.
+	_, err := session.Reload(ctx, cfgs)
+	require.NoError(t, err)
+	require.True(t, session.hasSession("srv"), "reload must pick up the stored token")
+	requireToolsWork(t, session)
+}
+
+func TestMCPOAuth_ReloadKeepsInMemoryTokenWithoutStorage(t *testing.T) {
+	// With no auth.AuthStorage the in-memory token is the only copy: a reload
+	// must not invalidate it, or /mcp reload would log the session out.
+	as := newFakeAuthServer(t, asOptions{})
+	srv := newFakeMCPServer(t, as, mcpOptions{})
+	cfgs := map[string]ServerConfig{"srv": srv.config(nil)}
+
+	mgr, _ := newTestManager(t, srv.config(nil))
+	require.NoError(t, loginAndConnect(t, mgr, browserCallbacks(t, nil)))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	_, err := mgr.Reload(ctx, cfgs)
+	require.NoError(t, err)
+	require.True(t, mgr.hasSession("srv"))
+	requireToolsWork(t, mgr)
+
+	_, _, issued := as.counters()
+	require.Equal(t, 1, issued, "the cached token is reused; no second grant")
+}
+
 // --- 403 is not a login trigger ---------------------------------------------
 
 func TestMCPOAuth_ForbiddenDoesNotTriggerLogin(t *testing.T) {

@@ -269,29 +269,56 @@ func (s *AuthStorage) recordError(err error) {
 }
 
 func (s *AuthStorage) parseStorageData(content []byte) AuthStorageData {
+	data, _ := decodeStorageData(content)
+	return data
+}
+
+// decodeStorageData decodes a storage blob, reporting an error when content is
+// present but unparseable. That distinction matters to Reload: "no
+// credentials" and "unreadable credentials" must not be handled the same way.
+func decodeStorageData(content []byte) (AuthStorageData, error) {
 	if len(content) == 0 {
-		return make(AuthStorageData)
+		return make(AuthStorageData), nil
 	}
 	var parsed AuthStorageData
 	if err := json.Unmarshal(content, &parsed); err != nil {
-		return make(AuthStorageData)
+		return make(AuthStorageData), fmt.Errorf("parse auth storage: %w", err)
 	}
-	return parsed
+	if parsed == nil { // literal JSON null
+		parsed = make(AuthStorageData)
+	}
+	return parsed, nil
 }
 
 // Reload re-reads credentials from storage.
+//
+// A corrupt or truncated file leaves the in-memory credentials untouched. This
+// runs mid-session now — `/mcp reload` re-reads the store to pick up a token
+// minted by another process — and swapping in an empty map on a bad read would
+// log the session out of every provider at once. The error is recorded (so
+// DrainErrors surfaces it) but loadError is left clear, so a subsequent login
+// can still overwrite the damaged file.
 func (s *AuthStorage) Reload() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	var parseErr error
 	_, err := s.storage.WithLock(func(current []byte) (any, []byte) {
-		s.data = s.parseStorageData(current)
+		data, perr := decodeStorageData(current)
+		if perr != nil {
+			parseErr = perr
+			return nil, nil
+		}
+		s.data = data
 		return nil, nil
 	})
 	if err != nil {
 		s.loadError = err
 		s.recordError(err)
-	} else {
-		s.loadError = nil
+		return
+	}
+	s.loadError = nil
+	if parseErr != nil {
+		s.recordError(parseErr)
 	}
 }
 
