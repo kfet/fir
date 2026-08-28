@@ -346,11 +346,12 @@ func TestCloseIsIdempotent(t *testing.T) {
 	}
 }
 
-// TestGzipFileErrors pins the failure contract of the compressor: a missing
-// source and an uncreatable destination are reported, and a failed copy must
-// not leave a half-written .gz behind — a truncated archive would look like a
-// valid backup to anyone reading the directory.
-func TestGzipFileErrors(t *testing.T) {
+// TestGzipFile pins the compressor's contract, mirroring the copyFile test
+// below: a missing source and an uncreatable destination are reported, a
+// failed copy leaves no half-written .gz behind (a truncated archive would
+// look like a valid backup to anything reading the directory), and a
+// successful run round-trips the bytes.
+func TestGzipFile(t *testing.T) {
 	dir := t.TempDir()
 
 	if err := gzipFile(filepath.Join(dir, "missing"), filepath.Join(dir, "out.gz")); err == nil {
@@ -373,6 +374,34 @@ func TestGzipFileErrors(t *testing.T) {
 	}
 	if _, err := os.Stat(dst); !os.IsNotExist(err) {
 		t.Errorf("a failed gzip must remove its partial output, err=%v", err)
+	}
+
+	// What it writes is readable gzip holding exactly the source bytes.
+	big := filepath.Join(dir, "big")
+	want := strings.Repeat("log line\n", 500)
+	if err := os.WriteFile(big, []byte(want), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	round := filepath.Join(dir, "round.gz")
+	if err := gzipFile(big, round); err != nil {
+		t.Fatalf("gzipFile: %v", err)
+	}
+	f, err := os.Open(round)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	gr, err := gzip.NewReader(f)
+	if err != nil {
+		t.Fatalf("gzip reader: %v", err)
+	}
+	defer gr.Close()
+	got, err := io.ReadAll(gr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != want {
+		t.Errorf("round trip lost data: %d bytes in, %d out", len(want), len(got))
 	}
 }
 
@@ -405,39 +434,6 @@ func TestCopyFileErrorsAndRoundTrip(t *testing.T) {
 	}
 	if err := copyFile(dir, filepath.Join(dir, "fromdir")); err == nil {
 		t.Error("expected an error copying from a directory")
-	}
-}
-
-// TestGzipRoundTrip pins that what the compressor writes is readable gzip
-// holding exactly the source bytes.
-func TestGzipRoundTrip(t *testing.T) {
-	dir := t.TempDir()
-	src := filepath.Join(dir, "src")
-	want := strings.Repeat("log line\n", 500)
-	if err := os.WriteFile(src, []byte(want), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	dst := filepath.Join(dir, "out.gz")
-	if err := gzipFile(src, dst); err != nil {
-		t.Fatalf("gzipFile: %v", err)
-	}
-
-	f, err := os.Open(dst)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer f.Close()
-	gr, err := gzip.NewReader(f)
-	if err != nil {
-		t.Fatalf("gzip reader: %v", err)
-	}
-	defer gr.Close()
-	got, err := io.ReadAll(gr)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(got) != want {
-		t.Errorf("round trip lost data: %d bytes in, %d out", len(want), len(got))
 	}
 }
 
