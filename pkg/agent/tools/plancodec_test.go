@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -24,35 +25,25 @@ func nestedCodec() *schemaCodec {
 	)
 }
 
-// mustPanic runs fn and returns the panic value, failing if it did not panic.
-func mustPanic(t *testing.T, fn func()) string {
+// mustPanic runs fn and returns the panic value rendered as text, failing if
+// fn did not panic. Any value is rendered, so a panic with an unexpected type
+// is reported as a mismatch rather than as "no panic".
+func mustPanic(t *testing.T, fn func()) (msg string) {
 	t.Helper()
-	var got string
+	panicked := false
 	func() {
 		defer func() {
-			r := recover()
-			if r == nil {
-				return
+			if r := recover(); r != nil {
+				panicked = true
+				msg = fmt.Sprint(r)
 			}
-			got = strings.TrimSpace(strings.Join(strings.Fields(toString(r)), " "))
 		}()
 		fn()
 	}()
-	if got == "" {
+	if !panicked {
 		t.Fatal("expected a panic, got none")
 	}
-	return got
-}
-
-func toString(v any) string {
-	switch x := v.(type) {
-	case string:
-		return x
-	case error:
-		return x.Error()
-	default:
-		return ""
-	}
+	return msg
 }
 
 // TestNewSchemaCodecRejectsBadSchemas pins that a broken schema declaration

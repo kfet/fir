@@ -100,9 +100,8 @@ func TestDiscardHandlerStaysDisabled(t *testing.T) {
 // TestWithOnDiscardLoggerIsSafe pins the same guarantee through the public
 // API: a component logger taken before Init must stay a no-op.
 func TestWithOnDiscardLoggerIsSafe(t *testing.T) {
-	orig := logger.Load()
-	logger.Store(slog.New(discardHandler{}))
-	t.Cleanup(func() { logger.Store(orig) })
+	resetLogger()
+	t.Cleanup(resetLogger)
 
 	component := With("component", "bash")
 	if component.Enabled(context.Background(), slog.LevelError) {

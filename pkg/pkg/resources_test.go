@@ -3,6 +3,7 @@ package pkg
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -34,18 +35,6 @@ func relNames(t *testing.T, root string, paths []string) []string {
 	}
 	sort.Strings(out)
 	return out
-}
-
-func equalStrings(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }
 
 // TestAutoDiscoverClassifies pins the full auto-discovery rule set: what
@@ -87,13 +76,13 @@ func TestAutoDiscoverClassifies(t *testing.T) {
 		t.Fatalf("ScanPackageResources: %v", err)
 	}
 
-	if got, want := relNames(t, root, res.Extensions), []string{"hook.py", "tools/deep/run.sh"}; !equalStrings(got, want) {
+	if got, want := relNames(t, root, res.Extensions), []string{"hook.py", "tools/deep/run.sh"}; !slices.Equal(got, want) {
 		t.Errorf("Extensions = %v, want %v", got, want)
 	}
-	if got, want := relNames(t, root, res.Skills), []string{"notes.md", "reminders/SKILL.md"}; !equalStrings(got, want) {
+	if got, want := relNames(t, root, res.Skills), []string{"notes.md", "reminders/SKILL.md"}; !slices.Equal(got, want) {
 		t.Errorf("Skills = %v, want %v", got, want)
 	}
-	if got, want := relNames(t, root, res.Themes), []string{"custom/theme.json", "themes/dark.json"}; !equalStrings(got, want) {
+	if got, want := relNames(t, root, res.Themes), []string{"custom/theme.json", "themes/dark.json"}; !slices.Equal(got, want) {
 		t.Errorf("Themes = %v, want %v", got, want)
 	}
 }
@@ -155,7 +144,7 @@ func TestAutoDiscoverSkipsUnreadableDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ScanPackageResources: %v", err)
 	}
-	if got, want := relNames(t, root, res.Skills), []string{"ok/SKILL.md"}; !equalStrings(got, want) {
+	if got, want := relNames(t, root, res.Skills), []string{"ok/SKILL.md"}; !slices.Equal(got, want) {
 		t.Errorf("Skills = %v, want %v", got, want)
 	}
 }
@@ -184,13 +173,13 @@ func TestManifestExpansion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ScanPackageResources: %v", err)
 	}
-	if got, want := relNames(t, root, res.Extensions), []string{"ext/a.py", "ext/b.py"}; !equalStrings(got, want) {
+	if got, want := relNames(t, root, res.Extensions), []string{"ext/a.py", "ext/b.py"}; !slices.Equal(got, want) {
 		t.Errorf("Extensions = %v, want %v", got, want)
 	}
-	if got, want := relNames(t, root, res.Skills), []string{"skills/one/SKILL.md", "skills/two.md"}; !equalStrings(got, want) {
+	if got, want := relNames(t, root, res.Skills), []string{"skills/one/SKILL.md", "skills/two.md"}; !slices.Equal(got, want) {
 		t.Errorf("Skills = %v, want %v", got, want)
 	}
-	if got, want := relNames(t, root, res.Themes), []string{"theme.json"}; !equalStrings(got, want) {
+	if got, want := relNames(t, root, res.Themes), []string{"theme.json"}; !slices.Equal(got, want) {
 		t.Errorf("Themes = %v, want %v", got, want)
 	}
 }
@@ -209,7 +198,7 @@ func TestManifestOverridesAutoDiscovery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ScanPackageResources: %v", err)
 	}
-	if got, want := relNames(t, root, res.Skills), []string{"listed/SKILL.md"}; !equalStrings(got, want) {
+	if got, want := relNames(t, root, res.Skills), []string{"listed/SKILL.md"}; !slices.Equal(got, want) {
 		t.Errorf("Skills = %v, want %v", got, want)
 	}
 	if len(res.Extensions) != 0 {
@@ -248,7 +237,7 @@ func TestManifestUnreadableFallsBackToAutoDiscovery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ScanPackageResources: %v", err)
 	}
-	if got, want := relNames(t, root, res.Skills), []string{"skill/SKILL.md"}; !equalStrings(got, want) {
+	if got, want := relNames(t, root, res.Skills), []string{"skill/SKILL.md"}; !slices.Equal(got, want) {
 		t.Errorf("Skills = %v, want %v", got, want)
 	}
 }
@@ -286,7 +275,7 @@ func TestManifestSkipsUnstattableMatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ScanPackageResources: %v", err)
 	}
-	if got, want := relNames(t, root, res.Extensions), []string{"real.py"}; !equalStrings(got, want) {
+	if got, want := relNames(t, root, res.Extensions), []string{"real.py"}; !slices.Equal(got, want) {
 		t.Errorf("Extensions = %v, want %v", got, want)
 	}
 }
@@ -309,7 +298,7 @@ func TestManifestDirPatternSkipsUnreadable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ScanPackageResources: %v", err)
 	}
-	if got, want := relNames(t, root, res.Skills), []string{"skills/ok/SKILL.md"}; !equalStrings(got, want) {
+	if got, want := relNames(t, root, res.Skills), []string{"skills/ok/SKILL.md"}; !slices.Equal(got, want) {
 		t.Errorf("Skills = %v, want %v", got, want)
 	}
 }

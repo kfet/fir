@@ -270,15 +270,17 @@ func TestExtractReportsReadFailureAndCleansUp(t *testing.T) {
 	useCacheDir(t, cache)
 
 	tree := sampleFS()
-	hooked := newHookFS(tree, nil)
-	hooked.hook = func() { hooked.failReads = true }
-	useSDKFS(t, hooked)
-
+	useSDKFS(t, tree)
 	hash, err := embeddedHash()
 	if err != nil {
 		t.Fatal(err)
 	}
-	hooked.reads, hooked.done, hooked.failReads = 0, false, false
+
+	// Reads fail from the first extraction read onwards; hashing, which
+	// walks the same tree first, still succeeds.
+	hooked := newHookFS(tree, nil)
+	hooked.hook = func() { hooked.failReads = true }
+	useSDKFS(t, hooked)
 
 	_, err = EnsureExtracted()
 	if err == nil {

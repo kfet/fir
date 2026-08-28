@@ -86,24 +86,14 @@ func TestInstallUnlist(t *testing.T) {
 	bareRepo := t.TempDir()
 	initBareRepo(t, bareRepo)
 
-	// We install using the bare repo path as a local source so no
-	// network is needed.  But we want to exercise the git code path,
-	// so craft a URL that points at the local bare repo.
-	// Use "file://" scheme — ParseSource only handles http/ssh/bare,
-	// so we construct an HTTPS-style URL manually instead by directly
-	// calling Clone + addPackage to keep the test self-contained.
-	//
-	// Simpler: use a local path source (type==local) pointing at the
-	// working copy we just cloned from the bare repo.
-
-	// Clone the bare repo into a working dir first.
+	// Install from a local path pointing at a working clone of the bare
+	// repo, so the test needs no network. The git source path is covered
+	// by the subdirectory tests, which rewrite github.com to a local repo.
 	workRepo := filepath.Join(agentDir, "work-clone")
 	if err := Clone(bareRepo, workRepo); err != nil {
 		t.Fatalf("Clone: %v", err)
 	}
 
-	// Install via local path.
-	localSrc := "./" + workRepo // will be resolved to absolute
 	if err := mgr.Install(workRepo, false); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
@@ -121,7 +111,6 @@ func TestInstallUnlist(t *testing.T) {
 	}
 
 	// Install same package again — should be idempotent.
-	_ = localSrc
 	if err := mgr.Install(workRepo, false); err != nil {
 		t.Fatalf("second Install: %v", err)
 	}
