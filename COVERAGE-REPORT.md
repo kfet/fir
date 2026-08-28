@@ -1,7 +1,7 @@
 # Coverage-gate on-ramp: queue items 1-6 sealed
 
-Branch: `test/pkg-pkg-coverage` (worktree `~/fir-covpkg`), 13 commits on top of
-`624b4442`. Not merged, not pushed. `make all` is green.
+Branch: `test/pkg-pkg-coverage` (worktree `~/fir-covpkg`), rebased onto local
+`main` at v1.1.1. Not merged, not pushed. `make all` is green on that base.
 
 ## Result
 
@@ -23,7 +23,7 @@ package. Nothing was added to `.covignore` to achieve it.
 | Gated at a hard `-min=100` | 372 statements (1.2%) | **1,443 (4.6%)** |
 | Excluded — structural | 12,446 (39.5%) | 12,446 (39.5%) |
 | Excluded — pure debt | 18,677 (59.3%) | **17,602 (55.9%)** |
-| Whole tree (`COVERAGE_FLOOR` tier) | 67.0% | **68.0%** |
+| Whole tree (`COVERAGE_FLOOR` tier) | 67.0% | **68.1%** |
 | `COVERAGE_FLOOR` | 66 | **67** |
 
 Every number above is from `make coverage`, not from eyeballing: each package
@@ -40,7 +40,7 @@ $ awk '…' bin/coverage.gated.out     # 1443/1443 statements, all covered
 
 ## A note on `pkg/pkg`
 
-The first four commits on this branch took `pkg/pkg` (queue item 12) to 100%
+The first five commits on this branch took `pkg/pkg` (queue item 12) to 100%
 and sealed it, before the retarget. They are **kept**, not reverted: the
 package is at 100%, the gate enforces it, and the work found a real bug. It is
 out of queue order, which is recorded as such in `BACKLOG.md`. Say the word and
@@ -49,8 +49,8 @@ seemed the worse trade.
 
 ## Bugs found
 
-Four, none of them cosmetic. Tests at 100% surface these because the assertions
-that reach the last few branches are the ones nobody writes.
+Three, plus one gap. None cosmetic. Tests at 100% surface these because the
+assertions that reach the last few branches are the ones nobody writes.
 
 1. **`pkg/extension/sdk`: a leaked SDK copy on every lost extraction race.**
    `EnsureExtracted` publishes the embedded SDK by renaming a temp directory
@@ -76,10 +76,10 @@ that reach the last few branches are the ones nobody writes.
    a test comment; not fixed here (it needs a post-condition check, i.e. a
    behaviour change beyond this task).
 
-4. **`pkg/log`: nothing broken, but the failure paths were entirely untested** —
-   including the one that would wedge rotation permanently (leaving `rotating`
-   set after an aborted attempt). Every failure path now asserts the flag is
-   cleared.
+4. **The gap — `pkg/log`'s failure paths were entirely untested.** No bug found,
+   but the untested set included the one that would wedge rotation permanently
+   (leaving `rotating` set after an aborted attempt), which no happy-path test
+   could ever catch. Every failure path now asserts the flag is cleared.
 
 ## Testability seams and deletions
 
@@ -126,7 +126,7 @@ so this holds today; a root-based CI image would break it. Recorded in
   adoption" table added, the bucket table now shows at-adoption vs today, the
   gated statement count updated (372 → 1,443), and the root constraint noted.
   `pkg/mcp/autoreply` is called out as the next cheapest.
-- `Makefile` — `COVERAGE_FLOOR` 66 → 67 (measured 68.0%, keeping the ~1 point of
+- `Makefile` — `COVERAGE_FLOOR` 66 → 67 (measured 68.1%, keeping the ~1 point of
   slack the surrounding comment argues for, so the tier does not flap).
 - `CONTRIBUTING.md` — "The coverage ratchet" section (added with the `pkg/pkg`
   work) explains the two tiers and what sealing a package costs.
@@ -135,19 +135,46 @@ so this holds today; a root-based CI image would break it. Recorded in
 ## Commits
 
 ```
-506199ee refactor(pkg): delete dead code and dedupe the local-path seam
-5cf83da5 fix(pkg): make install dedup agree with uninstall on unreadable entries
-046ece59 test(pkg): take pkg/pkg to 100% statement coverage
-99b8eda2 chore(coverage): seal pkg/pkg in the ledger, document the ratchet
-ef6e3f32 docs(pkg): record the unprivileged-suite constraint and report the result
-cf101ad9 test(apikind): cover the ApiSpec handler registry, promote it out of the ledger
-96666e86 test(envkeys): cover credential detection, promote it out of the ledger
-3b29c9d5 fix(sdk): stop leaking a full SDK copy when the extract race is lost
-75a2229b test(declcfg): cover the substitution grammar, promote it out of the ledger
-d237a6e8 test(agent/tools): cover the schema codec, promote it out of the ledger
-3fe99a84 test(log): cover rotation failure paths, promote it out of the ledger
-daa3867c chore(coverage): record the cleared on-ramp and ratchet the floor
+198130c7 refactor(pkg): delete dead code and dedupe the local-path seam
+405a6623 fix(pkg): make install dedup agree with uninstall on unreadable entries
+18b430e0 test(pkg): take pkg/pkg to 100% statement coverage
+11fa15a6 chore(coverage): seal pkg/pkg in the ledger, document the ratchet
+f3f4a138 docs(pkg): record the unprivileged-suite constraint and report the result
+f8b42808 test(apikind): cover the ApiSpec handler registry, promote it out of the ledger
+86753937 test(envkeys): cover credential detection, promote it out of the ledger
+0e199738 fix(sdk): stop leaking a full SDK copy when the extract race is lost
+c195a371 test(declcfg): cover the substitution grammar, promote it out of the ledger
+1dde52e1 test(agent/tools): cover the schema codec, promote it out of the ledger
+ab707966 test(log): cover rotation failure paths, promote it out of the ledger
+707e4226 chore(coverage): record the cleared on-ramp and ratchet the floor
+5217cfc8 docs(coverage): stop the ledger header keeping its own list of sealed packages
+890a8a9f test: review pass — fix a misreporting panic helper, drop three redundancies
 ```
+
+## Review pass
+
+The branch was reviewed against its own diff and rebased onto current `main`
+(19 commits ahead, up to v1.1.1) so the gate proves the sealed packages against
+the tree they will land on rather than a stale one — a gate result is a
+property of a tree, not of a diff. Main had touched none of the sealed
+packages. Two things came out of it:
+
+- **A test helper misreported panics.** `mustPanic` rendered the recovered
+  value through a type switch that returned `""` for anything that was not a
+  `string` or an `error`, and the caller read `""` as "no panic". A panic with
+  an unexpected type would have been reported as *"expected a panic, got
+  none"* — an inverted diagnosis of the exact thing the helper exists to catch.
+- **The rebase silently misfiled this branch's CHANGELOG entries** into the
+  released `[0.99.0]` section, because git matched surrounding context after
+  main's releases moved the old `[Unreleased]` block down. No conflict was
+  raised. Moved back under `[Unreleased]`; `[0.99.0]` is byte-identical to
+  main's again. Worth knowing: a clean `git rebase` is not evidence that a
+  changelog survived one.
+
+Three redundancies were also removed (a local `equalStrings` that stdlib
+`slices.Equal` already provides, a dead local plus a comment narrating an
+approach a test does not take, and a hand-rolled logger save/restore where the
+package already had `resetLogger()`).
 
 ## Next cheapest
 

@@ -25,7 +25,7 @@ a generated table.
 
 **Sealed since adoption.** Seven packages have been promoted out of section
 2 at 100%, taking the gated scope from 372 to **1,443 statements** (4.6% of
-the tree) and the whole-tree number from 67.0% to 68.0%:
+the tree) and the whole-tree number from 67.0% to 68.1%:
 
 | Package | Statements | Queue item |
 | --- | ---: | --- |
