@@ -208,14 +208,31 @@ session accumulated 45.7M cache-read tokens and never compacted once.
 Compaction is also lossy and in-band; `self_handoff` (a curated briefing plus
 bookmarks) preserves more for less.
 
+Two triggers fire it. The **ceiling** (`atTokens` / `atPercent`) means the
+session is simply large — attention dilution and cache-read cost both scale with
+tokens. The **cold cache** trigger uses the fact that fir requests Anthropic's 1h
+extended cache retention: while turns keep coming the prefix is cache-warm and a
+re-read costs ~0.1x input, which is noise not worth nagging about, but once the
+session has been idle past `idleMinutes` the cache has provably expired and every
+turn from then on pays full input on the whole prefix plus a fresh cache write.
+That is the natural moment to cut over, at a much lower token bar — 30% of
+whichever ceiling applies, floored at 100k so a small-window session is not
+nudged absurdly early, and never above the ceiling itself. Idle is measured
+turn-end to turn-start, so one long-running turn (which keeps the cache warm with
+its own API calls) never reads as idle, and the first turn of a cold streak is
+exempt from the `nudgeEvery` throttle — that turn is the cheap one to spend, and
+only the first, so a slow-cadence session (cold on every turn) is nudged once
+rather than continuously.
+
 Configure via `handoff-nudger.json` in a config dir (project-local `.fir/`
 overrides `~/.config/fir/`):
 
 | Key | Default | Meaning |
 |-----|---------|---------|
-| `atTokens` | `150000` | Absolute token threshold |
-| `atPercent` | `60` | Percent-of-window threshold; the lower of the two thresholds fires |
-| `nudgeEvery` | `40000` | Further tokens before re-nudging an agent that keeps going |
+| `atTokens` | `500000` | Absolute token ceiling |
+| `atPercent` | `65` | Percent-of-window ceiling; the lower of the two fires |
+| `idleMinutes` | `65` | Idle gap after which the prompt cache is assumed dead |
+| `nudgeEvery` | `100000` | Further tokens before re-nudging an agent that keeps going |
 | `off` | `false` | Disable the nudge entirely |
 
 ### Optional mode targeting

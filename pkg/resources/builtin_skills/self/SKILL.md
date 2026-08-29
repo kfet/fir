@@ -326,7 +326,7 @@ Extensions can optionally self-restrict by mode using script comment frontmatter
 
 Builtin extensions (notify, tmuxspinner, plan_nudger, handoff_nudger, etc.) are embedded in the binary and auto-discovered at lowest priority. Use `fir extensions` to list them and `fir extensions install <name>` to extract one for customisation.
 
-`handoff-nudger` watches context usage after each turn and, once it crosses the lower of `atTokens` (150000) / `atPercent` (60) of the window, prepends a `[SYS_EXT]` note telling you to wrap up and `self_handoff` — auto-compaction only fires at 70% and is lossy, while cache-read cost grows linearly with conversation length. Tune or disable it in `handoff-nudger.json` (`atTokens`, `atPercent`, `nudgeEvery`, `off`) in `.fir/` or `~/.config/fir/`.
+`handoff-nudger` watches context usage after each turn and prepends a `[SYS_EXT]` note telling you to wrap up and `self_handoff` — auto-compaction only fires at 70% and is lossy, while cache-read cost grows linearly with conversation length. Two triggers: the ceiling, the lower of `atTokens` (500000) / `atPercent` (65) of the window; and a cold prompt cache — 30% of that ceiling (floored at 100000) once the session has been idle past `idleMinutes` (65), since the provider's 1h cache has expired by then and every further turn pays full input on the whole prefix. Tune or disable it in `handoff-nudger.json` (`atTokens`, `atPercent`, `idleMinutes`, `nudgeEvery`, `off`) in `.fir/` or `~/.config/fir/`.
 
 Extensions can be reloaded via `/reload`; there is no automatic file watching. Reloading extensions rebuilds the system prompt, which might impact prompt cacheing.
 

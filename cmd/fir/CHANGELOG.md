@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Changed
+- **`handoff-nudger` is far less chatty, and now knows about the 1h prompt cache.** It nudged at the lower of 150k tokens / 60% of the window and repeated every 40k, which on a 1M-window model meant nagging from 150k onwards — while the prefix was cache-warm and a re-read cost ~0.1x input, i.e. noise. The ceiling moves to 500k / 65% (repeat every 100k), and a second trigger fires at 30% of that ceiling (floored at 100k, capped at the ceiling) once the session has been idle past `idleMinutes` (65) — by then the provider's extended cache has expired and every further turn pays full input on the whole prefix plus a fresh cache write, so that is the cheap moment to cut over. Idle is measured turn-end to turn-start, so a single long-running turn (which keeps the cache warm with its own API calls) never reads as idle, and the first turn of a cold streak is exempt from the `nudgeEvery` throttle so the cheap cut-over turn is never suppressed by a nudge 20k tokens earlier — only the first, so a slow-cadence session (cold on every turn) is nudged once rather than continuously. The cold-cache threshold is derived from the ceiling rather than being its own config key, so the knob count grows by one (`idleMinutes`) and no more.
+
 ## [1.3.3] - 2026-08-28
 
 ### Fixed
