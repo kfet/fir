@@ -10,6 +10,8 @@
 
 ### Changed
 - **Model catalog regenerated** at release time: routine upstream refresh of model ids, pricing and limits.
+### Fixed
+- **`fir pty kill` orphaned everything the window had started.** The underlying `firpty` tore a window down by SIGKILLing its session leader and nothing else, so a language server, a build, or any command the shell had launched kept running with its terminal closed under it. Bumped to `firpty` v0.2.0, which signals the process **group** — SIGHUP first so terminal-attached programs flush, then SIGKILL after a grace period — decides whether to signal from whether the terminal still has a holder rather than from a pid that may have been recycled, and closes the master last so the window's final output is still captured. The same release also reaps windows whose program exited on its own (they used to stay zombies for the life of the server) and fixes `alive` reporting on the output stream rather than on the process.
 
 ## [1.3.4] - 2026-08-29
 
