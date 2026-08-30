@@ -2,8 +2,14 @@
 
 ## [Unreleased]
 
+## [1.3.5] - 2026-08-30
+
 ### Fixed
+- **Flaky Python SDK extension tests under parallel `make all`.** The fake-host harnesses waited only 3–5s for a subprocess extension's JSON-RPC response, so interpreter startup under full-build load could time out `init` (`handoff_ext_test`, and the same pattern in `mood_ext_test`, `demo_ext_test`, `fir_ext_test`). All of these are early-exit polls, so the deadlines widen to 20s at no cost on the happy path.
 - **`fir update` corrupted Homebrew installs.** On a brew-managed install (`brew install kfet/ai/fir`), `/opt/homebrew/bin/fir` is a symlink into the Cellar, so self-update rewrote the binary *inside the keg* while Homebrew still recorded the old version — the next `brew upgrade` silently reverted it. `fir update` now detects a brew-managed executable and delegates to `brew update && brew upgrade kfet/ai/fir`, streaming brew's output. Detection is deliberately conservative (anything uncertain falls through to self-update); the sole hard failure is a Cellar-resident binary with no `brew` on PATH, which stops with an explanation rather than corrupting the keg.
+
+### Changed
+- **Model catalog regenerated** at release time: routine upstream refresh of model ids, pricing and limits.
 
 ## [1.3.4] - 2026-08-29
 

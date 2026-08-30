@@ -689,7 +689,7 @@ class TestHost(unittest.TestCase):
         result: list = []
 
         def reader():
-            result.append(host.readline(timeout=5.0))
+            result.append(host.readline(timeout=20.0))
 
         t = threading.Thread(target=reader, daemon=True)
         t.start()

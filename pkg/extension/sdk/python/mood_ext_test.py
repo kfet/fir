@@ -143,7 +143,7 @@ class Bridge:
         self._stdin.write((json.dumps(msg) + "\n").encode())
         self._stdin.flush()
 
-    def request(self, method: str, params: dict, timeout: float = 5.0) -> dict:
+    def request(self, method: str, params: dict, timeout: float = 20.0) -> dict:
         mid = self.next_id
         self.next_id += 1
         self._send({"jsonrpc": "2.0", "id": mid, "method": method, "params": params})
@@ -157,7 +157,7 @@ class Bridge:
     def notify(self, method: str, params: dict | None = None) -> None:
         self._send({"jsonrpc": "2.0", "method": method, "params": params or {}})
 
-    def wait_for(self, predicate, timeout: float = 5.0) -> bool:
+    def wait_for(self, predicate, timeout: float = 20.0) -> bool:
         deadline = time.time() + timeout
         while time.time() < deadline:
             if predicate():
@@ -305,7 +305,7 @@ def main() -> int:
                 e.get("kind") == "gating" and e.get("decision") is True
                 for e in json.loads(b.session_data.get("mood_log", "[]"))
             ),
-            timeout=5.0,
+            timeout=20.0,
         ), "YES gating entry never recorded"
         log = json.loads(b.session_data["mood_log"])
         gating_entries = [e for e in log if e.get("kind") == "gating"]
@@ -388,7 +388,7 @@ def main() -> int:
                 )
                 > before_send_n
             ),
-            timeout=5.0,
+            timeout=20.0,
         ), "no new mood_nudge send_message recorded"
         send_msg_reqs = [
             r
@@ -434,7 +434,7 @@ def main() -> int:
                 and "aside unavailable" in (e.get("skipped_reason") or "")
                 for e in json.loads(b.session_data.get("mood_log", "[]"))
             ),
-            timeout=5.0,
+            timeout=20.0,
         ), "is_error=True gating entry not recorded"
         log = json.loads(b.session_data["mood_log"])
         # No additional nudge during the error window.
@@ -510,7 +510,7 @@ def main() -> int:
                 )
                 > len(status_clears_before)
             ),
-            timeout=5.0,
+            timeout=20.0,
         ), "expected set_status('') to clear stale tag"
         print("✓ stale footer tag cleared after TTL")
 

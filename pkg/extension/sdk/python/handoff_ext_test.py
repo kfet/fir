@@ -166,7 +166,7 @@ class Bridge:
         self._stdin.write((json.dumps(msg) + "\n").encode())
         self._stdin.flush()
 
-    def request(self, method: str, params: dict, timeout: float = 5.0) -> dict:
+    def request(self, method: str, params: dict, timeout: float = 20.0) -> dict:
         mid = self.next_id
         self.next_id += 1
         self._send({"jsonrpc": "2.0", "id": mid, "method": method, "params": params})

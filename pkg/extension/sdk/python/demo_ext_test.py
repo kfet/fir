@@ -286,7 +286,7 @@ class FakeFir:
         )
         return self.wait_for_response(msg_id)
 
-    def wait_for_method(self, method: str, timeout: float = 3.0) -> Optional[dict]:
+    def wait_for_method(self, method: str, timeout: float = 20.0) -> Optional[dict]:
         """Block until a message with the given outbound method is seen."""
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
@@ -299,7 +299,7 @@ class FakeFir:
             self._from_ext_event.clear()
         return None
 
-    def wait_for_response(self, msg_id: int, timeout: float = 3.0) -> Optional[dict]:
+    def wait_for_response(self, msg_id: int, timeout: float = 20.0) -> Optional[dict]:
         """Block until a response with the given id is seen."""
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
@@ -1129,7 +1129,7 @@ class TestDemoCLIVerb(DemoTestCase):
         fake.send({"jsonrpc": "2.0", "method": "cli_stdin", "params": {"data": "line1\n"}})
         fake.send({"jsonrpc": "2.0", "method": "cli_stdin", "params": {"data": "line2\n"}})
         fake.send({"jsonrpc": "2.0", "method": "cli_stdin", "params": {"eof": True}})
-        resp = fake.wait_for_response(102, timeout=5.0)
+        resp = fake.wait_for_response(102, timeout=20.0)
         fake.stop()
         assert resp is not None
         self.assertEqual(resp["result"]["exit_code"], 0)
@@ -1178,7 +1178,7 @@ class TestDemoProvider(DemoTestCase):
         self.assertEqual(resp["result"], {"model_ids": ["echo-1"]})
 
     def _collect_stream_events(
-        self, fake: "FakeFir", stream_id: str, timeout: float = 3.0
+        self, fake: "FakeFir", stream_id: str, timeout: float = 20.0
     ) -> list[dict]:
         deadline = time.monotonic() + timeout
         events: list[dict] = []
