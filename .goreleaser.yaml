@@ -54,11 +54,23 @@ release:
 # ---------------------------------------------------------------------------
 brews:
   - name: fir
+    # Pushed over ssh with a WRITE deploy key on kfet/homebrew-ai,
+    # rather than with a personal access token. A deploy key is scoped
+    # to exactly one repository and does not expire, where a
+    # fine-grained PAT is account-wide, opaque once created, and
+    # capped at a one-year lifetime — i.e. it breaks silently, later.
+    # Each consumer repo has its OWN key, so one can be revoked
+    # without touching the others.
+    #
+    # private_key takes the key CONTENTS (GoReleaser writes them to a
+    # temp file itself), not a path.
     repository:
       owner: kfet
       name: homebrew-ai
       branch: main
-      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+      git:
+        url: 'git@github.com:kfet/homebrew-ai.git'
+        private_key: '{{ index .Env "HOMEBREW_TAP_SSH_KEY" }}'
     directory: Formula
     url_template: "https://github.com/kfet/fir-dist/releases/download/{{ .Tag }}/{{ .ArtifactName }}"
     homepage: "https://github.com/kfet/fir"
@@ -68,7 +80,15 @@ brews:
       name: goreleaserbot
       email: bot@goreleaser.com
     commit_msg_template: "fir: update to {{ .Tag }}"
-    skip_upload: auto
+    # Skip the tap push when no key is configured, instead of failing
+    # the whole release. A fresh clone or a fork has no
+    # HOMEBREW_TAP_SSH_KEY, and a missing formula update is not a
+    # reason to withhold the binaries. "auto" additionally skips
+    # prereleases.
+    #
+    # index .Env rather than .Env.X so an entirely unset variable is an
+    # empty string instead of a template error.
+    skip_upload: '{{ if eq (index .Env "HOMEBREW_TAP_SSH_KEY") "" }}true{{ else }}auto{{ end }}'
     test: |
       system "#{bin}/fir", "--version"
     # The downloaded artifact is named fir-<os>-<arch> (archives.formats=binary
@@ -94,11 +114,23 @@ brews:
   # `brew link --overwrite fir@X.Y`). That is the rollback flow.
   # The tap-prune workflow keeps only the 10 most recent minors.
   - name: "fir@{{ .Major }}.{{ .Minor }}"
+    # Pushed over ssh with a WRITE deploy key on kfet/homebrew-ai,
+    # rather than with a personal access token. A deploy key is scoped
+    # to exactly one repository and does not expire, where a
+    # fine-grained PAT is account-wide, opaque once created, and
+    # capped at a one-year lifetime — i.e. it breaks silently, later.
+    # Each consumer repo has its OWN key, so one can be revoked
+    # without touching the others.
+    #
+    # private_key takes the key CONTENTS (GoReleaser writes them to a
+    # temp file itself), not a path.
     repository:
       owner: kfet
       name: homebrew-ai
       branch: main
-      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+      git:
+        url: 'git@github.com:kfet/homebrew-ai.git'
+        private_key: '{{ index .Env "HOMEBREW_TAP_SSH_KEY" }}'
     directory: Formula
     url_template: "https://github.com/kfet/fir-dist/releases/download/{{ .Tag }}/{{ .ArtifactName }}"
     homepage: "https://github.com/kfet/fir"
@@ -108,7 +140,15 @@ brews:
       name: goreleaserbot
       email: bot@goreleaser.com
     commit_msg_template: "fir@{{ .Major }}.{{ .Minor }}: update to {{ .Tag }}"
-    skip_upload: auto
+    # Skip the tap push when no key is configured, instead of failing
+    # the whole release. A fresh clone or a fork has no
+    # HOMEBREW_TAP_SSH_KEY, and a missing formula update is not a
+    # reason to withhold the binaries. "auto" additionally skips
+    # prereleases.
+    #
+    # index .Env rather than .Env.X so an entirely unset variable is an
+    # empty string instead of a template error.
+    skip_upload: '{{ if eq (index .Env "HOMEBREW_TAP_SSH_KEY") "" }}true{{ else }}auto{{ end }}'
     caveats: |
       This is a pinned channel (fir@{{ .Major }}.{{ .Minor }}). It ships
       its own bin/fir, which collides with the rolling kfet/ai/fir

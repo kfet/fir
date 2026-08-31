@@ -103,7 +103,11 @@ jobs:
           args: release --clean --skip=validate
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          # May be unset: .goreleaser.yaml skips the tap push rather than
+          # failing the release when it is empty. This is an ssh private
+          # key for a WRITE deploy key on kfet/homebrew-ai, not a PAT —
+          # repo-scoped and non-expiring, and unique to this repo.
+          HOMEBREW_TAP_SSH_KEY: ${{ secrets.HOMEBREW_TAP_SSH_KEY }}
 
       # ---------------------------------------------------------------
       # Mirror release to the public binary-distribution repo.
