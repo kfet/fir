@@ -14,9 +14,18 @@ import (
 )
 
 const (
-	// Binaries are distributed through a public mirror repo (kfet/fir-dist)
-	// so update checks and downloads work without GitHub authentication,
-	// regardless of the visibility of the source repo.
+	// Binaries are distributed through a public mirror repo (kfet/fir-dist).
+	//
+	// This started as a workaround for kfet/fir being private. It is not
+	// that any more — fir is public — and the mirror is kept for a better
+	// reason: fir-dist is the STABLE DISTRIBUTION ENDPOINT, baked into
+	// every binary ever shipped (here, and as the catalog URL in
+	// pkg/models). The installed base can only be redirected THROUGH this
+	// endpoint, so it cannot be retired without dual-publishing for as
+	// long as any old binary exists. It also decouples distribution from
+	// the source repo, which can then be renamed or restructured freely.
+	//
+	// Do not rename kfet/fir-dist. Shipped binaries resolve it by name.
 	repoOwner = "kfet"
 	repoName  = "fir-dist"
 	cacheTTL  = 24 * time.Hour

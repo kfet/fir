@@ -36,8 +36,12 @@ jobs:
 
       - name: Publish catalog to kfet/fir-dist
         env:
-          # Same fine-grained PAT the release workflow uses to mirror assets:
-          # "Contents: read and write" on kfet/fir-dist only.
+          # Same fine-grained PAT the release workflow uses to mirror
+          # assets: "Contents: read and write" on kfet/fir-dist only,
+          # non-expiring. SHARED with release.yml — rotating it means
+          # updating one secret and re-running both workflows. A
+          # successful workflow_dispatch of THIS workflow is the cheap
+          # proof that a freshly rotated token works.
           MIRROR_TOKEN: ${{ secrets.FIR_DIST_TOKEN }}
           MIRROR_REPO: kfet/fir-dist
           CATALOG: pkg/models/catalog-v1.json

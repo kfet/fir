@@ -120,7 +120,16 @@ jobs:
       # Requires a repository secret FIR_DIST_TOKEN: a fine-grained PAT
       # with "Contents: read and write" on kfet/fir-dist only. The
       # default GITHUB_TOKEN is scoped to kfet/fir and cannot push
-      # cross-repo.
+      # cross-repo, and a deploy key cannot do this at all — release
+      # ASSET UPLOAD is a REST API call, and deploy keys are git-only.
+      # That is why this one credential is a PAT while every tap push in
+      # the fleet is an ssh deploy key.
+      #
+      # The token is NON-EXPIRING (fine-grained PATs support expires_in
+      # =none), so there is no silent expiry cliff. publish-catalog.yml
+      # SHARES this same secret: rotate once, then re-run both — the
+      # catalog workflow has a workflow_dispatch trigger for exactly
+      # that, and succeeding there proves the new token works.
       #
       # We mirror by re-downloading the source release's assets via gh
       # (authenticated as the source-repo token), then re-uploading them

@@ -151,3 +151,22 @@ artifacts (benchmarks, tool wrappers, skill patches). Judged redundant: git
 branches plus `fir-exts` packages already serve it. *Trigger: fleets are observed
 independently re-deriving the same artifacts, i.e. the duplication is real rather
 than anticipated.*
+
+## Deferred: immutable releases on kfet/fir-dist (2026-09-01)
+
+**Enable GitHub immutable releases on the distribution mirror.** fir-dist is a
+binary-distribution endpoint that every installed fir self-updates from, so
+asset immutability is the right posture there — it complements the sha256 the
+Homebrew formula already pins, and closes silent asset replacement under a
+published tag.
+
+Not done today because it is a mirror-step rewrite, not a flag flip: immutable
+releases lock assets after publication, and `release.yml` currently re-uploads
+with `gh release upload --clobber` precisely so a re-run on the same tag is
+idempotent. The supported shape (see softprops/action-gh-release docs) is to
+upload every asset to a DRAFT release and publish the draft once complete, with
+downstream consumers subscribing to `release.published` rather than
+`release.prereleased`. Worth doing deliberately, with a dry run on a throwaway
+tag first. *Trigger: any change to the mirror step, or the first time an asset
+under a published tag needs to be treated as tamper-evident by a third party.*
+
