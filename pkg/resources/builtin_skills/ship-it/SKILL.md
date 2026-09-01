@@ -26,9 +26,13 @@ Run only on a worktree feature branch with implementation complete and
    *is* the confirmation that skill asks for — do not stop to ask again.
 4. **deploy** — complete the `release` skill's Publishing step: `make publish`
    (pushes the commit and tag; GoReleaser CI builds and uploads the release),
-   followed by its post-publish workflow monitoring. When the target is a
-   specific host rather than a GitHub release, use `make deploy HOST=<host>`
-   instead.
+   followed by its post-publish workflow monitoring. Rolling the new version out
+   to hosts is then `fir update` **run on each host**, once CI is green — never
+   an scp/cp of a build artifact onto a host's `fir`. `make deploy HOST=<host>`
+   is the exception, not the rollout: use it only when the release has no
+   artifact for that platform, or for deliberate pre-release testing, say so out
+   loud, and clean up the `~/.local/bin/fir.prev` file it leaves behind once the
+   new binary is verified.
 5. **Cleanup** — remove the worktree and branch.
 6. **Instruction friction log** — see below.
 

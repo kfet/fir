@@ -42,15 +42,16 @@ releases carry; that line alone is not grounds for a minor bump either.
     "$installdir/fir" --version
     ```
 
-    Then reconcile PATH: compare `command -v fir` against `$installdir/fir`. If
+    Then diagnose PATH: compare `command -v fir` against `$installdir/fir`. If
     they differ (and are not the same file — a symlink is fine), PATH is serving
     a **stale, shadowing** binary and a bare `fir --version` will silently report
     the old version. `make install` warns about this; do not ignore the warning.
-    Report which path holds which version. Only if the shadowing path is
-    user-writable and clearly meant to be the same install, offer to overwrite it
-    (`cp "$installdir/fir" "$(command -v fir)"`, keeping a `.prev` backup as
-    `make deploy` does) — never do so silently, and never assume it is writable.
     Never accept a bare `fir --version` as proof.
+
+    At this step you **diagnose and report only** — say which path holds which
+    version. Do not touch the shadowing binary here: nothing is published yet, so
+    there is no release artifact to reconcile against. Reconciliation happens
+    after publishing (see *Post-publish: reconcile a shadowing PATH binary*).
 
 ## Important notes
 
@@ -62,7 +63,12 @@ releases carry; that line alone is not grounds for a minor bump either.
 
 After the user confirms, run `make publish` to regenerate the PGO profile and amend the release commit if it changed, push the commit and tag to origin, and let GoReleaser CI build and create the release.
 
-Alternatively, `make deploy` pushes binaries directly to remote hosts via scp (no GitHub release needed).
+Alternatively, `make deploy HOST=<host>` scp's a locally built binary straight
+onto a host. That is **not** the update path — it installs an unpublished,
+locally built artifact and leaves a `~/.local/bin/fir.prev` backup file behind.
+Reserve it for the case where no published artifact exists for that platform, or
+for deliberate pre-release testing, and say out loud that you are doing it.
+Hosts are normally brought current with `fir update` — see below.
 
 If any step fails, stop and report the error. Do not push or publish unless the user confirms.
 
@@ -139,3 +145,45 @@ escape or a BOM at byte 0 is a permanent, reproducible fault that no amount of
 retrying will clear.
 
 Do not ask the user whether to monitor — always do it automatically after a successful publish.
+
+## Post-publish: reconcile a shadowing PATH binary
+
+Only once the CI monitoring above reports every workflow for the release commit
+`completed` / `success` does a published artifact exist. That green result — not
+a guess, not a sleep — is the signal that the following is safe to run.
+
+**A shadowing PATH binary is brought current by the canonical update path, and
+by nothing else: `fir update`, run on the host that carries it.** `fir update`
+upgrades a Homebrew-managed install via brew and otherwise self-replaces
+atomically from the published GitHub release, leaving no backup files behind.
+
+**Copying a build artifact over an installed binary is not a supported update
+path.** Do not `cp`/`scp`/`mv` the output of `make install` or `make build` onto
+a binary on someone's `PATH`, and do not leave `.prev` (or any other) backup
+litter next to it. A host that gets hand-copied artifacts is running an
+unpublished build that no release tag describes.
+
+Run it as a bare command so the shell resolves the **shadowing** binary — that
+is the one that needs replacing, and `fir update` rewrites the running binary in
+place:
+
+```bash
+fir update            # NOT "$installdir/fir" update — that one is already new
+hash -r               # shells cache PATH lookups; clear before re-checking
+"$(command -v fir)" --version
+```
+
+For a remote host, run `fir update` **on that host** (e.g. over ssh). Never scp
+a binary to it.
+
+Then verify. `fir update` prints "already up to date" and exits 0 when the
+running binary's version string compares no older than the release — so a
+dev/dirty build can silently no-op. If `"$(command -v fir)" --version` does not
+report the version you just released, that host is carrying a non-release build
+and `fir update` will not fix it.
+
+**Exception — no published artifact for the platform.** If the release has no
+asset for that host's OS/arch, there is nothing to self-update from. Then, and
+only then, build and install into the PATH location deliberately: state out loud
+which path you are overwriting and why, get the user's confirmation first, and do
+not leave a backup file behind. This is the exception, never the offer.

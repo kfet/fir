@@ -21,6 +21,7 @@ Thumbs.db
 # Env
 .envrc
 FLEET.md
+BRIEF.md
 __pycache__/
 swe-bench-cache.json
 cmd/fir/fir

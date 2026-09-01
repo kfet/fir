@@ -306,6 +306,13 @@ publish: pgo build
 
 # Deploy to a remote host via scp (auto-detects OS and arch)
 # Usage: make deploy HOST=myhost
+#
+# NOT the canonical update path. This ships a *locally built*, unpublished
+# binary and leaves a ~/.local/bin/fir.prev backup on the target. Hosts are
+# normally brought current with `fir update` run on the host itself, which
+# self-updates atomically from the published release (or defers to brew) and
+# leaves nothing behind. Use this target only when no published artifact
+# exists for the platform, or for deliberate pre-release testing.
 deploy: build-all
 	@if [ -z "$(HOST)" ]; then echo "Usage: make deploy HOST=<hostname>"; exit 1; fi
 	@INFO=$$(ssh -o ConnectTimeout=5 $(HOST) "uname -s -m") || { echo "Cannot reach $(HOST)"; exit 1; }; \
