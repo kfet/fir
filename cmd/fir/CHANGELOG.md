@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-09-01
+
+### Changed
+- **Model catalog regenerated** at release time: routine upstream refresh of model ids, pricing and limits.
+
+### Fixed
+- **Newer Anthropic OAuth models no longer fail with a version error.** The `anthropic-auth` builtin extension identifies itself to the OAuth endpoint as `claude-cli/<version>`, and that version was pinned at `2.1.112`. Anthropic gates recent models on the advertised Claude Code version, so selecting one (e.g. `claude-fable-5-1`) died with `400 ... does not support this model; version 2.1.251 or newer is required`. The pin is now `2.1.257`.
+
 ## [1.4.0] - 2026-09-01
 
 ### Added
