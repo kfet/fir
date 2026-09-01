@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [1.3.6] - 2026-09-01
+
+### Changed
+- **Model catalog regenerated** at release time: routine upstream refresh of model ids, pricing and limits.
+
 ### Fixed
 - **Anthropic `refusal` / `sensitive` / unrecognised stop reasons lost their diagnosis.** The `message_delta` SSE handler mapped those raw stop reasons to `StopReasonError` but never set `ErrorMessage`, so the turn reached the agent loop empty and the user saw only its last-ditch backstop ("provider reported stop_reason=error with no error message"). The handler now sets a truthful message naming the **raw** stop reason — the model declined, the response was filtered, or Anthropic shipped a value fir does not know — without clobbering an `ErrorMessage` an earlier error path already set. Wording deliberately avoids anything `ratelimit.IsRetryableError` matches: these outcomes are terminal, not re-rollable.
 
