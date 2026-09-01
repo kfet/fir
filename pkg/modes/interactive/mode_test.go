@@ -2743,3 +2743,26 @@ func TestInteractiveMode_DispatchInitialPrompt_Message(t *testing.T) {
 		t.Error("plain initial prompt was not shown as a user message")
 	}
 }
+
+// TestInteractiveMode_DispatchInitialPrompt_Unknown verifies a command-looking
+// initial prompt that nothing claims is reported to the user rather than sent
+// to the model as literal text.
+func TestInteractiveMode_DispatchInitialPrompt_Unknown(t *testing.T) {
+	tm := newTestMode(t)
+
+	tm.mode.DispatchInitialPrompt("/not-a-real-command")
+
+	// The unknown path resolves on its own goroutine (it waits for the
+	// extension handshake first), so poll for the warning.
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		tm.waitRender()
+		if strings.Contains(strings.Join(tm.term.GetOutput(), "\n"), "Unknown command /not-a-real-command") {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("unknown initial command never reported to the user")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}

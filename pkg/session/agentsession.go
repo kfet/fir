@@ -268,13 +268,17 @@ type AgentSession struct {
 	mcpConfigured bool
 }
 
-// WaitExtReady blocks until extensions have finished loading. It returns
+// WaitExtReady blocks until extensions have finished loading, ctx is done, or
 // immediately when no extension-readiness channel was wired (e.g. in tests).
 // Prompt gates on this internally; callers that dispatch something other than
 // a prompt (such as an extension slash command) need it explicitly.
-func (s *AgentSession) WaitExtReady() {
-	if s.extReady != nil {
-		<-s.extReady
+func (s *AgentSession) WaitExtReady(ctx context.Context) {
+	if s.extReady == nil {
+		return
+	}
+	select {
+	case <-s.extReady:
+	case <-ctx.Done():
 	}
 }
 

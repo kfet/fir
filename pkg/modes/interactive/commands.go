@@ -145,7 +145,10 @@ func (m *InteractiveMode) DispatchInitialPrompt(text string) {
 			// Extension commands register during the handshake, which runs
 			// concurrently with startup; re-resolve once it has completed.
 			if m.session != nil {
-				m.session.WaitExtReady()
+				m.session.WaitExtReady(m.ctx)
+			}
+			if m.ctx.Err() != nil {
+				return
 			}
 			if m.isExtensionSlashCommand(text) {
 				m.handleExtensionSlashCommand(text)
