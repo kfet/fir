@@ -2,7 +2,10 @@
 
 ## [Unreleased]
 
+## [1.3.7] - 2026-09-01
+
 ### Changed
+- **Model catalog regenerated** at release time: routine upstream refresh of model ids, pricing and limits.
 - **`release` and `ship-it` skills now point at the canonical update path instead of hand-copying binaries.** The `release` skill's PATH-reconciliation step used to *offer* to `cp` the freshly `make install`ed binary over a shadowing `fir` on `PATH`, keeping a `.prev` backup — guidance that put locally built, unpublished artifacts onto hosts and left multi-MB litter behind. Step 10 now diagnoses and reports only (nothing is published yet, so there is nothing to reconcile against), and a new post-publish section — gated on the existing green-CI signal — reconciles a shadowing binary with `fir update` run on the host that carries it, including the `hash -r` re-check and the "already up to date" no-op trap for dev builds. `ship-it`'s deploy step makes per-host `fir update` the rollout and demotes `make deploy HOST=<host>` to an explicit exception. `make deploy`'s behaviour is unchanged, but the target now carries a comment saying it is not the update path.
 
 ## [1.3.6] - 2026-09-01
