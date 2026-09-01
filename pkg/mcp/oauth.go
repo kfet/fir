@@ -118,7 +118,15 @@ func (e *AuthRequiredError) Error() string {
 	if e.Reason != "" {
 		msg += " (" + e.Reason + ")"
 	}
-	return msg + fmt.Sprintf("; run: fir mcp login %s", e.Server)
+	return msg + "; " + loginHint(e.Server)
+}
+
+// loginHint names both forms of the login command. The slash form leads
+// because this message is nearly always read inside a session; the terminal
+// form follows for the cases (ACP, plain CLI) where there is no prompt to
+// type it at.
+func loginHint(server string) string {
+	return fmt.Sprintf("run: /mcp login %s (or: fir mcp login %s)", server, server)
 }
 
 func (e *AuthRequiredError) Unwrap() error { return e.Cause }

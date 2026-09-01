@@ -20,7 +20,8 @@ import (
 // plain terminal, instead of during a session: MCP servers connect from
 // background goroutines (potentially before the TUI is up), so fir never opens
 // a browser on its own. A server that needs a login reports
-// `run: fir mcp login <server>` — this is that command.
+// `run: /mcp login <server> (or: fir mcp login <server>)` — this is the
+// terminal half of that; `/mcp login` is the in-session half.
 //
 // Usage:
 //

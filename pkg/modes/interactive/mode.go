@@ -1022,17 +1022,37 @@ func (m *InteractiveMode) setupAutocomplete() {
 	sort.Strings(skillsSpec.Values)
 	argSpecs["skills"] = skillsSpec
 
-	// /mcp completes with server names for detailed inspection.
+	// /mcp completes with server names for detailed inspection, and
+	// `/mcp login|logout` complete with server names too.
 	if m.mcpDetails != nil {
-		mcpSpec := &CommandArgSpec{Type: ArgCompleteStatic}
+		var serverNames []string
 		for _, d := range m.mcpDetails() {
-			mcpSpec.Values = append(mcpSpec.Values, d.Name)
+			serverNames = append(serverNames, d.Name)
 		}
-		mcpSpec.Values = append(mcpSpec.Values, "reload", "login", "logout")
-		sort.Strings(mcpSpec.Values)
-		argSpecs["mcp"] = mcpSpec
+		argSpecs["mcp"] = mcpArgSpec(serverNames)
 	}
 
 	provider := NewCombinedAutocompleteProvider(commands, basePath, argSpecs)
 	m.editor.SetAutocompleteProvider(provider)
+}
+
+// mcpArgSpec builds the argument completion spec for /mcp. The first argument
+// completes to a server name (for `/mcp <name>` detail) or a subcommand, and
+// `/mcp login|logout` then complete their second argument with server names.
+func mcpArgSpec(serverNames []string) *CommandArgSpec {
+	names := append([]string{}, serverNames...)
+	sort.Strings(names)
+	serverSpec := &CommandArgSpec{Type: ArgCompleteStatic, Values: names}
+
+	values := append(append([]string{}, names...), "reload", "login", "logout")
+	sort.Strings(values)
+	return &CommandArgSpec{
+		Type:   ArgCompleteStatic,
+		Values: values,
+		SubCommands: map[string]*CommandArgSpec{
+			"reload": {Type: ArgCompleteNone},
+			"login":  serverSpec,
+			"logout": serverSpec,
+		},
+	}
 }

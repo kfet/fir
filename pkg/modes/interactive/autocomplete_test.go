@@ -739,3 +739,56 @@ func TestTokenStartIndex_QuoteAware(t *testing.T) {
 		}
 	}
 }
+
+func TestGetSuggestions_MCPServerNameArgs(t *testing.T) {
+	argSpecs := map[string]*CommandArgSpec{
+		"mcp": mcpArgSpec([]string{"github", "gitlab", "notion"}),
+	}
+	p := NewCombinedAutocompleteProvider(testCommands(), "/tmp", argSpecs)
+
+	// Bare `/mcp ` offers server names and subcommands.
+	s := p.GetSuggestions([]string{"/mcp "}, 0, 5)
+	if s == nil {
+		t.Fatal("expected suggestions for /mcp")
+	}
+	if len(s.Items) != 6 {
+		t.Fatalf("expected 6 suggestions (3 servers + reload/login/logout), got %d", len(s.Items))
+	}
+
+	// `/mcp login ` offers only server names.
+	s = p.GetSuggestions([]string{"/mcp login "}, 0, 11)
+	if s == nil {
+		t.Fatal("expected server-name suggestions for /mcp login")
+	}
+	if len(s.Items) != 3 {
+		t.Fatalf("expected 3 server suggestions, got %d", len(s.Items))
+	}
+
+	// `/mcp logout git` fuzzy-filters server names.
+	s = p.GetSuggestions([]string{"/mcp logout git"}, 0, 15)
+	if s == nil || len(s.Items) != 2 {
+		t.Fatalf("expected 2 filtered server suggestions, got %v", s)
+	}
+
+	// `/mcp reload ` takes no arguments.
+	if s := p.GetSuggestions([]string{"/mcp reload "}, 0, 12); s != nil {
+		t.Fatalf("expected no suggestions after /mcp reload, got %v", s)
+	}
+}
+
+func TestApplyCompletion_MCPLoginArg(t *testing.T) {
+	argSpecs := map[string]*CommandArgSpec{
+		"mcp": mcpArgSpec([]string{"github"}),
+	}
+	p := NewCombinedAutocompleteProvider(testCommands(), "/tmp", argSpecs)
+
+	line := "/mcp login git"
+	s := p.GetSuggestions([]string{line}, 0, len(line))
+	if s == nil || len(s.Items) != 1 {
+		t.Fatalf("expected one suggestion, got %v", s)
+	}
+	res := p.ApplyCompletion([]string{line}, 0, len(line), s.Items[0], s.Prefix)
+	if res.Lines[0] != "/mcp login github " {
+		t.Fatalf("got %q", res.Lines[0])
+	}
+}

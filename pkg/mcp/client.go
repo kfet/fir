@@ -382,7 +382,7 @@ func (m *Manager) AuthStatus(name string) string {
 	}
 	if cred := m.credStore.Load(name, sa.resource); cred != nil {
 		if cred.Token != nil && cred.Token.Expired() && cred.Token.RefreshToken == "" {
-			return "auth: OAuth token expired — run: fir mcp login " + name
+			return "auth: OAuth token expired — " + loginHint(name)
 		}
 		issuer := cred.Issuer
 		if issuer == "" {

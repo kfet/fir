@@ -108,7 +108,7 @@ automatic prompt there would be a browser-window storm.) A server that needs cre
 its connection with an actionable message naming the command to run:
 
 ```
-MCP server "my-remote" requires OAuth authentication (no stored credential); run: fir mcp login my-remote
+MCP server "my-remote" requires OAuth authentication (no stored credential); run: /mcp login my-remote (or: fir mcp login my-remote)
 ```
 
 | Command | Context |

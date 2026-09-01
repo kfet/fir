@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Changed
+- **MCP auth messages now name the in-session `/mcp login` form, and `/mcp login|logout` complete server names.** A server needing OAuth reported only `run: fir mcp login <server>` — sending a user who was already at a fir prompt out to a second terminal for a flow the session can run itself. Both message sites (the `*AuthRequiredError` text and the expired-token line in `fir mcp list`) now share one `loginHint` helper and read `run: /mcp login <server> (or: fir mcp login <server>)`, slash form first because the message is nearly always read inside a session. Separately, `/mcp login` and `/mcp logout` gained argument autocomplete over the configured server names, via the existing `CommandArgSpec.SubCommands` mechanism that already backs `/skills install`; `/mcp <name>` and `/mcp reload` are unchanged.
+
 ## [1.4.1] - 2026-09-01
 
 ### Changed

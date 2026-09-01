@@ -259,7 +259,7 @@ func TestMCPOAuth_ReauthRequiredAfterFullRevoke(t *testing.T) {
 	var authErr *AuthRequiredError
 	require.True(t, errors.As(err, &authErr), "got %T: %v", err, err)
 	require.Equal(t, "srv", authErr.Server)
-	require.Contains(t, authErr.Error(), "fir mcp login srv")
+	require.Contains(t, authErr.Error(), "/mcp login srv (or: fir mcp login srv)")
 	require.Nil(t, storage.Get(storageKey("srv")), "revoked credential deleted")
 }
 
@@ -324,7 +324,7 @@ func TestMCPOAuth_ConnectWithoutCredentialsIsActionable(t *testing.T) {
 
 	var authErr *AuthRequiredError
 	require.True(t, errors.As(err, &authErr), "got %T: %v", err, err)
-	require.Contains(t, err.Error(), "fir mcp login srv")
+	require.Contains(t, err.Error(), "/mcp login srv (or: fir mcp login srv)")
 	registrations, _, _ := as.counters()
 	require.Zero(t, registrations, "the dial path performs no discovery of its own")
 }
@@ -500,6 +500,32 @@ func TestMCPOAuth_AuthStatusLabels(t *testing.T) {
 	require.Contains(t, mgr.AuthStatus("unsetok"), "NOT SET")
 	require.Contains(t, mgr.AuthStatus("off"), "disabled")
 	require.Contains(t, mgr.AuthStatus("broken"), "misconfigured")
+}
+
+// An expired, unrefreshable token sends the user to a login, naming the
+// in-session slash form first and the terminal form second.
+func TestMCPOAuth_AuthStatusExpiredNamesBothLoginForms(t *testing.T) {
+	const resource = "https://mcp.example.com/mcp"
+	storage := auth.NewAuthStorage(filepath.Join(t.TempDir(), "auth.json"))
+	require.NoError(t, newCredentialStore(storage).Save("srv", &oauthCredential{
+		Resource: resource,
+		Issuer:   "https://issuer.example",
+		TokenURL: "https://issuer.example/token",
+		Token: &pinoauth.Token{
+			AccessToken: "stale",
+			ExpiresAt:   time.Now().Add(-time.Hour),
+		},
+	}))
+
+	mgr := NewManager(map[string]ServerConfig{
+		"srv": {Transport: "streamable", URL: resource},
+	}, false)
+	mgr.SetAuth(storage)
+	t.Cleanup(func() { _ = mgr.Close() })
+
+	require.Equal(t,
+		"auth: OAuth token expired — run: /mcp login srv (or: fir mcp login srv)",
+		mgr.AuthStatus("srv"))
 }
 
 // --- Credential storage isolation ------------------------------------------
@@ -745,11 +771,11 @@ func TestNewServerAuthDisabledAndInvalid(t *testing.T) {
 func TestAuthRequiredErrorMessage(t *testing.T) {
 	base := errors.New("boom")
 	err := &AuthRequiredError{Server: "gh", Reason: "token revoked", Cause: base}
-	require.Equal(t, `MCP server "gh" requires OAuth authentication (token revoked); run: fir mcp login gh`, err.Error())
+	require.Equal(t, `MCP server "gh" requires OAuth authentication (token revoked); run: /mcp login gh (or: fir mcp login gh)`, err.Error())
 	require.ErrorIs(t, err, base)
 
 	bare := &AuthRequiredError{Server: "gh"}
-	require.True(t, strings.HasSuffix(bare.Error(), "run: fir mcp login gh"))
+	require.True(t, strings.HasSuffix(bare.Error(), "run: /mcp login gh (or: fir mcp login gh)"))
 }
 
 // --- Token containment ------------------------------------------------------
@@ -825,7 +851,7 @@ func TestMCPOAuth_RejectedStaticBearerIsNotAnOAuthProblem(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "static bearer token")
 	require.Contains(t, err.Error(), "auth.token")
-	require.NotContains(t, err.Error(), "fir mcp login",
+	require.NotContains(t, err.Error(), "mcp login",
 		"there is nothing to log in to for a static token")
 
 	var authErr *AuthRequiredError
