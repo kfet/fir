@@ -2,7 +2,10 @@
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-09-02
+
 ### Changed
+- **Model catalog regenerated** at release time: routine upstream refresh of model ids, pricing and limits.
 - **The advisor path (`aside` with `escalate=true`) no longer pays a full prompt-cache write on every escalation.** A side query replays the whole executor conversation and appends the one-off question, and the only breakpoint sat on that question — a block that can never recur — so with more than the ~20-block automatic lookback of tool calls between escalations every escalation re-wrote the entire history at flagship rates. Side queries now place *anchored rolling breakpoints*: one at the previous side query's write point (an exact prefix read of what was written last time), one at the current last **stable** history entry (writing only the delta, and becoming the next call's anchor), and none on the question. "Stable" excludes a trailing assistant turn, which is the one message guaranteed to be rewritten before the next escalation — it carries the in-flight `aside` tool call that `StripUnmatchedToolCalls` removes for this request and that is restored, with its tool result, by the next one. Anchors are keyed by session **and** model — an advisor-chain fallback to a different model is a different cache namespace — and held in a bounded map; a compacted or rewritten history is detected by content hash and degrades to a plain delta write rather than pointing at the wrong message. The side-query request is also marked for **1h cache retention per call**, without touching executor writes the way the global `FIR_CACHE_RETENTION` switch would, degrading to the default 5m TTL for models that don't support it.
 - **`PrefixGuard` no longer conflates advisor traffic with executor traffic.** Side queries hash into their own `<session>:sidequery:<model>` namespace, so a `-vv` cache-invalidation trace names drift that actually belongs to the request it is describing. The guard also stops hashing `cache_control` markers, which move by design every turn and previously produced a spurious "message changed" on essentially every single turn.
 
