@@ -33,7 +33,7 @@ func TestResolveSlashInvocation_UnknownHeadless(t *testing.T) {
 		t.Fatal("expected error for unknown skill")
 	}
 	if !strings.Contains(err.Error(), "unknown skill or command") {
-		t.Errorf("error %v, want contains 'unknown skill'", err)
+		t.Errorf("error %v, want contains 'unknown skill or command'", err)
 	}
 }
 
