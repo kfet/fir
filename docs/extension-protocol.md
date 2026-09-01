@@ -833,15 +833,24 @@ Response shape:
   block) — extensions can classify "empty:redacted" without keeping the
   raw response.
 
+Both flavors also carry token accounting on the terminating response, omitted
+when zero: `tokens_in` (uncached prompt), `tokens_out` (completion),
+`cache_read` and `cache_write` (prompt-cache hit and write sizes). These make
+the advisor path's prompt-cache behaviour observable from an extension — the
+`aside` extension renders them as `in 1.2k · read 48.3k · write 612 · out 900`.
+
 `side_query/delta` notification params:
 
-| Field        | Type   | Notes                                                  |
-|--------------|--------|--------------------------------------------------------|
-| `request_id` | int    | JSON-RPC id of the originating `side_query` request.   |
-| `type`       | string | One of `text`, `thinking`, `usage`. Additive — SDKs ignore unknown types. |
-| `text`       | string | For `text` and `thinking`. The streaming chunk.        |
-| `tokens_out` | int    | For `usage`. Output token count when known.            |
-| `seq`        | int    | Strictly increasing per-request, starting at 0.        |
+| Field         | Type   | Notes                                                  |
+|---------------|--------|--------------------------------------------------------|
+| `request_id`  | int    | JSON-RPC id of the originating `side_query` request.   |
+| `type`        | string | One of `text`, `thinking`, `usage`. Additive — SDKs ignore unknown types. |
+| `text`        | string | For `text` and `thinking`. The streaming chunk.        |
+| `tokens_out`  | int    | For `usage`. Output token count when known.            |
+| `tokens_in`   | int    | For `usage`. Uncached prompt tokens when known.        |
+| `cache_read`  | int    | For `usage`. Prompt-cache hit size when known.         |
+| `cache_write` | int    | For `usage`. Prompt-cache write size when known.       |
+| `seq`         | int    | Strictly increasing per-request, starting at 0.        |
 
 ---
 

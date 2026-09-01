@@ -991,6 +991,76 @@ def _slug_for_progress(partial: str) -> str:
     return f"{n / 1024:.1f}kc"
 
 
+def _fmt_tokens(n: int) -> str:
+    """Compact token count: 812, 4.1k, 132k."""
+    if n < 1000:
+        return str(n)
+    if n < 100_000:
+        return f"{n / 1000:.1f}k"
+    return f"{round(n / 1000)}k"
+
+
+_USAGE_KEYS = ("tokens_in", "tokens_out", "cache_read", "cache_write")
+
+
+def _format_usage(usage: dict[str, int] | None) -> str:
+    """One-line prompt-cache accounting, or "" when nothing is known.
+
+    Renders as ``in 1.2k · read 48.3k · write 612 · out 900`` — the numbers
+    that say whether the advisor path actually hit the prompt cache. ``in`` is
+    the uncached prompt, ``read`` the cache hit, ``write`` the cache write.
+
+    Requires at least one PROMPT-side counter to be non-zero. A completion
+    count on its own says nothing about caching, and padding the other three
+    with zeros would read as "nothing was cached" when the truth is "the host
+    didn't tell us".
+    """
+    if not usage:
+        return ""
+    tin = int(usage.get("tokens_in", 0) or 0)
+    read = int(usage.get("cache_read", 0) or 0)
+    write = int(usage.get("cache_write", 0) or 0)
+    out = int(usage.get("tokens_out", 0) or 0)
+    if not (tin or read or write):
+        return ""
+    return (
+        f"in {_fmt_tokens(tin)} · read {_fmt_tokens(read)} · "
+        f"write {_fmt_tokens(write)} · out {_fmt_tokens(out)}"
+    )
+
+
+def _append_usage(text: str, usage: dict[str, int] | None) -> str:
+    """Append the compact usage footer to a tool result body, if known."""
+    footer = _format_usage(usage)
+    if not footer:
+        return text
+    return f"{text}\n\n[{footer}]"
+
+
+def _merge_usage(*parts: Mapping[str, int] | None) -> dict[str, int]:
+    """Sum token counters across several LLM calls.
+
+    An escalation is not always one request: the empty-content retry can fire
+    a second attempt on the same model, and the chain walk can burn several
+    candidates before one answers. Every one of those is real spend. Reporting
+    only the last attempt's numbers hides the others — and actively misleads,
+    since a retry re-writes the cache under a different key (the retry forces
+    thinking off, and Anthropic's cache key includes the thinking config).
+    """
+    total = dict.fromkeys(_USAGE_KEYS, 0)
+    for part in parts:
+        if not part:
+            continue
+        for k in _USAGE_KEYS:
+            total[k] += int(part.get(k, 0) or 0)
+    return total
+
+
+def _usage_from_result(result: Mapping[str, Any]) -> dict[str, int]:
+    """Extract the token counters from a side_query result mapping."""
+    return {k: int(result.get(k, 0) or 0) for k in _USAGE_KEYS}
+
+
 def _run_side_query_with_card(
     ctx: fir_ext.Context,
     question: str,
@@ -998,11 +1068,11 @@ def _run_side_query_with_card(
     model: str | None,
     provider: str | None,
     effort: str | None,
-) -> tuple[str | None, str | None]:
+) -> tuple[str | None, str | None, dict[str, int]]:
     """Run a streaming side_query and publish a card for the whole lifecycle.
 
-    Returns ``(text, error)`` — exactly one is non-None. On success the
-    full text is returned; on failure the error string is returned. The
+    Returns ``(text, error, usage)`` — exactly one of text/error is non-None.
+    ``usage`` carries the call's token counters (empty when unknown). The
     card identified by ``query/<unix-ms>`` is updated in place: starts at
     slug ``"running"``, ticks through size slugs as text accumulates, and
     settles on the LLM's finish reason (``"stop"``), the block-summary
@@ -1026,16 +1096,17 @@ def _run_side_query_with_card(
         except Exception as exc:
             err = str(exc)
             ctx.put_observable(key, slug="ERR", detail=err)
-            return None, err
+            return None, err, {}
         if not text or not text.strip():
             ctx.put_observable(key, slug="empty", detail="advisor returned no content")
-            return None, "advisor returned no content"
+            return None, "advisor returned no content", {}
         ctx.put_observable(key, slug="stop", detail=text)
-        return text, None
+        return text, None, {}
 
     stream = ctx.side_query_stream(question, model=model, provider=provider, effort=effort)
 
     partial = ""
+    usage: dict[str, int] = {}
     last_flush = time.monotonic()
     last_size = 0
     try:
@@ -1055,8 +1126,18 @@ def _run_side_query_with_card(
                     )
                     last_flush = now
                 continue
+            elif delta.type == "usage":
+                # Terminal token accounting — keep it for the card footer
+                # and the tool result, nothing to accumulate into text.
+                usage = {
+                    "tokens_in": delta.tokens_in,
+                    "tokens_out": delta.tokens_out,
+                    "cache_read": delta.cache_read,
+                    "cache_write": delta.cache_write,
+                }
+                continue
             else:
-                # Unknown / usage delta — nothing to accumulate.
+                # Unknown delta kind — ignore.
                 continue
             now = time.monotonic()
             if (now - last_flush) >= _CARD_THROTTLE_SECONDS or (
@@ -1072,7 +1153,7 @@ def _run_side_query_with_card(
     except Exception as exc:
         msg = str(exc)
         ctx.put_observable(key, slug="ERR", detail=f"{msg}\n\n{partial}")
-        return None, msg
+        return None, msg, usage
 
     if stream.error is not None:
         err = stream.error
@@ -1084,14 +1165,25 @@ def _run_side_query_with_card(
             ctx.put_observable(key, slug=slug, detail=err)
         else:
             ctx.put_observable(key, slug="ERR", detail=f"{err}\n\n{partial}")
-        return None, err
+        return None, err, usage
 
     result = stream.result or {}
     text = result.get("text", partial)
     finish = result.get("finish_reason") or "stop"
+    # The terminating response is authoritative for usage; the streaming
+    # delta is a fallback for hosts that only emit it there.
+    from_result = _usage_from_result(result)
+    if any(from_result.values()):
+        usage = from_result
     # Slug is the finish reason; the cards layer truncates to ≤24 chars.
-    ctx.put_observable(key, slug=str(finish) or "stop", detail=text)
-    return text, None
+    # The usage footer makes prompt-cache behaviour visible on the card.
+    footer = _format_usage(usage)
+    ctx.put_observable(
+        key,
+        slug=str(finish) or "stop",
+        detail=f"{text}\n\n— {footer}" if footer else text,
+    )
+    return text, None, usage
 
 
 def _run_side_query_chain(
@@ -1100,11 +1192,14 @@ def _run_side_query_chain(
     *,
     chain: list[dict[str, str]],
     role_label: str | None,
-) -> tuple[str | None, str | None, dict[str, str] | None, str]:
+) -> tuple[str | None, str | None, dict[str, str] | None, str, dict[str, int]]:
     """Run a side query, walking a candidate chain with executor fallback.
 
     Walks *chain* (an ordered list of resolved advisor/delegate specs) in
-    order. Returns ``(text, error, used_cfg, note)``:
+    order. Returns ``(text, error, used_cfg, note, usage)`` — ``usage`` is the
+    SUMMED token accounting of every LLM call the walk made: each candidate
+    probe, each empty-content retry, and the executor fallback. That is what
+    the escalation cost, not what its last attempt cost:
 
       * A candidate succeeds → ``(text, None, <that cfg>, "")``. The caller
         renders the routing trace from ``used_cfg`` (including a
@@ -1157,11 +1252,15 @@ def _run_side_query_chain(
     # the chain to exhaustion — it makes the executor note tell the truth
     # about *why* we ended up here instead of claiming unavailability.
     stop_err: str | None = None
+    # Running token total for the WHOLE walk — every candidate probe and every
+    # retry, not just the call that ended up answering. Anything less
+    # under-reports what the escalation actually cost.
+    spent: dict[str, int] = {}
     walk_key = f"aside/chain/{int(time.time() * 1000)}"
 
     def _attempt(
         *, model: str | None, provider: str | None, effort: str | None, label: str
-    ) -> tuple[str | None, str | None]:
+    ) -> tuple[str | None, str | None, dict[str, int]]:
         """One candidate probe, with a single retry on empty content.
 
         At most two attempts: the second happens ONLY when the first failed
@@ -1172,6 +1271,7 @@ def _run_side_query_chain(
         """
         text: str | None = None
         err: str | None = None
+        usage: dict[str, int] = {}
         for attempt in range(2):
             if attempt:
                 # Keep the retry honest and visible — an observer sees the
@@ -1183,21 +1283,23 @@ def _run_side_query_chain(
                 )
                 if _EMPTY_CONTENT_RETRY_BACKOFF > 0:
                     time.sleep(_EMPTY_CONTENT_RETRY_BACKOFF)
-            text, err = _run_side_query_with_card(
+            text, err, attempt_usage = _run_side_query_with_card(
                 ctx, question, model=model, provider=provider, effort=effort
             )
+            usage = _merge_usage(usage, attempt_usage)
             if err is None or _is_request_shaped_error(err) or not _is_empty_content_error(err):
                 break
-        return text, err
+        return text, err, usage
 
     for cfg in chain:
         label = f"{cfg['provider']}/{cfg['model']}"
-        text, err = _attempt(
+        text, err, usage = _attempt(
             model=cfg["model"],
             provider=cfg["provider"],
             effort=cfg.get("effort"),
             label=label,
         )
+        spent = _merge_usage(spent, usage)
         if err is None:
             # It answered — close its breaker so an intermittent model gets a
             # fresh short backoff next time rather than ratcheting toward the
@@ -1213,12 +1315,12 @@ def _run_side_query_chain(
                 # in place would corrupt the session config.
                 cfg = dict(cfg)
                 cfg["_fallback"] = failed_models[0]
-            return text, None, cfg, ""
+            return text, None, cfg, "", spent
         if _is_request_shaped_error(err):
             # Attributable to the request, not the route — surface as-is.
             # Deliberately ahead of the empty-content check so a cancellation
             # can never earn a retry.
-            return None, err, None, ""
+            return None, err, None, "", spent
         if _is_empty_content_error(err):
             # Transient — retried once already. Advance, but do NOT cool the
             # model off: it is alive, the response was just empty.
@@ -1248,7 +1350,8 @@ def _run_side_query_chain(
     # Chain exhausted, stopped or empty → executor terminal fallback (the same
     # empty-content retry applies: the executor model is the last hope, one
     # blip must not sink the whole call).
-    text, err = _attempt(model=None, provider=None, effort=None, label="executor model")
+    text, err, usage = _attempt(model=None, provider=None, effort=None, label="executor model")
+    spent = _merge_usage(spent, usage)
     if err is None:
         # Any requested-but-unfulfilled role earns the note — whether the
         # chain died on this call (advisor_errs) or was already cooling off
@@ -1265,8 +1368,8 @@ def _run_side_query_chain(
                     "returned no usable content" if advisor_errs and empty_only else "unavailable"
                 )
                 note = f"[{role_label} {reason} — answered on executor model]\n\n"
-            return text, None, None, note
-        return text, None, None, ""
+            return text, None, None, note, spent
+        return text, None, None, "", spent
 
     # Executor fallback ALSO failed. When we had advisor candidates, chain both
     # error sets so neither is discarded.
@@ -1274,8 +1377,8 @@ def _run_side_query_chain(
         joined = "; ".join(advisor_errs)
         how = "chain failed" if stop_err is not None else "chain exhausted"
         combined = f"{role_label} {how}: {joined}; executor fallback also failed: {err}"
-        return None, combined, None, ""
-    return None, err, None, ""
+        return None, combined, None, "", spent
+    return None, err, None, "", spent
 
 
 # ---------------------------------------------------------------------------
@@ -1335,7 +1438,7 @@ def _run_aside(
 
     # No tools — pure ephemeral side query.
     if not tools:
-        synthesis, err, used_cfg, note = _run_side_query_chain(
+        synthesis, err, used_cfg, note, usage = _run_side_query_chain(
             ctx, instructions, chain=chain, role_label=role_label
         )
         if err is not None:
@@ -1350,7 +1453,7 @@ def _run_aside(
         # exhausted) — drop the advisor/delegate trace prefix.
         text = note + synthesis if note else _prefix_for_role(synthesis, used_cfg, role_label)
         return {
-            "content": [{"type": "text", "text": text}],
+            "content": [{"type": "text", "text": _append_usage(text, usage)}],
             "is_error": False,
         }
 
@@ -1430,7 +1533,7 @@ def _run_aside(
     # Synthesise collected outputs.
     ctx.report_progress("Synthesizing...")
     prompt = _build_synthesis_prompt(results, instructions)
-    synthesis, err, used_cfg, note = _run_side_query_chain(
+    synthesis, err, used_cfg, note, usage = _run_side_query_chain(
         ctx, prompt, chain=chain, role_label=role_label
     )
     if err is not None:
@@ -1459,9 +1562,12 @@ def _run_aside(
         "content": [
             {
                 "type": "text",
-                "text": (note + synthesis)
-                if note
-                else _prefix_for_role(synthesis, used_cfg, role_label),
+                "text": _append_usage(
+                    (note + synthesis)
+                    if note
+                    else _prefix_for_role(synthesis, used_cfg, role_label),
+                    usage,
+                ),
             }
         ],
         "is_error": False,
@@ -1748,14 +1854,14 @@ def cmd_advise(args: list[str], ctx: fir_ext.Context):
         }
 
     chain = _resolve_advisor_chain(ctx)
-    answer, err, used_cfg, note = _run_side_query_chain(
+    answer, err, used_cfg, note, usage = _run_side_query_chain(
         ctx, text, chain=chain, role_label="advisor"
     )
     if err is not None:
         return {"message": _side_query_error_text(RuntimeError(err))}
     if not answer or not answer.strip():
         return {"message": _side_query_error_text(RuntimeError("advisor returned no content"))}
-    body = note + answer if note else _prefix_advisor(answer, used_cfg)
+    body = _append_usage(note + answer if note else _prefix_advisor(answer, used_cfg), usage)
     return {
         "message": f"**advise:** {text}\n\n{body}",
         "print_response": True,

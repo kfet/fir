@@ -50,7 +50,7 @@ func (pg *PrefixGuard) Check(systemBlocks []map[string]any, messages []map[strin
 	invalidated := 0
 
 	// Check system prompt
-	sysHash := hashJSON(systemBlocks)
+	sysHash := hashJSON(stripCacheControlBlocks(systemBlocks))
 	if pg.prevSystemHash != "" && sysHash != pg.prevSystemHash {
 		firlog.Trace("cache prefix invalidated: system prompt changed")
 		invalidated++
@@ -65,7 +65,7 @@ func (pg *PrefixGuard) Check(systemBlocks []map[string]any, messages []map[strin
 
 	newHashes := make([]string, len(messages))
 	for i := range messages {
-		newHashes[i] = hashJSON(messages[i])
+		newHashes[i] = hashJSON(stripCacheControl(messages[i]))
 	}
 
 	for i := 0; i < prefixLen; i++ {
@@ -94,4 +94,64 @@ func hashJSON(v any) string {
 	}
 	h := sha256.Sum256(b)
 	return string(h[:])
+}
+
+// stripCacheControl returns a view of a converted message with any
+// cache_control markers removed from its content blocks.
+//
+// Breakpoints move between calls by design — the tail breakpoint advances
+// every turn, and the side-query path retires an old anchor as it places a
+// new one. cache_control is request metadata, not cached content: Anthropic
+// matches the content prefix, so a marker appearing or disappearing on an
+// earlier message does not invalidate anything. Hashing it would make the
+// guard report a prefix invalidation on every single turn — pure noise
+// drowning the real drift the guard exists to find.
+//
+// Copies are shallow and made only for the blocks that actually carry a
+// marker, so the common case allocates nothing.
+func stripCacheControl(msg map[string]any) any {
+	content, ok := msg["content"].([]map[string]any)
+	if !ok || !hasCacheControl(content) {
+		return msg
+	}
+	out := make(map[string]any, len(msg))
+	for k, v := range msg {
+		out[k] = v
+	}
+	out["content"] = stripCacheControlBlocks(content)
+	return out
+}
+
+// hasCacheControl reports whether any block carries a cache_control marker.
+func hasCacheControl(blocks []map[string]any) bool {
+	for _, b := range blocks {
+		if _, ok := b["cache_control"]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// stripCacheControlBlocks returns blocks with cache_control removed. When no
+// block carries one, the input slice is returned unchanged.
+func stripCacheControlBlocks(blocks []map[string]any) []map[string]any {
+	if !hasCacheControl(blocks) {
+		return blocks
+	}
+	out := make([]map[string]any, len(blocks))
+	for i, b := range blocks {
+		if _, ok := b["cache_control"]; !ok {
+			out[i] = b
+			continue
+		}
+		cp := make(map[string]any, len(b))
+		for k, v := range b {
+			if k == "cache_control" {
+				continue
+			}
+			cp[k] = v
+		}
+		out[i] = cp
+	}
+	return out
 }

@@ -2487,6 +2487,9 @@ class _FakeStream:
             type=d.get("type", ""),
             text=d.get("text", ""),
             tokens_out=d.get("tokens_out", 0),
+            tokens_in=d.get("tokens_in", 0),
+            cache_read=d.get("cache_read", 0),
+            cache_write=d.get("cache_write", 0),
             seq=self._i - 1,
             raw=dict(d),
         )
@@ -2558,6 +2561,125 @@ class TestAsideStreamingCards(unittest.TestCase):
         self.assertEqual(len(keys), 1, f"all cards should share one key, got {keys}")
         only_key = next(iter(keys))
         self.assertTrue(only_key.startswith("query/"), f"unexpected key: {only_key}")
+
+    def test_usage_footer_on_card_and_result(self):
+        """Prompt-cache accounting reaches both the card and the tool result.
+
+        This is the only way an operator can tell whether an escalation hit
+        the advisor prompt cache or paid a full write.
+        """
+        deltas = [
+            {"type": "text", "text": "advice"},
+            {
+                "type": "usage",
+                "tokens_out": 900,
+                "tokens_in": 1200,
+                "cache_read": 48300,
+                "cache_write": 612,
+            },
+        ]
+        result_dict = {"text": "advice", "finish_reason": "stop"}
+
+        ctx = _streaming_ctx(lambda *_a, **_kw: _FakeStream(deltas, result=result_dict))
+        out = self.mod._run_aside([], "what?", ctx)
+
+        self.assertFalse(out["is_error"])
+        text = out["content"][0]["text"]
+        self.assertIn("[in 1.2k · read 48.3k · write 612 · out 900]", text)
+        self.assertTrue(text.startswith("advice"))
+
+        terminal = list(ctx.put_observable.call_args_list)[-1]
+        detail = terminal.kwargs.get("detail") or (
+            terminal.args[2] if len(terminal.args) > 2 else ""
+        )
+        self.assertIn("— in 1.2k · read 48.3k · write 612 · out 900", detail)
+
+    def test_usage_footer_prefers_terminating_response(self):
+        """The terminating response is authoritative when both carry usage."""
+        deltas = [
+            {"type": "text", "text": "advice"},
+            {"type": "usage", "tokens_out": 1, "tokens_in": 1, "cache_read": 1, "cache_write": 1},
+        ]
+        result_dict = {
+            "text": "advice",
+            "finish_reason": "stop",
+            "tokens_in": 100,
+            "tokens_out": 200,
+            "cache_read": 300,
+            "cache_write": 400,
+        }
+        ctx = _streaming_ctx(lambda *_a, **_kw: _FakeStream(deltas, result=result_dict))
+        out = self.mod._run_aside([], "what?", ctx)
+        self.assertIn("[in 100 · read 300 · write 400 · out 200]", out["content"][0]["text"])
+
+    def test_no_usage_footer_without_prompt_side_counters(self):
+        """A completion count alone says nothing about caching — no footer.
+
+        Padding in/read/write with zeros would read as "nothing was cached"
+        when the truth is "the host didn't report it".
+        """
+        deltas = [{"type": "text", "text": "advice"}, {"type": "usage", "tokens_out": 12}]
+        ctx = _streaming_ctx(
+            lambda *_a, **_kw: _FakeStream(
+                deltas, result={"text": "advice", "finish_reason": "stop"}
+            )
+        )
+        out = self.mod._run_aside([], "what?", ctx)
+        self.assertEqual(out["content"][0]["text"], "advice")
+
+    def test_format_usage_scales_units(self):
+        f = self.mod._format_usage
+        self.assertEqual(f(None), "")
+        self.assertEqual(f({}), "")
+        self.assertEqual(
+            f({"tokens_in": 812, "cache_read": 0, "cache_write": 0, "tokens_out": 3}),
+            "in 812 · read 0 · write 0 · out 3",
+        )
+        self.assertEqual(
+            f({"tokens_in": 0, "cache_read": 132_400, "cache_write": 4100, "tokens_out": 0}),
+            "in 0 · read 132k · write 4.1k · out 0",
+        )
+
+    def test_usage_sums_across_retries(self):
+        """A retried escalation reports total spend, not the last attempt's.
+
+        The empty-content retry is a second real request, and because the
+        retry forces thinking off it lands under a different cache key and
+        re-writes. Reporting only the last attempt would hide that entirely.
+        """
+        empty_err = "side-query: response had no usable content (blocks: [])"
+        streams = [
+            _FakeStream(
+                [{"type": "usage", "tokens_in": 10, "cache_read": 1000, "cache_write": 5}],
+                result=None,
+                error=empty_err,
+            ),
+            _FakeStream(
+                [{"type": "text", "text": "advice"}],
+                result={
+                    "text": "advice",
+                    "finish_reason": "stop",
+                    "tokens_in": 20,
+                    "tokens_out": 7,
+                    "cache_read": 0,
+                    "cache_write": 2000,
+                },
+            ),
+        ]
+        ctx = _streaming_ctx(lambda *_a, **_kw: streams.pop(0))
+        self.mod._EMPTY_CONTENT_RETRY_BACKOFF = 0
+        out = self.mod._run_aside([], "what?", ctx)
+
+        self.assertFalse(out["is_error"])
+        # 10+20 in, 1000+0 read, 5+2000 write, 0+7 out.
+        self.assertIn("[in 30 · read 1.0k · write 2.0k · out 7]", out["content"][0]["text"])
+
+    def test_merge_usage(self):
+        m = self.mod._merge_usage
+        self.assertEqual(
+            m(None, {}, {"tokens_in": 1, "cache_read": 2}, {"tokens_in": 3, "cache_write": 4}),
+            {"tokens_in": 4, "tokens_out": 0, "cache_read": 2, "cache_write": 4},
+        )
 
     def test_empty_redacted_response_emits_empty_slug(self):
         # Mimics what the Go side sends back when the response only carried

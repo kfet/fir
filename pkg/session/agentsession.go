@@ -1671,10 +1671,19 @@ type SideQueryOptions struct {
 // SideQueryDelta is a single streaming event from SideQueryStream. Type is
 // one of "text", "thinking", "usage"; the relevant payload field is
 // populated. Future kinds are additive — readers must ignore unknown types.
+//
+// On a "usage" delta the token counters are populated: TokensOut is the
+// completion size, TokensIn the non-cached prompt tokens, and
+// CacheRead/CacheWrite the prompt-cache hit and write sizes. The cache
+// counters make the advisor path's cache behaviour observable from the
+// extension layer — see docs/design/streaming-side-query.md.
 type SideQueryDelta struct {
-	Type      string `json:"type"`
-	Text      string `json:"text,omitempty"`
-	TokensOut int    `json:"tokens_out,omitempty"`
+	Type       string `json:"type"`
+	Text       string `json:"text,omitempty"`
+	TokensOut  int    `json:"tokens_out,omitempty"`
+	TokensIn   int    `json:"tokens_in,omitempty"`
+	CacheRead  int    `json:"cache_read,omitempty"`
+	CacheWrite int    `json:"cache_write,omitempty"`
 }
 
 // SideQueryResult is the terminating value of a side query (streaming or
@@ -1686,6 +1695,15 @@ type SideQueryResult struct {
 	Text         string               `json:"text"`
 	Blocks       []agent.BlockSummary `json:"blocks"`
 	FinishReason string               `json:"finish_reason,omitempty"`
+
+	// Token accounting for the call, straight off the final assistant
+	// message. TokensIn is the uncached prompt size, TokensOut the
+	// completion, CacheRead the prompt-cache hit and CacheWrite the
+	// prompt-cache write. Zero when the provider reports no usage.
+	TokensIn   int `json:"tokens_in,omitempty"`
+	TokensOut  int `json:"tokens_out,omitempty"`
+	CacheRead  int `json:"cache_read,omitempty"`
+	CacheWrite int `json:"cache_write,omitempty"`
 }
 
 // SideQuery makes a one-shot, ephemeral LLM call using the current session
@@ -1783,7 +1801,7 @@ func (s *AgentSession) SideQueryStream(ctx context.Context, question string, opt
 		}
 	}
 
-	text, msg, err := s.Agent.SimplePromptStream(ctx, msgs, promptOpts, onEvent)
+	text, msg, err := s.Agent.SimplePromptStream(withSideQuery(ctx), msgs, promptOpts, onEvent)
 	if err != nil {
 		// Prefix with "side-query:" so callers (e.g. the aside extension) can
 		// surface a clear, attributable error to the main LLM instead of a
@@ -1794,6 +1812,10 @@ func (s *AgentSession) SideQueryStream(ctx context.Context, question string, opt
 		if msg != nil {
 			out.Blocks = agent.SummarizeBlocks(msg.Content)
 			out.FinishReason = string(msg.StopReason)
+			out.TokensIn = msg.Usage.Input
+			out.TokensOut = msg.Usage.Output
+			out.CacheRead = msg.Usage.CacheRead
+			out.CacheWrite = msg.Usage.CacheWrite
 		}
 		return out, fmt.Errorf("side-query: %w", err)
 	}
@@ -1801,15 +1823,28 @@ func (s *AgentSession) SideQueryStream(ctx context.Context, question string, opt
 	// SimplePromptStream guarantees msg is non-nil when err is nil — see its
 	// contract. Both fields below dereference msg unconditionally.
 
-	// Emit a final usage delta if we know the output token count.
-	if onDelta != nil && msg.Usage.Output > 0 {
-		onDelta(SideQueryDelta{Type: "usage", TokensOut: msg.Usage.Output})
+	// Emit a final usage delta once any token counter is known. The cache
+	// counters matter as much as the output count on this path — they are
+	// how the advisor path's cache behaviour is observed.
+	if onDelta != nil && (msg.Usage.Output > 0 || msg.Usage.Input > 0 ||
+		msg.Usage.CacheRead > 0 || msg.Usage.CacheWrite > 0) {
+		onDelta(SideQueryDelta{
+			Type:       "usage",
+			TokensOut:  msg.Usage.Output,
+			TokensIn:   msg.Usage.Input,
+			CacheRead:  msg.Usage.CacheRead,
+			CacheWrite: msg.Usage.CacheWrite,
+		})
 	}
 
 	return SideQueryResult{
 		Text:         text,
 		Blocks:       agent.SummarizeBlocks(msg.Content),
 		FinishReason: string(msg.StopReason),
+		TokensIn:     msg.Usage.Input,
+		TokensOut:    msg.Usage.Output,
+		CacheRead:    msg.Usage.CacheRead,
+		CacheWrite:   msg.Usage.CacheWrite,
 	}, nil
 }
 

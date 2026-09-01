@@ -178,12 +178,26 @@ class FakeFir:
                 _notif({"request_id": rid, "type": "thinking", "text": "mulling…", "seq": 0})
                 _notif({"request_id": rid, "type": "text", "text": "mock ", "seq": 1})
                 _notif({"request_id": rid, "type": "text", "text": "synthesis", "seq": 2})
-                _notif({"request_id": rid, "type": "usage", "tokens_out": 7, "seq": 3})
+                _notif(
+                    {
+                        "request_id": rid,
+                        "type": "usage",
+                        "tokens_out": 7,
+                        "tokens_in": 11,
+                        "cache_read": 4096,
+                        "cache_write": 64,
+                        "seq": 3,
+                    }
+                )
                 result = {
                     "ok": True,
                     "text": "mock synthesis",
                     "blocks": [{"type": "text", "len": 14}],
                     "finish_reason": "stop",
+                    "tokens_in": 11,
+                    "tokens_out": 7,
+                    "cache_read": 4096,
+                    "cache_write": 64,
                 }
             else:
                 result = {"ok": True, "text": "mock synthesis"}
@@ -703,10 +717,14 @@ class TestDemoTools(DemoTestCase):
         progress = fake.wait_for_method("report_progress")
         self.assertIsNotNone(progress, "expected progress updates during streaming")
         # Final tool result is the synthesised text from the stream's
-        # terminating response.
+        # terminating response, footed with the usage delta's token
+        # accounting (including the prompt-cache read/write sizes).
         self.assertIsNotNone(resp)
         assert resp is not None
         self.assertIsNone(resp.get("error"))
+        body = json.dumps(resp.get("result"))
+        self.assertIn("read 4096", body)
+        self.assertIn("write 64", body)
         fake.stop()
 
     def test_batch_example_with_extra_instructions(self) -> None:

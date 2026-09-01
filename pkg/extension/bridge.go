@@ -447,11 +447,14 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 			var seq int
 			onDelta := func(d session.SideQueryDelta) {
 				params := SideQueryDeltaParams{
-					RequestID: reqIDInt,
-					Type:      d.Type,
-					Text:      d.Text,
-					TokensOut: d.TokensOut,
-					Seq:       seq,
+					RequestID:  reqIDInt,
+					Type:       d.Type,
+					Text:       d.Text,
+					TokensOut:  d.TokensOut,
+					TokensIn:   d.TokensIn,
+					CacheRead:  d.CacheRead,
+					CacheWrite: d.CacheWrite,
+					Seq:        seq,
 				}
 				seq++
 				// Errors here are unrecoverable from the LLM stream's
@@ -471,6 +474,10 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 					Text:         res.Text,
 					Blocks:       res.Blocks,
 					FinishReason: res.FinishReason,
+					TokensIn:     res.TokensIn,
+					TokensOut:    res.TokensOut,
+					CacheRead:    res.CacheRead,
+					CacheWrite:   res.CacheWrite,
 				}
 			}
 		} else {

@@ -320,16 +320,25 @@ def batch_example(params, ctx):
     if hasattr(ctx, "side_query_stream"):
         stream = ctx.side_query_stream(prompt)
         partial = ""
+        usage = ""
         for delta in stream:
             if delta.type == "text":
                 partial += delta.text
                 ctx.report_progress(f"synthesising… ({len(partial)} chars)")
+            elif delta.type == "usage":
+                # Terminal token accounting, including prompt-cache hit/write
+                # sizes — the same numbers the aside extension footers with.
+                usage = (
+                    f"in {delta.tokens_in} · read {delta.cache_read} · "
+                    f"write {delta.cache_write} · out {delta.tokens_out}"
+                )
         if stream.error is not None:
             return {
                 "content": [{"text": f"side_query failed: {stream.error}"}],
                 "is_error": True,
             }
-        return (stream.result or {}).get("text", partial)
+        text = (stream.result or {}).get("text", partial)
+        return f"{text}\n\n[{usage}]" if usage else text
 
     return ctx.side_query(prompt)
 

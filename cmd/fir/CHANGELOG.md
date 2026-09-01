@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Changed
+- **The advisor path (`aside` with `escalate=true`) no longer pays a full prompt-cache write on every escalation.** A side query replays the whole executor conversation and appends the one-off question, and the only breakpoint sat on that question — a block that can never recur — so with more than the ~20-block automatic lookback of tool calls between escalations every escalation re-wrote the entire history at flagship rates. Side queries now place *anchored rolling breakpoints*: one at the previous side query's write point (an exact prefix read of what was written last time), one at the current last **stable** history entry (writing only the delta, and becoming the next call's anchor), and none on the question. "Stable" excludes a trailing assistant turn, which is the one message guaranteed to be rewritten before the next escalation — it carries the in-flight `aside` tool call that `StripUnmatchedToolCalls` removes for this request and that is restored, with its tool result, by the next one. Anchors are keyed by session **and** model — an advisor-chain fallback to a different model is a different cache namespace — and held in a bounded map; a compacted or rewritten history is detected by content hash and degrades to a plain delta write rather than pointing at the wrong message. The side-query request is also marked for **1h cache retention per call**, without touching executor writes the way the global `FIR_CACHE_RETENTION` switch would, degrading to the default 5m TTL for models that don't support it.
+- **`PrefixGuard` no longer conflates advisor traffic with executor traffic.** Side queries hash into their own `<session>:sidequery:<model>` namespace, so a `-vv` cache-invalidation trace names drift that actually belongs to the request it is describing. The guard also stops hashing `cache_control` markers, which move by design every turn and previously produced a spurious "message changed" on essentially every single turn.
+
+### Added
+- **Side-query token accounting is now visible.** `SideQueryResult` and the terminal streaming `usage` delta carry `tokens_in`, `tokens_out`, `cache_read` and `cache_write` through the extension bridge and the Python SDK, and `aside` footers both its observable card and its tool result with a compact `in 1.2k · read 48.3k · write 612 · out 900` line, summed across every attempt the escalation made (candidate probes, empty-content retries, executor fallback) rather than just the one that answered. Without it, whether an escalation hit the advisor cache or paid a full write was unobservable from outside the process.
+
 ## [1.4.2] - 2026-09-02
 
 ### Changed
@@ -292,7 +299,6 @@
 ### Changed
 - Bumped the MCP Go SDK from v1.3.1 to v1.6.1 (and, transitively, `google/jsonschema-go` to v0.4.3 and `segmentio/encoding` to v0.5.4). No API breakage in fir's usage; the SDK's `oauthex` package now ships the RFC 9728 / 8414 / 7591 discovery primitives fir uses for MCP OAuth. The `go` directive moves to 1.25.0 to match the SDK's minimum — CI already resolves its toolchain from `go.mod`.
 
-
 ## [0.89.0] - 2026-07-27
 
 ### Fixed
@@ -388,7 +394,6 @@
 - **`wt` skill spawn.sh no longer fails on GNU `mktemp`.** The task-file template was `mktemp -t firtask`, which GNU coreutils rejects (`too few X's in template`); it needs ≥6 trailing X's. Changed to `mktemp -t firtask.XXXXXX`, which both GNU and BSD/macOS accept.
 - **`fir observe` / `stop_session` now target the real fir binary, not the python forkserver.** The observe sidecar's `host_pid` (used by the observe PID column and by `stop_session` to signal the host) was set from `os.getppid()`, which under the forkserver architecture is the python forkserver — not fir. Killing it left the session running and the observe listing showing stale entries. The fir host now exports its pid as `FIR_HOST_PID` (injected in `SDKEnv`, inherited by both the forkserver and `FIR_NO_FORKSERVER` exec paths); observe.py reads it, falling back to `os.getppid()` only for old hosts.
 
-
 ## [0.78.2] - 2026-07-10
 
 ### Fixed
@@ -424,7 +429,6 @@
 ### Added
 - `-n` is now a short alias for `--session-name`, so `fir -n quick "…"` sets the session display name without the long flag.
 
-
 ## [0.74.2] - 2026-06-23
 
 ### Fixed
@@ -440,7 +444,6 @@
 
 ### Added
 - Advisor/delegate runtime adaptation in the `aside` extension. The bundled default advisor (`anthropic/claude-fable-5`) and delegate are now a *preference seed*, not a fixed target. A new `available_models` host bridge verb (with `ctx.available_models()` in the Python/Go SDKs) exposes the session model registry's live-and-authed set. **Layer A (proactive):** when the configured advisor/delegate model isn't live, resolution degrades to the highest-ranked available Anthropic flagship (advisor) or Haiku (delegate), preserving effort and tracing the redirect (`[advisor: anthropic/claude-opus-4-8 (fallback: claude-fable-5 unavailable)]`); the ranking helper is shared with the drift tests so test and runtime agree. **Layer B (reactive):** an escalated/delegated side query that fails with a model-unavailability error (`not_found_error`, HTTP 400/404, "model not found", etc.) auto-retries once on the executor's own model and notes it (`[advisor unavailable — answered on executor model]`); context-overflow errors still hit their dedicated hint path. `/advise` degrades the same way. Older hosts without the verb degrade gracefully to the static config (no regression).
-
 
 ## [0.73.1] - 2026-06-18
 
@@ -466,12 +469,10 @@
 ### Added
 - `forge` builtin extension: a single `forge_tool` lets the agent author a new fir extension and load it live this session. It writes `<name>.py` to the global (user) config dir's `extensions/` — never the project-local `.fir`, so it avoids the trust prompt that would silently skip it in headless/ACP mode — then calls `reload_extension` and reports the new tools the extension exposes (or the init/handshake error so the agent can fix and retry). Rejects unsafe names and refuses to self-reload (`name == "forge"`).
 
-
 ## [0.71.1] - 2026-06-14
 
 ### Fixed
 - Multi-account Anthropic logins now distinguish accounts by **organization**, not just user, with **human-readable** account ids. One Anthropic user can belong to several orgs and each OAuth login is org-scoped; previously two org logins for the same user collided and overwrote each other. The account id (which becomes the `auth.json` slot key shown in the selector badge, `fir login list`, and `fir logout`) is now a readable slug built from the email + organization name — e.g. `anthropic#me@example.com-acme-corp` — instead of opaque uuids (uuids are only a last-resort fallback). The selector label shows the display name when Anthropic provides one, otherwise the email, plus the org — e.g. `Ada Lovelace (Acme Corp)`. A personal-org and a work-org login for the same user coexist and switch live.
-
 
 ## [0.71.0] - 2026-06-13
 
@@ -479,7 +480,6 @@
 - `/mcp reload` command (TUI and ACP): targeted MCP-only reload that re-reads `mcp.json` and `mcp.d/` configs without triggering a full session reload. Reports collisions when multiple files define the same server name. Use instead of `/reload` when you only need to pick up MCP config changes.
 - Amazon Bedrock multi-account support (Phase B). `fir login bedrock` configures one or more Bedrock accounts — `iam-profile` (named `~/.aws` profile, SigV4), `iam-keys` (explicit AWS keys, SigV4), or `bearer` (Bedrock API key, suppresses SigV4) — interactively or via flags (`--mode`/`--account`/`--region`/`--profile`/`--access-key`/`--secret-key`/`--session-token`/`--token`). Accounts are stored as `aws_iam` or `api_key` credentials and coexist/switch live like OAuth accounts. The Bedrock provider now threads the resolved per-account credential into the skipstone client (bearer token, IAM profile, or static keys), with per-account region (regional `bedrock-runtime` endpoint) and per-model inference-profile ARN overrides. Profiles are seeded from `~/.aws/config`; bearer seeded from `$AWS_BEARER_TOKEN_BEDROCK`.
 - Multiple accounts per provider, switchable live with no restart. A provider can now hold N named accounts at once (typed provider accounts): logging in to the same OAuth provider twice keeps both (`fir login anthropic` again ADDS a second account instead of evicting the first). Accounts are stored under composite slot keys (`<provider>#<account>`) in `auth.json`; the bare `<provider>` key is the default account and stays back-compatible with older fir builds (which read the default and ignore `#account` keys). Each account is fanned out into its own labelled model group in the selector and `--list-models`, and switching accounts is just picking a model under that group. New `fir login list` shows stored accounts; new `fir logout <provider[#account]>` removes a single account slot. The Anthropic OAuth provider captures the account profile (uuid/email) so accounts are labelled by email.
-
 
 ### Fixed
 - Live model-list discovery now works for OAuth-authenticated Anthropic (Claude Pro/Max) accounts. The built-in Go lister authenticates with an `x-api-key` header, which Anthropic rejects for OAuth access tokens (HTTP 401), so the live catalogue never populated and fir silently fell back to the static built-in model list — meaning a model the account can no longer reach would still show in `--list-models`, the model selector, and downstream surfaces. `StartLiveModelFetch` now skips the bare API-key lister for OAuth-authed providers, and the `anthropic-auth` extension grows an `auth/list_models` hook that pages `GET /v1/models` with `Authorization: Bearer` + the `oauth-2025-04-20` beta header. The fetch stays permissive: on any failure fir falls back to the static catalogue rather than masking models.
@@ -527,13 +527,11 @@
 ### Changed
 - `cmd/generate-models` now verifies Poe models with an empty `supported_endpoints` list by probing `/v1/chat/completions` live, instead of trusting the empty list (and instead of the hand-maintained `poeUncallable` skip-list added in v0.66.1). Poe sometimes catalogs a model before enabling API access — it appears in `/v1/models` with full metadata but a 404 on call (first seen with `claude-fable-5`). No catalog field distinguishes these pre-release listings from genuinely callable empty-endpoint bots (e.g. `grok-4.20-multi-agent`), so the only reliable signal is a request. Only the ambiguous empty-endpoint set is probed (concurrently); models with explicit endpoints are trusted as-is. A model is dropped solely on a definitive `404 not_found`; any other outcome (success, rate-limit, bad-request, transient/5xx) keeps it, so a flaky probe never prunes a working model. The token comes from `POE_API_KEY` or fir's `auth.json`; with no token the probe is skipped and empty-endpoint models are kept (permissive default) with a warning.
 
-
 ## [0.67.1] - 2026-06-10
 
 ### Changed
 
 - Test coverage only (no behaviour change). Added `TestMetaChannel` to the pipe/wait extension suite, locking in the post-`Meta` wait×hash contract: the tool-result content hash now travels in the `meta` sibling field, so it never reaches `_result_text`, the `WAIT:` verdict line, or `{{prev}}` substitutions (the prior `TestHashBlockFiltering` only covered the legacy `[hash: …]` content-block defense). Also hardened the flaky observable-cards sidecar e2e test.
-
 
 ## [0.67.0] - 2026-06-10
 
@@ -545,7 +543,6 @@
 
 ### Fixed
 - Poe model catalog: drop `poe/claude-fable-5`. Poe lists it in `/v1/models` (with full pricing/context metadata and an empty `supported_endpoints`) but does not expose it over any API endpoint yet — calling it returns `404 "Model not found"`. No catalog field distinguishes such pre-release listings from genuinely callable empty-endpoint bots (e.g. `poe/grok-4.20-multi-agent` is empty-endpoint yet works), so `cmd/generate-models` now carries a small hand-maintained `poeUncallable` skip-list; the entry is removed once Poe enables the endpoint. Fable remains reachable via `anthropic/`, `openrouter/`, and `amazon-bedrock/` providers.
-
 
 ## [0.66.0] - 2026-06-10
 
@@ -705,7 +702,6 @@
   `Alt+L`, and the general-purpose dismiss/clear key moves from `Alt+A` to
   `Ctrl+L`.
 
-
 ## [0.61.2] - 2026-06-08
 
 ### Changed
@@ -718,7 +714,6 @@
   transcript restored) instead of returning `session-not-found` — no ID churn,
   no re-resume round-trip. See `pkg/modes/acp/release.go`,
   `pkg/modes/acp/methods.go` (`hydrateSessionFromFile`, `rehydrateForPrompt`).
-
 
 ## [0.61.1] - 2026-06-08
 
@@ -957,7 +952,6 @@
 
 ### Changed
 
-
 - Anthropic server-side content blocks are now captured generically. The stream
   parser previously enumerated the server `*_tool_result` block types it would
   store, so each new Anthropic server tool silently dropped its result block
@@ -1053,7 +1047,6 @@
   pointed at. To proceed, the model can pass the new `cwd` parameter pointing
   at an existing directory, or recreate the missing directory.
 - MCP "connecting…" indication now appears for the initial connect in interactive mode. The TUI consumer attaches only after `session.Setup` has already begun dialing, so the start-of-connection event was previously lost — the user saw only the success/failure notice on completion. MCP server lifecycle transitions (connecting/ready/disconnected) are now delivered over a single buffered `Manager.ServerEvents()` channel that retains events emitted before a consumer attaches, so slow or hanging MCP servers are visibly in progress. Replaces the three `SetOnServer*` callbacks (and the `OnMCPServer*` factory plumbing), removing the "callbacks must be wired before Start" constraint; both the interactive TUI and ACP now attach a consumer after Setup returns.
-
 
 ## [0.52.0] - 2026-05-28
 
@@ -1166,7 +1159,6 @@
 ### Added
 
 - `mood` extension (project-local, `.fir/extensions/mood.py`) — lightweight diary / mood-introspection mechanism inspired by Anthropic's "Emotion concepts and functional states" research. Gives the model two tools (`mood_note`, `mood_recent`) and a `/mood [--all]` slash command for an append-only log of brief self-observations stored in `set_session_data("mood_log", …)` (survives `/reexec`). On every `agent_end` a *gating step* asks the advisor (escalated via `ctx.call_tool("aside", {escalate: true, …})`) whether the current moment is a natural pause point; the gate is deliberately conservative — default "no", uncertain "no", parse-fail / RPC error / advisor-unavailable all log a silent gating entry and bail with no nag. When the advisor returns `{"checkin": true}` the extension does **not** synthesise a reflection via `ctx.side_query` (that would be a journal entry written by a clone — the in-session model would never have actually noticed anything, only inherited a note). Instead it calls `ctx.send_message(custom_type="mood_nudge", display=False, deliver_as="steer")` carrying a short ambient-context message; the steered message is converted to a plain user-role message by `store.convertCustomToLLM` (no `[SYS_EXT]` framing — deliberately *plainer* than a prepend, just an additional voice arriving as the model starts its next real turn), self-labelled with a `[mood-introspection]` prefix so the model doesn't misattribute the words to the user. `display=False` keeps it out of the TUI render; the JSONL transcript still records it as an audit trail. The model itself encounters that nudge on its **next real turn** — whenever the user prompts next — and decides for itself whether to call `mood_note` ("nothing notable" is a valid call, and so is skipping it entirely). The advisor's `reason` field is sanitised before splicing — `[SYS_EXT]` / `[/SYS_EXT]` markers stripped, newlines collapsed — so a hallucinating or jailbroken advisor can't smuggle in markers that fir's base system prompt would treat as authoritative. The advisor gate IS the dynamic off-switch — no on/off toggle exposed. The model never volunteers mood content into the visible transcript; the only surfaces are the tools, `/mood`, and the footer. Behaviour coverage in `pkg/extension/sdk/python/mood_ext_test.py` exercises the init handshake, both tools, `/mood` (with and without `--all`), the gating floor, advisor=NO / YES / is_error branches, the steered `send_message` payload (custom_type, display=False, deliver_as=steer, self-label, reason carry-through), explicit anti-assertions that `side_query` and `prepend_context` are *not* used, the marker sanitisation (incl. whitespace-inside-brackets and sanitise-before-truncate ordering), the stale-footer clear after TTL, and log persistence across a simulated `/reexec`.
-
 
 ## [0.46.5] - 2026-05-16
 
@@ -2450,7 +2442,6 @@
 - Refactor: `.fir/skills` is a symlink to `pkg/core/builtin_skills` — single source of truth
 - Refactor: `StripAnsi`/`AppendColorEnv` consolidated into `pkg/core/tools/ansi.go`
 - Theme: dark theme `toolOutput` color brightened from `#808080` to `#b0b0b0`
-
 
 ## [0.9.0] - 2026-02-28
 

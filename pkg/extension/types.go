@@ -174,6 +174,15 @@ type SideQueryResult struct {
 	Text         string               `json:"text"`
 	Blocks       []agent.BlockSummary `json:"blocks,omitempty"`
 	FinishReason string               `json:"finish_reason,omitempty"`
+
+	// Token accounting for the call. TokensIn is the uncached prompt size,
+	// TokensOut the completion, CacheRead/CacheWrite the prompt-cache hit
+	// and write sizes. Omitted when zero; extensions that ignore them stay
+	// forward-compatible.
+	TokensIn   int `json:"tokens_in,omitempty"`
+	TokensOut  int `json:"tokens_out,omitempty"`
+	CacheRead  int `json:"cache_read,omitempty"`
+	CacheWrite int `json:"cache_write,omitempty"`
 }
 
 // SideQueryDeltaParams is the params shape of a "side_query/delta" outbound
@@ -189,7 +198,11 @@ type SideQueryDeltaParams struct {
 	Type      string `json:"type"`
 	Text      string `json:"text,omitempty"`
 	TokensOut int    `json:"tokens_out,omitempty"`
-	Seq       int    `json:"seq"`
+	// Prompt-side counters, populated on a "usage" delta only.
+	TokensIn   int `json:"tokens_in,omitempty"`
+	CacheRead  int `json:"cache_read,omitempty"`
+	CacheWrite int `json:"cache_write,omitempty"`
+	Seq        int `json:"seq"`
 }
 
 // GetSessionDataResult is the result of "get_session_data".

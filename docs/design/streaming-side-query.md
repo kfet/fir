@@ -68,14 +68,17 @@ request id. The terminating response on the same id closes the stream.
               "text": "...partial assistant text...", "seq": 1 } }
 { "jsonrpc": "2.0", "method": "side_query/delta",
   "params": { "request_id": 42, "type": "usage",
-              "tokens_out": 1834, "seq": 2 } }
+              "tokens_out": 1834, "tokens_in": 36,
+              "cache_read": 48300, "cache_write": 612, "seq": 2 } }
 
 // host → ext: terminating response on the original id
 { "jsonrpc": "2.0", "id": 42,
   "result": { "text": "<full joined text>",
               "blocks": [ {"type":"thinking","len":3402,"sig_len":920},
                           {"type":"text","len":4218} ],
-              "finish_reason": "stop" } }
+              "finish_reason": "stop",
+              "tokens_in": 36, "tokens_out": 1834,
+              "cache_read": 48300, "cache_write": 612 } }
 ```
 
 Notes:
@@ -181,7 +184,10 @@ Sketch:
    `AgentEvent` kinds to wire delta kinds:
    - text chunk → `{type:"text", text:...}`
    - thinking chunk → `{type:"thinking", text:...}`
-   - usage event → `{type:"usage", tokens_out:...}`
+   - usage event → `{type:"usage", tokens_out:…, tokens_in:…,
+     cache_read:…, cache_write:…}`. The prompt-cache counters are what
+     make the advisor path's caching observable from an extension; the
+     delta fires when ANY counter is non-zero, not only `tokens_out`.
    - Other event kinds are dropped at this layer for v1.
 
 3. `pkg/extension/api.go` + `pkg/extension/session_bridge.go`: extend

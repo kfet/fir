@@ -399,10 +399,11 @@ otherwise noted.
 | session``        | Triggers a new agent turn.            | SDK timeout: 60 s         |
 +------------------+---------------------------------------+---------------------------+
 | ``side_query``   | ``{question, model?, provider?,       | ``{ok: true,              |
-|                  | effort?}``                            | text: "..."}``            |
-|                  | One-shot LLM call, no history.        | SDK timeout: 120 s        |
-|                  | model/provider/effort override the    |                           |
-|                  | agent's defaults for this call.       |                           |
+|                  | effort?}``                            | text: "...",              |
+|                  | One-shot LLM call, no history.        | tokens_in, tokens_out,    |
+|                  | model/provider/effort override the    | cache_read,               |
+|                  | agent's defaults for this call.       | cache_write}``            |
+|                  |                                       | SDK timeout: 120 s        |
 +------------------+---------------------------------------+---------------------------+
 | ``set_session_   | ``{key, value}``                      | ``{ok: true}``            |
 | data``           | Persist string K/V; survives          |                           |
@@ -1145,6 +1146,13 @@ class SideQueryResult(TypedDict, total=False):
     text: str
     blocks: list[SideQueryBlock]
     finish_reason: str
+    # Token accounting for the call. tokens_in is the uncached prompt size,
+    # tokens_out the completion, cache_read/cache_write the prompt-cache hit
+    # and write sizes. Absent when zero.
+    tokens_in: int
+    tokens_out: int
+    cache_read: int
+    cache_write: int
 
 
 class SetSessionDataParams(TypedDict, total=False):
@@ -2408,8 +2416,10 @@ class SideQueryDelta:
     """One streaming event from :py:meth:`Context.side_query_stream`.
 
     ``type`` is one of ``"text"``, ``"thinking"``, or ``"usage"``. The
-    relevant payload field is populated: ``text`` for text/thinking,
-    ``tokens_out`` for usage. Unknown future types are still surfaced —
+    relevant payload field is populated: ``text`` for text/thinking, and
+    for usage the token counters ``tokens_out`` (completion), ``tokens_in``
+    (uncached prompt), ``cache_read`` and ``cache_write`` (prompt-cache hit
+    and write sizes). Unknown future types are still surfaced —
     callers should ignore deltas whose ``type`` they don't recognise.
 
     ``seq`` is the strictly-increasing per-request sequence number,
@@ -2420,6 +2430,9 @@ class SideQueryDelta:
     type: str
     text: str = ""
     tokens_out: int = 0
+    tokens_in: int = 0
+    cache_read: int = 0
+    cache_write: int = 0
     seq: int = 0
     raw: dict[str, Any] = field(default_factory=dict)
 
@@ -2526,6 +2539,9 @@ def _delta_from_params(params: dict[str, Any]) -> SideQueryDelta:
         type=str(params.get("type", "")),
         text=str(params.get("text", "") or ""),
         tokens_out=int(params.get("tokens_out", 0) or 0),
+        tokens_in=int(params.get("tokens_in", 0) or 0),
+        cache_read=int(params.get("cache_read", 0) or 0),
+        cache_write=int(params.get("cache_write", 0) or 0),
         seq=int(params.get("seq", 0) or 0),
         raw=dict(params),
     )

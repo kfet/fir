@@ -18,11 +18,19 @@ import (
 	"github.com/kfet/agent"
 	core "github.com/kfet/ai"
 	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/ai/providers"
 )
 
 func init() {
 	agent.DefaultStreamFn = func(ctx context.Context) agent.StreamFn {
+		// A side-query call marks its context (see sidequery_ctx.go). The
+		// marker is resolved once here, at factory time, on the very ctx the
+		// caller handed to Agent.SimplePromptStream.
+		sideQuery := isSideQueryContext(ctx)
 		return func(model *core.Model, prompt core.Context, opts *core.SimpleStreamOptions) *core.AssistantMessageEventStream {
+			if sideQuery {
+				opts = providers.ApplySideQueryOptions(model, opts)
+			}
 			return ai.StreamSimple(ctx, ai.DefaultRegistry, model, prompt, opts)
 		}
 	}

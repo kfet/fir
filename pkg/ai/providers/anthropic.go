@@ -1036,14 +1036,36 @@ func buildAnthropicParams(model *ai.Model, ctx ai.Context, oauthToken bool, opti
 	}
 
 	// Messages
-	msgs := convertAnthropicMessages(ctx.Messages, model, oauthToken, retention)
+	//
+	// On the side-query (advisor) path the default tail breakpoint is
+	// suppressed — the tail is the one-off question and caching it buys
+	// nothing. applySideQueryCacheControl places anchored rolling
+	// breakpoints instead; see sidequery.go.
+	sideQuery := isSideQuery(options)
+	msgRetention := retention
+	if sideQuery {
+		msgRetention = ai.CacheNone
+	}
+	msgs := convertAnthropicMessages(ctx.Messages, model, oauthToken, msgRetention)
+	if sideQuery {
+		// isSideQuery is false for nil options, so options is non-nil here.
+		applySideQueryCacheControl(msgs, model, retention, options.SessionID)
+	}
 	params["messages"] = msgs
 
 	// Check prefix stability for cache preservation
 	if options != nil && options.SessionID != "" {
 		v, _ := anthropicPrefixGuards.LoadOrStore(options.SessionID, NewPrefixGuard())
 		guard := v.(*PrefixGuard)
-		guard.Check(systemBlocks, msgs)
+		guarded := msgs
+		if sideQuery && len(guarded) > 0 {
+			// The side-query question is a one-off that occupies the tail
+			// slot and is replaced wholesale next time. Feeding it to the
+			// guard reports a "message changed" on every single side query —
+			// noise that says nothing about prefix stability.
+			guarded = guarded[:len(guarded)-1]
+		}
+		guard.Check(systemBlocks, guarded)
 	}
 
 	// Temperature
