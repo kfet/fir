@@ -265,6 +265,27 @@ func mapAnthropicStopReason(reason string) ai.StopReason {
 	}
 }
 
+// anthropicStopReasonErrorMessage returns a self-diagnosing error message for a
+// raw Anthropic stop_reason that maps to ai.StopReasonError, or "" when the
+// stop reason is not an error. The raw value is always quoted so the diagnosis
+// survives even for stop reasons Anthropic ships after this code was written.
+//
+// The wording deliberately avoids any phrase matched by ratelimit.IsRetryableError:
+// these outcomes are terminal, not worth re-rolling.
+func anthropicStopReasonErrorMessage(reason string) string {
+	if mapAnthropicStopReason(reason) != ai.StopReasonError {
+		return ""
+	}
+	switch reason {
+	case "refusal":
+		return `Anthropic ended the turn with stop_reason "refusal": the model declined to continue this response. Any content generated before the refusal may be incomplete.`
+	case "sensitive":
+		return `Anthropic ended the turn with stop_reason "sensitive": the response was blocked by the provider's content filters. Any content generated before the block may be incomplete.`
+	default:
+		return fmt.Sprintf("Anthropic reported an unrecognised stop_reason %q; treating the turn as failed. Any content generated may be incomplete.", reason)
+	}
+}
+
 // normalizeAnthropicToolCallID normalizes tool call IDs for Anthropic's format.
 func normalizeAnthropicToolCallID(id string, _ *ai.Model, _ *ai.AssistantMessage) string {
 	var b strings.Builder
@@ -590,6 +611,11 @@ func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, op
 					if d, ok := raw["delta"].(map[string]any); ok {
 						if sr, ok := d["stop_reason"].(string); ok {
 							output.StopReason = mapAnthropicStopReason(sr)
+							// Never let an error stop reason travel with an empty
+							// ErrorMessage — the raw value is the whole diagnosis.
+							if output.StopReason == ai.StopReasonError && output.ErrorMessage == "" {
+								output.ErrorMessage = anthropicStopReasonErrorMessage(sr)
+							}
 						}
 					}
 					if usage, ok := raw["usage"].(map[string]any); ok {

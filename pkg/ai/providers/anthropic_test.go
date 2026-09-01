@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kfet/ai/ratelimit"
 	"github.com/kfet/fir/pkg/ai"
 )
 
@@ -578,6 +579,158 @@ func TestAnthropic_MapStopReasons(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("mapStopReason(%q) = %q, want %q", tt.input, got, tt.want)
 		}
+	}
+}
+
+// TestAnthropic_StopReasonErrorMessage covers the mapping from a raw Anthropic
+// stop_reason to a self-diagnosing ErrorMessage: the raw value must always be
+// quoted, non-error stop reasons must produce no message, and the wording must
+// never look retryable to ratelimit.IsRetryableError.
+func TestAnthropic_StopReasonErrorMessage(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantError bool
+	}{
+		{"refusal", "refusal", true},
+		{"sensitive", "sensitive", true},
+		{"unknown", "wibble_reason", true},
+		{"tool_use", "tool_use", false},
+		{"end_turn", "end_turn", false},
+		{"max_tokens", "max_tokens", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := anthropicStopReasonErrorMessage(tt.input)
+			if !tt.wantError {
+				if got != "" {
+					t.Errorf("anthropicStopReasonErrorMessage(%q) = %q, want empty", tt.input, got)
+				}
+				return
+			}
+			if got == "" {
+				t.Fatalf("anthropicStopReasonErrorMessage(%q) = empty, want a message", tt.input)
+			}
+			if !strings.Contains(got, tt.input) {
+				t.Errorf("message %q does not name the raw stop_reason %q", got, tt.input)
+			}
+			if ratelimit.IsRetryableError(got) {
+				t.Errorf("message %q is classified as retryable; it must be terminal", got)
+			}
+		})
+	}
+}
+
+// TestAnthropic_StopReasonErrorSSE drives the SSE stream end-to-end and asserts
+// that an error stop reason arriving via message_delta always carries a
+// non-empty ErrorMessage — i.e. the agent loop's ensureErrorMessage() backstop
+// can no longer fire for this path.
+func TestAnthropic_StopReasonErrorSSE(t *testing.T) {
+	tests := []struct {
+		name       string
+		stopReason string
+		wantErr    bool
+	}{
+		{"refusal", "refusal", true},
+		{"sensitive", "sensitive", true},
+		{"unknown", "wibble_reason", true},
+		{"tool_use", "tool_use", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sse := "event: message_start\n" +
+				`data: {"type":"message_start","message":{"id":"msg_01","type":"message","role":"assistant","content":[],"model":"claude-sonnet-4-20250514","stop_reason":null,"usage":{"input_tokens":25,"output_tokens":0}}}` + "\n\n" +
+				"event: content_block_start\n" +
+				`data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}` + "\n\n" +
+				"event: content_block_delta\n" +
+				`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"partial"}}` + "\n\n" +
+				"event: content_block_stop\n" +
+				`data: {"type":"content_block_stop","index":0}` + "\n\n" +
+				"event: message_delta\n" +
+				`data: {"type":"message_delta","delta":{"stop_reason":"` + tt.stopReason + `"},"usage":{"input_tokens":25,"output_tokens":3}}` + "\n\n" +
+				"event: message_stop\n" +
+				`data: {"type":"message_stop"}` + "\n\n"
+
+			srv := mockSSEServerFunc(t, func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				w.WriteHeader(http.StatusOK)
+				w.Write([]byte(sse))
+			})
+			defer srv.Close()
+
+			model := anthropicModel(srv.URL)
+			ctx := ai.Context{Messages: []ai.Message{ai.NewUserMsg("Hello!", 1000)}}
+			stream := StreamAnthropic(context.Background(), model, ctx, &ai.StreamOptions{APIKey: "test-key"})
+			_ = collectEvents(t, stream)
+
+			result := stream.Result()
+			if result == nil {
+				t.Fatal("expected non-nil result")
+			}
+			if !tt.wantErr {
+				if result.StopReason == ai.StopReasonError {
+					t.Fatalf("stop_reason %q should not be an error, got: %s", tt.stopReason, result.ErrorMessage)
+				}
+				if result.ErrorMessage != "" {
+					t.Errorf("expected empty ErrorMessage, got %q", result.ErrorMessage)
+				}
+				return
+			}
+			if result.StopReason != ai.StopReasonError {
+				t.Fatalf("expected StopReasonError for %q, got %q", tt.stopReason, result.StopReason)
+			}
+			if result.ErrorMessage == "" {
+				t.Fatal("ErrorMessage is empty — ensureErrorMessage backstop would fire")
+			}
+			if !strings.Contains(result.ErrorMessage, tt.stopReason) {
+				t.Errorf("ErrorMessage %q does not name the raw stop_reason %q", result.ErrorMessage, tt.stopReason)
+			}
+			if ratelimit.IsRetryableError(result.ErrorMessage) {
+				t.Errorf("ErrorMessage %q is classified as retryable; it must be terminal", result.ErrorMessage)
+			}
+		})
+	}
+}
+
+// TestAnthropic_StopReasonErrorDoesNotClobber verifies that an ErrorMessage set
+// by an earlier error path survives a later error stop_reason in message_delta.
+func TestAnthropic_StopReasonErrorDoesNotClobber(t *testing.T) {
+	sse := "event: message_start\n" +
+		`data: {"type":"message_start","message":{"id":"msg_01","type":"message","role":"assistant","content":[],"model":"claude-sonnet-4-20250514","stop_reason":null,"usage":{"input_tokens":25,"output_tokens":0}}}` + "\n\n" +
+		"event: content_block_start\n" +
+		`data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}` + "\n\n" +
+		"event: content_block_delta\n" +
+		`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"partial"}}` + "\n\n" +
+		"event: content_block_stop\n" +
+		`data: {"type":"content_block_stop","index":0}` + "\n\n" +
+		"event: error\n" +
+		`data: {"type":"error","error":{"type":"api_error","message":"upstream exploded"}}` + "\n\n" +
+		"event: message_delta\n" +
+		`data: {"type":"message_delta","delta":{"stop_reason":"refusal"},"usage":{"input_tokens":25,"output_tokens":3}}` + "\n\n" +
+		"event: message_stop\n" +
+		`data: {"type":"message_stop"}` + "\n\n"
+
+	srv := mockSSEServerFunc(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(sse))
+	})
+	defer srv.Close()
+
+	model := anthropicModel(srv.URL)
+	ctx := ai.Context{Messages: []ai.Message{ai.NewUserMsg("Hello!", 1000)}}
+	stream := StreamAnthropic(context.Background(), model, ctx, &ai.StreamOptions{APIKey: "test-key"})
+	_ = collectEvents(t, stream)
+
+	result := stream.Result()
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if result.StopReason != ai.StopReasonError {
+		t.Fatalf("expected StopReasonError, got %q", result.StopReason)
+	}
+	if !strings.Contains(result.ErrorMessage, "upstream exploded") {
+		t.Errorf("earlier ErrorMessage was clobbered, got %q", result.ErrorMessage)
 	}
 }
 
