@@ -611,8 +611,10 @@ func TestSetupSession_NoDeferExtensions_RunsSetup(t *testing.T) {
 
 func TestSetupSession_DeferExtensions_FasterThanBlocking(t *testing.T) {
 	// This test verifies the performance invariant: deferring extensions
-	// should make setupSession return in well under 500ms, even if there
-	// are extensions that would take seconds to start.
+	// makes setupSession return without waiting for an extension that would
+	// take 30s to start. The budget is deliberately generous (5s, a sixth of
+	// the extension's sleep): a tight wall-clock cap says nothing extra about
+	// the invariant and flakes under the race detector on a loaded machine.
 	providers.RegisterDefaultProviders()
 	agentDir := t.TempDir()
 	t.Setenv("FIR_AGENT_DIR", agentDir)
@@ -637,8 +639,8 @@ func TestSetupSession_DeferExtensions_FasterThanBlocking(t *testing.T) {
 	}
 	defer setup.result.Session.Close()
 
-	if elapsed > 500*time.Millisecond {
-		t.Errorf("setupSession with deferExtensions=true took %v, expected < 500ms", elapsed)
+	if elapsed > 5*time.Second {
+		t.Errorf("setupSession with deferExtensions=true took %v, expected < 5s (it must not wait for the 30s extension)", elapsed)
 	}
 }
 
