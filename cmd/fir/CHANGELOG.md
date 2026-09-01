@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Added
+- **`fir /<command>` runs slash commands from the CLI.** A leading-`/` argument used to resolve as a *skill* only, so `fir /changelog` died with `unknown skill "changelog"`. It now resolves skill first (back-compat — a skill named like a command still wins), then falls back to the interactive slash command registry: `fir /changelog`, `fir /session`, `fir /mcp`, `fir /model sonnet`, `fir /theme` and extension-provided commands all launch fir and execute exactly as if typed at the prompt. Headless modes (`-p`, `--output-mode json`, ACP) fail fast with `command /x requires interactive mode`; unresolvable names report both unknown-skill and unknown-command context. Bash and zsh completion now offer built-in commands alongside skills after `fir /<TAB>`.
+
 ## [1.3.7] - 2026-09-01
 
 ### Changed

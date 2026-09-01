@@ -5,6 +5,10 @@
 # or for a single user:
 #   fir completion bash > ~/.local/share/bash-completion/completions/fir
 
+# Built-in slash commands, runnable as `fir /<command>`. Kept in sync with
+# resources.BuiltinSlashCommands by TestCompletionScripts_SlashCommandsInSync.
+_FIR_SLASH_COMMANDS="help theme thinking model settings session new compact resume tree export share name changelog login logout reload skills update reexec queue dequeue plan mcp quit"
+
 _fir_complete() {
     local cur prev words cword
     if declare -F _init_completion >/dev/null 2>&1; then
@@ -104,9 +108,8 @@ _fir_complete() {
             return
         fi
         if [[ $cur == /* ]]; then
-            local stripped=${cur#/}
             local names
-            names=$(_fir_skill_names)
+            names="$(_fir_skill_names) $_FIR_SLASH_COMMANDS"
             local prefixed=()
             local n
             for n in $names; do prefixed+=("/$n"); done

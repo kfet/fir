@@ -133,9 +133,17 @@ _fir_first_arg() {
         done
     fi
     slash_skills=( "${_fir_slash_skills_cache[@]}" )
+    # Built-in slash commands, runnable as `fir /<command>`. Kept in sync with
+    # resources.BuiltinSlashCommands by TestCompletionScripts_SlashCommandsInSync.
+    local -a slash_commands
+    local c
+    for c in help theme thinking model settings session new compact resume tree export share name changelog login logout reload skills update reexec queue dequeue plan mcp quit; do
+        slash_commands+=("/$c:slash command")
+    done
     _alternative \
         'subcommands:subcommand:(( ${subs[@]} ))' \
         'skills:slash-skill:(( ${slash_skills[@]} ))' \
+        'commands:slash-command:(( ${slash_commands[@]} ))' \
         'files:file argument (@file):_files -P @' \
         'messages:message:'
 }

@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/kfet/fir/pkg/resources"
 )
 
 // TestCompletionScripts_CoverAllFlagsAndSubcommands is a build-time guard that
@@ -202,3 +204,37 @@ func extractSubcommandsFromAppGo(path string) ([]string, error) {
 // errParseRange is returned when the args.go ParseArgs / PrintHelp markers
 // can't be located.
 var errParseRange = errors.New("could not locate ParseArgs..PrintHelp range in args.go (markers moved?)")
+
+// TestCompletionScripts_SlashCommandsInSync guards the hardcoded slash command
+// lists in the completion scripts against drift from
+// resources.BuiltinSlashCommands (the single source of truth). The scripts are
+// static files, so the list cannot be generated at completion time without
+// shelling out to fir on every TAB.
+func TestCompletionScripts_SlashCommandsInSync(t *testing.T) {
+	want := make([]string, 0, len(resources.BuiltinSlashCommands))
+	for _, cmd := range resources.BuiltinSlashCommands {
+		want = append(want, cmd.Name)
+	}
+	sort.Strings(want)
+
+	scripts := []struct {
+		name string
+		body string
+		re   *regexp.Regexp
+	}{
+		{"fir.bash", completionBash, regexp.MustCompile(`_FIR_SLASH_COMMANDS="([^"]*)"`)},
+		{"_fir", completionZsh, regexp.MustCompile(`for c in ([^;]*); do`)},
+	}
+	for _, script := range scripts {
+		m := script.re.FindStringSubmatch(script.body)
+		if m == nil {
+			t.Errorf("%s: slash command list not found (did the script change shape?)", script.name)
+			continue
+		}
+		got := strings.Fields(m[1])
+		sort.Strings(got)
+		if strings.Join(got, " ") != strings.Join(want, " ") {
+			t.Errorf("%s: slash commands out of sync\n got: %v\nwant: %v", script.name, got, want)
+		}
+	}
+}

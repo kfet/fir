@@ -599,10 +599,11 @@ func run() error {
 		return runLoginWithExtensions(args, args.Login)
 	}
 
-	// Slash-skill invocation: `fir /<skill-name> <task...>` rewrites to a
-	// directive message. Done after --help/--version/--list-models/--export
-	// /--login so those exits are never blocked by an unknown-skill error.
-	if err := rewriteSlashSkillMessages(args); err != nil {
+	// Slash invocation: `fir /<name> <args...>` resolves to a skill (rewritten
+	// to a directive message) or a slash command (passed through to the
+	// interactive mode). Done after --help/--version/--list-models/--export
+	// /--login so those exits are never blocked by an unknown-name error.
+	if err := resolveSlashInvocation(args, isPrintMode || isACPMode); err != nil {
 		return err
 	}
 

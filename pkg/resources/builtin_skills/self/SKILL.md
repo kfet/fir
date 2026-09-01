@@ -340,6 +340,8 @@ Use `/skills` to list loaded skills, `/reload` to pick up changes. Use `fir skil
 
 Skills can also be invoked directly from the CLI: `fir /<skill-name> [task...]` rewrites into an initial agent message that points at the named skill and supplies the rest of the positional arguments as the task body. Composes with all flags (`-p`, `--model`, `-c`, …). Bash and zsh completion enumerate `/<skill>` candidates dynamically from `fir skills list`.
 
+`fir /<name>` also runs **slash commands**: if no skill matches, the name is resolved against the built-in slash commands (`/changelog`, `/session`, `/mcp`, `/model X`, `/theme`, `/skills`, `/plan`, …) and extension-provided commands, and dispatched exactly as if typed at the interactive prompt. Resolution order is skill first (back-compat), then command. Slash commands are TUI-bound, so in headless modes (`-p`, `--output-mode json`, ACP) they fail fast with `command /x requires interactive mode` rather than being sent to the model.
+
 ## External Packages
 
 Install/manage external packages (git repos or local paths) that contribute skills, extensions, and themes:
