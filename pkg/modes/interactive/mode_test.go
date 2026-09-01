@@ -2693,3 +2693,53 @@ func TestInteractiveMode_LoadAllSessionsUsesConfiguredAgentDir(t *testing.T) {
 		t.Fatalf("expected all-session selector not to read default agent dir when AgentDir is configured")
 	}
 }
+
+func TestInteractiveMode_RouteInitialPrompt(t *testing.T) {
+	m := NewInteractiveMode(nil, nil, nil, InteractiveModeOptions{})
+
+	cases := map[string]InitialPromptRoute{
+		"/changelog":            RouteBuiltin,
+		"/model sonnet":         RouteBuiltin,
+		"/exit":                 RouteBuiltin,
+		"/skill:review fix it":  RouteModel,
+		"/usr/bin/fir is stale": RouteModel,
+		"hello world":           RouteModel,
+		"/":                     RouteModel,
+		"":                      RouteModel,
+		"/not-a-real-command":   RouteUnknown,
+	}
+	for text, want := range cases {
+		if got := m.routeInitialPrompt(text); got != want {
+			t.Errorf("routeInitialPrompt(%q) = %v, want %v", text, got, want)
+		}
+	}
+}
+
+// TestInteractiveMode_DispatchInitialPrompt_Builtin verifies the CLI seam
+// (`fir /help`) actually runs the command rather than prompting the model.
+func TestInteractiveMode_DispatchInitialPrompt_Builtin(t *testing.T) {
+	tm := newTestMode(t)
+
+	if !tm.mode.helpHidden {
+		t.Fatal("expected help hidden before dispatch")
+	}
+	tm.mode.DispatchInitialPrompt("/help")
+	tm.waitRender()
+
+	if tm.mode.helpHidden {
+		t.Error("/help as initial prompt did not toggle help visibility")
+	}
+}
+
+// TestInteractiveMode_DispatchInitialPrompt_Message verifies a plain initial
+// prompt is still echoed as a user message.
+func TestInteractiveMode_DispatchInitialPrompt_Message(t *testing.T) {
+	tm := newTestMode(t)
+
+	tm.mode.DispatchInitialPrompt("do the thing")
+	tm.waitRender()
+
+	if !strings.Contains(strings.Join(tm.term.GetOutput(), "\n"), "do the thing") {
+		t.Error("plain initial prompt was not shown as a user message")
+	}
+}

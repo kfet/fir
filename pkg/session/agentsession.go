@@ -268,6 +268,16 @@ type AgentSession struct {
 	mcpConfigured bool
 }
 
+// WaitExtReady blocks until extensions have finished loading. It returns
+// immediately when no extension-readiness channel was wired (e.g. in tests).
+// Prompt gates on this internally; callers that dispatch something other than
+// a prompt (such as an extension slash command) need it explicitly.
+func (s *AgentSession) WaitExtReady() {
+	if s.extReady != nil {
+		<-s.extReady
+	}
+}
+
 // NewAgentSession creates a new AgentSession.
 func NewAgentSession(opts AgentSessionOptions) *AgentSession {
 	s := &AgentSession{

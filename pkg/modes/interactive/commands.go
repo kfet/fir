@@ -71,6 +71,101 @@ func (m *InteractiveMode) isExtensionSlashCommand(text string) bool {
 	return false
 }
 
+// InitialPromptRoute classifies how an initial prompt (from `fir <msg>` or
+// `fir /<command>`) should be dispatched.
+type InitialPromptRoute int
+
+const (
+	// RouteModel sends the text to the model as a normal user message.
+	RouteModel InitialPromptRoute = iota
+	// RouteBuiltin dispatches the text as a builtin slash command.
+	RouteBuiltin
+	// RouteExtension dispatches the text to the owning extension. Only
+	// decidable once extensions have finished loading.
+	RouteExtension
+	// RouteUnknown means the text looks like a command but nothing claims it.
+	RouteUnknown
+)
+
+// routeInitialPrompt classifies text for DispatchInitialPrompt. Anything that
+// is not a bare `/name ...` invocation goes to the model, including `/skill:x`
+// (expanded by the session) and paths such as `/usr/bin/foo`.
+//
+// RouteExtension/RouteUnknown are only meaningful after extensions have
+// loaded; callers must wait first.
+func (m *InteractiveMode) routeInitialPrompt(text string) InitialPromptRoute {
+	if !isBareSlashInvocation(text) {
+		return RouteModel
+	}
+	if m.isBuiltinSlashCommand(text) {
+		return RouteBuiltin
+	}
+	if m.isExtensionSlashCommand(text) {
+		return RouteExtension
+	}
+	return RouteUnknown
+}
+
+// isBareSlashInvocation reports whether text is a `/name ...` command
+// invocation rather than a message that merely starts with a slash (a path)
+// or a skill directive (`/skill:name`).
+func isBareSlashInvocation(text string) bool {
+	parts := strings.Fields(text)
+	if len(parts) == 0 {
+		return false
+	}
+	cmd := parts[0]
+	if len(cmd) < 2 || cmd[0] != '/' {
+		return false
+	}
+	name := cmd[1:]
+	if strings.ContainsRune(name, '/') || strings.HasPrefix(name, "skill:") {
+		return false
+	}
+	return true
+}
+
+// DispatchInitialPrompt routes the initial prompt supplied on the command
+// line. It is the single seam that makes `fir /<command>` behave exactly as
+// if the command had been typed at the interactive prompt — builtin commands
+// dispatch locally, extension commands dispatch to their extension, and
+// everything else is sent to the model.
+//
+// Extension commands are only known after the extension handshake, so an
+// unrecognised command is resolved again once extensions are ready rather
+// than being leaked to the model as literal text.
+func (m *InteractiveMode) DispatchInitialPrompt(text string) {
+	switch m.routeInitialPrompt(text) {
+	case RouteBuiltin:
+		m.handleSlashCommand(text)
+	case RouteExtension:
+		go m.handleExtensionSlashCommand(text)
+	case RouteUnknown:
+		go func() {
+			// Extension commands register during the handshake, which runs
+			// concurrently with startup; re-resolve once it has completed.
+			if m.session != nil {
+				m.session.WaitExtReady()
+			}
+			if m.isExtensionSlashCommand(text) {
+				m.handleExtensionSlashCommand(text)
+				return
+			}
+			name := strings.TrimPrefix(strings.Fields(text)[0], "/")
+			m.showWarning(fmt.Sprintf("Unknown command /%s — not a known skill, builtin slash command, or extension command. Try /help or /skills.", name))
+		}()
+	default:
+		m.AddUserMessage(text) // Show it instantly as if typed
+		if m.session != nil {
+			go func() {
+				// AgentSession.Prompt waits on ExtReady internally before
+				// firing the first LLM call.
+				_ = m.session.Prompt(text)
+			}()
+		}
+	}
+}
+
 // handleExtensionSlashCommand dispatches text to the owning extension and
 // shows any message it returns.
 func (m *InteractiveMode) handleExtensionSlashCommand(text string) {

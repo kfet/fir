@@ -625,18 +625,16 @@ func (m *InteractiveMode) Run() error {
 	// Restore sidecar state from a previous reexec (queued messages, editor text).
 	m.restoreReexecSidecar()
 
+	// Start TUI (sets up terminal input/resize handlers). This must happen
+	// before the initial prompt is dispatched: slash commands render into
+	// TUI containers or open selectors, both of which need a live render
+	// loop. Start() is non-blocking.
+	m.ui.Start()
+
 	// Send initial prompt if provided
 	if m.initialPrompt != "" {
-		m.AddUserMessage(m.initialPrompt) // Show it instantly as if typed
-		go func() {
-			// AgentSession.Prompt waits on ExtReady internally before
-			// firing the first LLM call.
-			_ = m.session.Prompt(m.initialPrompt)
-		}()
+		m.DispatchInitialPrompt(m.initialPrompt)
 	}
-
-	// Start TUI (sets up terminal input/resize handlers)
-	m.ui.Start()
 
 	// Main loop: wait for shutdown
 	<-m.ctx.Done()
