@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -53,6 +54,8 @@ type brewEnv struct {
 	brewPrefix func(ctx context.Context, brewPath string) (string, error)
 	// fullFormulaName resolves a bare keg name to its fully-qualified name.
 	fullFormulaName func(ctx context.Context, brewPath, keg string) (string, error)
+	// readFile reads a file from disk — used for the install receipt.
+	readFile func(string) ([]byte, error)
 }
 
 // defaultBrewEnv is the production environment.
@@ -63,6 +66,7 @@ func defaultBrewEnv() brewEnv {
 		lookPath:        exec.LookPath,
 		brewPrefix:      execBrewPrefix,
 		fullFormulaName: execFullFormulaName,
+		readFile:        os.ReadFile,
 	}
 }
 
@@ -88,7 +92,7 @@ func detectBrewInstall(ctx context.Context, env brewEnv) (*BrewInstall, error) {
 
 	// Cheap gate first: no Cellar component means not brew-managed, and we
 	// never pay for an exec on the overwhelmingly common non-brew host.
-	prefix, keg, ok := splitCellarPath(real)
+	cellar, ok := splitCellarPath(real)
 	if !ok {
 		return nil, nil
 	}
@@ -100,10 +104,10 @@ func detectBrewInstall(ctx context.Context, env brewEnv) (*BrewInstall, error) {
 
 	// Confirm the candidate prefix is a real Homebrew prefix rather than a
 	// directory that merely happens to be called "Cellar".
-	confirmed := isStandardBrewPrefix(prefix)
+	confirmed := isStandardBrewPrefix(cellar.prefix)
 	if !confirmed && brewPath != "" {
 		if reported, err := env.brewPrefix(ctx, brewPath); err == nil {
-			confirmed = filepath.Clean(reported) == prefix
+			confirmed = filepath.Clean(reported) == cellar.prefix
 		}
 	}
 	if !confirmed {
@@ -112,28 +116,52 @@ func detectBrewInstall(ctx context.Context, env brewEnv) (*BrewInstall, error) {
 
 	inst := &BrewInstall{
 		ExePath:  real,
-		Prefix:   prefix,
-		Formula:  keg,
+		Prefix:   cellar.prefix,
+		Formula:  cellar.keg,
 		BrewPath: brewPath,
 	}
 
 	// Prefer the fully-qualified name so `brew upgrade` cannot bind to a
 	// same-named formula from a different tap. Falling back to the bare keg
 	// name is safe: it is exactly what Homebrew laid down on disk.
-	if brewPath != "" {
-		if full, err := env.fullFormulaName(ctx, brewPath, keg); err == nil && full != "" {
+	//
+	// The install receipt is authoritative for the *name* only — never for
+	// detection. It is written by Homebrew at install time, so it names the
+	// exact tap this keg came from, costs no exec, works with `brew` absent,
+	// and — unlike `brew info` — is unambiguous when several taps provide the
+	// same formula. Its presence is deliberately not allowed to confirm
+	// brew-management: receipts survive copied or relocated Cellars, and the
+	// conservative rule above is what keeps `fir update` working on non-brew
+	// hosts.
+	if full, ok := receiptFormulaName(env.readFile, cellar.kegDir, cellar.keg); ok {
+		inst.Formula = full
+	} else if brewPath != "" {
+		if full, err := env.fullFormulaName(ctx, brewPath, cellar.keg); err == nil && full != "" {
 			inst.Formula = full
 		}
 	}
 	return inst, nil
 }
 
+// cellarPath is a resolved executable path decomposed into its Homebrew parts.
+type cellarPath struct {
+	// prefix is the Homebrew prefix, e.g. "/opt/homebrew".
+	prefix string
+	// keg is the formula's bare name, e.g. "fir".
+	keg string
+	// kegDir is the installed version's directory, e.g.
+	// "/opt/homebrew/Cellar/fir/1.3.2". Empty when nothing follows the keg
+	// name.
+	kegDir string
+}
+
 // splitCellarPath splits a resolved executable path of the shape
-// <prefix>/Cellar/<keg>/<version>/bin/<exe> into its prefix and keg name.
+// <prefix>/Cellar/<keg>/<version>/bin/<exe> into its parts.
 // ok is false when the path has no "Cellar" component with a name after it.
-func splitCellarPath(path string) (prefix, keg string, ok bool) {
+func splitCellarPath(path string) (cellarPath, bool) {
 	path = filepath.Clean(path)
-	parts := strings.Split(path, string(filepath.Separator))
+	sep := string(filepath.Separator)
+	parts := strings.Split(path, sep)
 	for i, p := range parts {
 		if p != "Cellar" {
 			continue
@@ -142,13 +170,16 @@ func splitCellarPath(path string) (prefix, keg string, ok bool) {
 		if i == 0 || i+1 >= len(parts) || parts[i+1] == "" {
 			continue
 		}
-		prefix = strings.Join(parts[:i], string(filepath.Separator))
-		if prefix == "" {
-			prefix = string(filepath.Separator)
+		out := cellarPath{prefix: strings.Join(parts[:i], sep), keg: parts[i+1]}
+		if out.prefix == "" {
+			out.prefix = sep
 		}
-		return prefix, parts[i+1], true
+		if i+2 < len(parts) && parts[i+2] != "" {
+			out.kegDir = filepath.Join(out.prefix, "Cellar", out.keg, parts[i+2])
+		}
+		return out, true
 	}
-	return "", "", false
+	return cellarPath{}, false
 }
 
 // isStandardBrewPrefix reports whether prefix is one of Homebrew's documented
@@ -172,6 +203,56 @@ func execBrewPrefix(ctx context.Context, brewPath string) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// installReceipt is the slice of Homebrew's INSTALL_RECEIPT.json we care
+// about. Homebrew writes it into every keg directory at install time.
+type installReceipt struct {
+	Source struct {
+		Tap string `json:"tap"`
+	} `json:"source"`
+}
+
+// receiptFormulaName resolves the fully-qualified formula name "<tap>/<keg>"
+// from <kegDir>/INSTALL_RECEIPT.json.
+//
+// Every failure mode — no reader, no receipt, unreadable, malformed JSON,
+// empty tap, tap not of the form owner/repo — reports ok=false so the caller
+// falls through to the next resolution step. It never errors out.
+func receiptFormulaName(readFile func(string) ([]byte, error), kegDir, keg string) (string, bool) {
+	if readFile == nil || kegDir == "" || keg == "" {
+		return "", false
+	}
+	data, err := readFile(filepath.Join(kegDir, "INSTALL_RECEIPT.json"))
+	if err != nil {
+		return "", false
+	}
+	var receipt installReceipt
+	if err := json.Unmarshal(data, &receipt); err != nil {
+		return "", false
+	}
+	tap := strings.TrimSpace(receipt.Source.Tap)
+	if !validTapName(tap) {
+		return "", false
+	}
+	return tap + "/" + keg, true
+}
+
+// validTapName reports whether tap is a plausible "owner/repo" Homebrew tap.
+// Anything else is rejected rather than handed to `brew upgrade` — notably a
+// component starting with "-", which brew would parse as a flag.
+func validTapName(tap string) bool {
+	parts := strings.Split(tap, "/")
+	if len(parts) != 2 {
+		return false
+	}
+	for _, p := range parts {
+		if p == "" || p == "." || p == ".." || strings.HasPrefix(p, "-") ||
+			strings.ContainsAny(p, " \t\n\r\\") {
+			return false
+		}
+	}
+	return true
 }
 
 // brewInfoV2 is the slice of `brew info --json=v2` output we care about.

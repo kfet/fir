@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"os/exec"
 	"strings"
 	"testing"
@@ -20,6 +21,7 @@ func TestSplitCellarPath(t *testing.T) {
 		wantOK     bool
 		wantPrefix string
 		wantKeg    string
+		wantKegDir string
 	}{
 		{
 			name:       "macos arm64 cellar",
@@ -27,6 +29,7 @@ func TestSplitCellarPath(t *testing.T) {
 			wantOK:     true,
 			wantPrefix: "/opt/homebrew",
 			wantKeg:    "fir",
+			wantKegDir: "/opt/homebrew/Cellar/fir/1.3.2",
 		},
 		{
 			name:       "macos amd64 cellar",
@@ -34,6 +37,7 @@ func TestSplitCellarPath(t *testing.T) {
 			wantOK:     true,
 			wantPrefix: "/usr/local",
 			wantKeg:    "fir",
+			wantKegDir: "/usr/local/Cellar/fir/1.3.2",
 		},
 		{
 			name:       "linuxbrew cellar",
@@ -41,6 +45,7 @@ func TestSplitCellarPath(t *testing.T) {
 			wantOK:     true,
 			wantPrefix: "/home/linuxbrew/.linuxbrew",
 			wantKeg:    "fir",
+			wantKegDir: "/home/linuxbrew/.linuxbrew/Cellar/fir/1.3.2",
 		},
 		{
 			name:       "custom prefix cellar",
@@ -48,6 +53,7 @@ func TestSplitCellarPath(t *testing.T) {
 			wantOK:     true,
 			wantPrefix: "/Users/kfet/homebrew",
 			wantKeg:    "fir",
+			wantKegDir: "/Users/kfet/homebrew/Cellar/fir/1.3.2",
 		},
 		{
 			name:       "uncleaned path",
@@ -55,6 +61,15 @@ func TestSplitCellarPath(t *testing.T) {
 			wantOK:     true,
 			wantPrefix: "/opt/homebrew",
 			wantKeg:    "fir",
+			wantKegDir: "/opt/homebrew/Cellar/fir/1.3.2",
+		},
+		{
+			name:       "keg with no version component has no keg dir",
+			path:       "/opt/homebrew/Cellar/fir",
+			wantOK:     true,
+			wantPrefix: "/opt/homebrew",
+			wantKeg:    "fir",
+			wantKegDir: "",
 		},
 		{name: "plain local install", path: "/home/kfet/.local/bin/fir"},
 		{name: "system install", path: "/usr/bin/fir"},
@@ -68,18 +83,21 @@ func TestSplitCellarPath(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			prefix, keg, ok := splitCellarPath(tt.path)
+			got, ok := splitCellarPath(tt.path)
 			if ok != tt.wantOK {
 				t.Fatalf("splitCellarPath(%q) ok = %v, want %v", tt.path, ok, tt.wantOK)
 			}
 			if !tt.wantOK {
 				return
 			}
-			if prefix != tt.wantPrefix {
-				t.Errorf("prefix = %q, want %q", prefix, tt.wantPrefix)
+			if got.prefix != tt.wantPrefix {
+				t.Errorf("prefix = %q, want %q", got.prefix, tt.wantPrefix)
 			}
-			if keg != tt.wantKeg {
-				t.Errorf("keg = %q, want %q", keg, tt.wantKeg)
+			if got.keg != tt.wantKeg {
+				t.Errorf("keg = %q, want %q", got.keg, tt.wantKeg)
+			}
+			if got.kegDir != tt.wantKegDir {
+				t.Errorf("kegDir = %q, want %q", got.kegDir, tt.wantKegDir)
 			}
 		})
 	}
@@ -88,12 +106,15 @@ func TestSplitCellarPath(t *testing.T) {
 // A "Cellar" directory nested deeper than the prefix must still resolve to the
 // segment before it, so confirmation against a real prefix is what rejects it.
 func TestSplitCellarPath_NestedCellarUsesFirstMatch(t *testing.T) {
-	prefix, keg, ok := splitCellarPath("/tmp/Cellar/fir/1.0.0/bin/fir")
+	got, ok := splitCellarPath("/tmp/Cellar/fir/1.0.0/bin/fir")
 	if !ok {
 		t.Fatal("expected a match")
 	}
-	if prefix != "/tmp" || keg != "fir" {
-		t.Errorf("got (%q, %q), want (/tmp, fir)", prefix, keg)
+	if got.prefix != "/tmp" || got.keg != "fir" {
+		t.Errorf("got (%q, %q), want (/tmp, fir)", got.prefix, got.keg)
+	}
+	if got.kegDir != "/tmp/Cellar/fir/1.0.0" {
+		t.Errorf("kegDir = %q, want /tmp/Cellar/fir/1.0.0", got.kegDir)
 	}
 }
 
@@ -138,9 +159,13 @@ type stubEnv struct {
 	prefixErr   error
 	fullName    string
 	fullNameErr error
+	// receipts maps an absolute file path to its contents. A path that is
+	// absent reads as "no such file".
+	receipts map[string]string
 
 	prefixCalls   int
 	fullNameCalls int
+	readCalls     int
 }
 
 func (s *stubEnv) env() brewEnv {
@@ -169,8 +194,24 @@ func (s *stubEnv) env() brewEnv {
 			s.fullNameCalls++
 			return s.fullName, s.fullNameErr
 		},
+		readFile: func(path string) ([]byte, error) {
+			s.readCalls++
+			body, ok := s.receipts[path]
+			if !ok {
+				return nil, fs.ErrNotExist
+			}
+			return []byte(body), nil
+		},
 	}
 }
+
+// receipt builds an INSTALL_RECEIPT.json body naming the given tap.
+func receipt(tap string) string {
+	return `{"homebrew_version":"4.6.1","source":{"tap":"` + tap +
+		`","spec":"stable","versions":{"stable":"1.3.2"}}}`
+}
+
+const kegReceiptPath = "/opt/homebrew/Cellar/fir/1.3.2/INSTALL_RECEIPT.json"
 
 func TestDetectBrewInstall(t *testing.T) {
 	tests := []struct {
@@ -237,6 +278,129 @@ func TestDetectBrewInstall(t *testing.T) {
 			wantPrefix:  "/home/linuxbrew/.linuxbrew",
 			wantFormula: "kfet/ai/fir",
 			wantBrew:    "/home/linuxbrew/.linuxbrew/bin/brew",
+		},
+
+		// --- install receipt resolution (preferred over `brew info`) ---
+		{
+			name: "receipt names the tap",
+			stub: stubEnv{
+				exePath:  "/opt/homebrew/Cellar/fir/1.3.2/bin/fir",
+				brewPath: "/opt/homebrew/bin/brew",
+				fullName: "kfet/fir/fir", // must not win over the receipt
+				receipts: map[string]string{kegReceiptPath: receipt("kfet/ai")},
+			},
+			wantPrefix:  "/opt/homebrew",
+			wantFormula: "kfet/ai/fir",
+			wantBrew:    "/opt/homebrew/bin/brew",
+		},
+		{
+			// Production shape: os.Executable() reports the brew symlink, so
+			// the receipt path must come from the *resolved* Cellar path.
+			name: "receipt is read from the resolved symlink target",
+			stub: stubEnv{
+				exePath:  "/opt/homebrew/bin/fir",
+				resolved: "/opt/homebrew/Cellar/fir/1.3.2/bin/fir",
+				brewPath: "/opt/homebrew/bin/brew",
+				fullName: "kfet/fir/fir", // must not win over the receipt
+				receipts: map[string]string{kegReceiptPath: receipt("kfet/ai")},
+			},
+			wantPrefix:  "/opt/homebrew",
+			wantFormula: "kfet/ai/fir",
+			wantBrew:    "/opt/homebrew/bin/brew",
+		},
+		{
+			// The reported regression: two taps provide `fir`, so
+			// `brew info --json=v2 --formula fir` exits non-zero. The receipt
+			// still resolves the right fully-qualified name.
+			name: "receipt wins when brew info is ambiguous",
+			stub: stubEnv{
+				exePath:     "/opt/homebrew/Cellar/fir/1.3.2/bin/fir",
+				brewPath:    "/opt/homebrew/bin/brew",
+				fullNameErr: errors.New("Error: Formulae found in multiple taps: * kfet/fir/fir * kfet/ai/fir"),
+				receipts:    map[string]string{kegReceiptPath: receipt("kfet/ai")},
+			},
+			wantPrefix:  "/opt/homebrew",
+			wantFormula: "kfet/ai/fir",
+			wantBrew:    "/opt/homebrew/bin/brew",
+		},
+		{
+			name: "receipt works with brew missing from PATH",
+			stub: stubEnv{
+				exePath:  "/opt/homebrew/Cellar/fir/1.3.2/bin/fir",
+				brewPath: "",
+				receipts: map[string]string{kegReceiptPath: receipt("kfet/ai")},
+			},
+			wantPrefix:  "/opt/homebrew",
+			wantFormula: "kfet/ai/fir",
+			wantBrew:    "",
+		},
+		{
+			name: "missing receipt falls back to brew info",
+			stub: stubEnv{
+				exePath:  "/opt/homebrew/Cellar/fir/1.3.2/bin/fir",
+				brewPath: "/opt/homebrew/bin/brew",
+				fullName: "kfet/ai/fir",
+			},
+			wantPrefix:  "/opt/homebrew",
+			wantFormula: "kfet/ai/fir",
+			wantBrew:    "/opt/homebrew/bin/brew",
+		},
+		{
+			name: "malformed receipt falls back to brew info",
+			stub: stubEnv{
+				exePath:  "/opt/homebrew/Cellar/fir/1.3.2/bin/fir",
+				brewPath: "/opt/homebrew/bin/brew",
+				fullName: "kfet/ai/fir",
+				receipts: map[string]string{kegReceiptPath: "{not json"},
+			},
+			wantPrefix:  "/opt/homebrew",
+			wantFormula: "kfet/ai/fir",
+			wantBrew:    "/opt/homebrew/bin/brew",
+		},
+		{
+			name: "empty tap in receipt falls back to brew info",
+			stub: stubEnv{
+				exePath:  "/opt/homebrew/Cellar/fir/1.3.2/bin/fir",
+				brewPath: "/opt/homebrew/bin/brew",
+				fullName: "kfet/ai/fir",
+				receipts: map[string]string{kegReceiptPath: receipt("")},
+			},
+			wantPrefix:  "/opt/homebrew",
+			wantFormula: "kfet/ai/fir",
+			wantBrew:    "/opt/homebrew/bin/brew",
+		},
+		{
+			name: "malformed tap in receipt falls back to brew info",
+			stub: stubEnv{
+				exePath:  "/opt/homebrew/Cellar/fir/1.3.2/bin/fir",
+				brewPath: "/opt/homebrew/bin/brew",
+				fullName: "kfet/ai/fir",
+				receipts: map[string]string{kegReceiptPath: receipt("kfet")},
+			},
+			wantPrefix:  "/opt/homebrew",
+			wantFormula: "kfet/ai/fir",
+			wantBrew:    "/opt/homebrew/bin/brew",
+		},
+		{
+			name: "no receipt and no brew leaves the bare keg name",
+			stub: stubEnv{
+				exePath:  "/opt/homebrew/Cellar/fir/1.3.2/bin/fir",
+				brewPath: "",
+			},
+			wantPrefix:  "/opt/homebrew",
+			wantFormula: "fir",
+			wantBrew:    "",
+		},
+		{
+			name: "no receipt and brew info erroring leaves the bare keg name",
+			stub: stubEnv{
+				exePath:     "/opt/homebrew/Cellar/fir/1.3.2/bin/fir",
+				brewPath:    "/opt/homebrew/bin/brew",
+				fullNameErr: errors.New("boom"),
+			},
+			wantPrefix:  "/opt/homebrew",
+			wantFormula: "fir",
+			wantBrew:    "/opt/homebrew/bin/brew",
 		},
 
 		// --- conservative: everything below must NOT be treated as brew ---
@@ -325,6 +489,28 @@ func TestDetectBrewInstall_NonCellarPathNeverExecsBrew(t *testing.T) {
 		t.Errorf("execed brew on a non-Cellar path: prefix=%d fullName=%d",
 			stub.prefixCalls, stub.fullNameCalls)
 	}
+	if stub.readCalls != 0 {
+		t.Errorf("read a receipt on a non-Cellar path: %d reads", stub.readCalls)
+	}
+}
+
+// A valid receipt is authoritative, so `brew info` must not be execed at all.
+func TestDetectBrewInstall_ReceiptSkipsBrewInfoExec(t *testing.T) {
+	stub := stubEnv{
+		exePath:  "/opt/homebrew/Cellar/fir/1.3.2/bin/fir",
+		brewPath: "/opt/homebrew/bin/brew",
+		receipts: map[string]string{kegReceiptPath: receipt("kfet/ai")},
+	}
+	inst, err := detectBrewInstall(context.Background(), stub.env())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if inst == nil || inst.Formula != "kfet/ai/fir" {
+		t.Fatalf("got %+v, want Formula kfet/ai/fir", inst)
+	}
+	if stub.fullNameCalls != 0 {
+		t.Errorf("brew info called %d times despite a valid receipt", stub.fullNameCalls)
+	}
 }
 
 // A standard prefix is trusted outright, so `brew --prefix` is not needed.
@@ -375,6 +561,82 @@ func TestUpgradeViaBrew_BrewMissingFromPATH(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), inst.ExePath) {
 		t.Errorf("error should name the executable, got: %v", err)
+	}
+}
+
+// -----------------------------------------------------------------------------
+// install receipt
+// -----------------------------------------------------------------------------
+
+func TestReceiptFormulaName(t *testing.T) {
+	// Trimmed shape of a real INSTALL_RECEIPT.json.
+	const real = `{"homebrew_version":"4.6.1","used_options":[],
+		"source":{"path":"/opt/homebrew/Library/Taps/kfet/homebrew-ai/Formula/fir.rb",
+		"tap":"kfet/ai","tap_git_head":"abc123","spec":"stable",
+		"versions":{"stable":"1.3.2","head":null}}}`
+
+	tests := []struct {
+		name   string
+		body   string // "" means the receipt file is absent
+		absent bool
+		want   string
+		wantOK bool
+	}{
+		{name: "real receipt", body: real, want: "kfet/ai/fir", wantOK: true},
+		{name: "minimal receipt", body: receipt("kfet/ai"), want: "kfet/ai/fir", wantOK: true},
+		{name: "tap is padded", body: receipt("  kfet/ai  "), want: "kfet/ai/fir", wantOK: true},
+		{name: "core tap", body: receipt("homebrew/core"), want: "homebrew/core/fir", wantOK: true},
+		{name: "missing receipt", absent: true},
+		{name: "empty file", body: ""},
+		{name: "malformed json", body: "{not json"},
+		{name: "no source key", body: `{"homebrew_version":"4.6.1"}`},
+		{name: "empty tap", body: receipt("")},
+		{name: "tap has no owner", body: receipt("fir")},
+		{name: "tap has too many parts", body: receipt("kfet/ai/extra")},
+		{name: "tap is a leading slash", body: receipt("/ai")},
+		{name: "tap is a trailing slash", body: receipt("kfet/")},
+		{name: "tap has dot components", body: receipt("../..")},
+		{name: "tap owner starts with a dash", body: receipt("-x/ai")},
+		{name: "tap repo starts with a dash", body: receipt("kfet/-x")},
+		{name: "tap has whitespace inside", body: receipt("kfet/a i")},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			read := func(path string) ([]byte, error) {
+				if path != kegReceiptPath {
+					t.Errorf("read %q, want %q", path, kegReceiptPath)
+				}
+				if tt.absent {
+					return nil, fs.ErrNotExist
+				}
+				return []byte(tt.body), nil
+			}
+			got, ok := receiptFormulaName(read, "/opt/homebrew/Cellar/fir/1.3.2", "fir")
+			if ok != tt.wantOK {
+				t.Fatalf("ok = %v, want %v (got %q)", ok, tt.wantOK, got)
+			}
+			if ok && got != tt.want {
+				t.Errorf("got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// Nothing may be read when the caller has no keg dir, keg name, or reader.
+func TestReceiptFormulaName_NoInput(t *testing.T) {
+	read := func(string) ([]byte, error) {
+		t.Fatal("readFile must not be called")
+		return nil, nil
+	}
+	if _, ok := receiptFormulaName(nil, "/opt/homebrew/Cellar/fir/1.3.2", "fir"); ok {
+		t.Error("expected failure with a nil reader")
+	}
+	if _, ok := receiptFormulaName(read, "", "fir"); ok {
+		t.Error("expected failure with an empty keg dir")
+	}
+	if _, ok := receiptFormulaName(read, "/opt/homebrew/Cellar/fir/1.3.2", ""); ok {
+		t.Error("expected failure with an empty keg name")
 	}
 }
 
