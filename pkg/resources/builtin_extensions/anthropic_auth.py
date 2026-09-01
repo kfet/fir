@@ -28,7 +28,7 @@ import fir_ext
 # ---------------------------------------------------------------------------
 
 _CLIENT_ID = base64.b64decode("OWQxYzI1MGEtZTYxYi00NGQ5LTg4ZWQtNTk0NGQxOTYyZjVl").decode()
-_CLAUDE_CODE_VERSION = "2.1.112"
+_CLAUDE_CODE_VERSION = "2.1.257"
 _USER_AGENT = f"claude-cli/{_CLAUDE_CODE_VERSION} (external, cli)"
 
 
