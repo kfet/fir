@@ -24,7 +24,7 @@ _fir_complete() {
     local subcommand=""
     if [[ $cword -ge 2 ]]; then
         case ${words[1]} in
-            update|skills|extensions|install|uninstall|packages|sessions|observe|htop|send|login|logout|mcp|completion)
+            update|skills|extensions|install|uninstall|packages|sessions|observe|htop|send|login|logout|auth|mcp|completion)
                 subcommand=${words[1]}
                 ;;
         esac
@@ -100,7 +100,7 @@ _fir_complete() {
 
     # First positional: subcommand or @file or message
     if [[ $cword -eq 1 ]]; then
-        local subs="update skills extensions install uninstall packages sessions observe htop send login logout mcp completion"
+        local subs="update skills extensions install uninstall packages sessions observe htop send login logout auth mcp completion"
         if [[ $cur == @* ]]; then
             local stripped=${cur#@}
             local files=( $(compgen -f -- "$stripped") )
@@ -182,6 +182,12 @@ _fir_complete_subcommand() {
         login)
             if [[ $pos -eq 1 ]]; then
                 COMPREPLY=( $(compgen -W "list $(_fir_providers)" -- "$cur") )
+            fi ;;
+        auth)
+            if [[ $pos -eq 1 ]]; then
+                COMPREPLY=( $(compgen -W "refresh" -- "$cur") )
+            else
+                COMPREPLY=( $(compgen -W "--force --within --no-extensions --debug $(_fir_providers)" -- "$cur") )
             fi ;;
         mcp)
             if [[ $pos -eq 1 ]]; then

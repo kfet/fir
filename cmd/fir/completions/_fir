@@ -26,6 +26,7 @@ _fir() {
         'send:Send messages to a live fir session'
         'login:OAuth login for a provider'
         'logout:Remove a stored account slot'
+        'auth:Refresh stored OAuth tokens without running a turn'
         'mcp:Inspect MCP servers or manage their credentials'
         'completion:Print shell completion script'
     )
@@ -43,6 +44,7 @@ _fir() {
             observe)     _fir_observe; return ;;
             send)        _fir_send; return ;;
             login)       _fir_login; return ;;
+            auth)        _fir_auth; return ;;
             mcp)         _fir_mcp; return ;;
             completion)  _fir_completion; return ;;
         esac
@@ -243,6 +245,20 @@ _fir_login() {
             'subcommand:subcommand:((list\:List\ available\ OAuth\ providers))' \
             'providers:provider:_fir_providers'
     fi
+}
+
+_fir_auth() {
+    if (( CURRENT == 3 )); then
+        _values 'subcommand' \
+            'refresh[Refresh stored OAuth tokens without running a turn]'
+        return
+    fi
+    _arguments -s \
+        '--force[Refresh regardless of how fresh the token is]' \
+        '--within=[Refresh only if expiry is within this window]:duration:(30m 1h 6h 20h)' \
+        '--no-extensions[Do not load extensions]' \
+        '--debug[Enable debug logging]' \
+        '*:provider:_fir_providers'
 }
 
 _fir_mcp() {

@@ -249,7 +249,17 @@ func CreateAgentSession(ctx context.Context, opts CreateAgentSessionOptions) (*C
 			if resolvedProvider == "" {
 				return "", fmt.Errorf("no model selected")
 			}
-			key := modelRegistry.GetApiKeyForProvider(resolvedProvider)
+			// Re-read auth.json rather than trusting this process's cached
+			// credential. The agent loop calls this both to resolve the key
+			// for a turn and again after an HTTP 401/403, and in the 401 case
+			// the cached token is usually not expired but REVOKED: an OAuth
+			// refresh grant elsewhere (another fir session, or `fir auth
+			// refresh` from cron) rotated the credential, and Anthropic kills
+			// the previous access token the moment that happens. Resolving
+			// from disk returns the rotated token, which differs from the one
+			// that just failed, so the provider retries and the session
+			// survives the rotation instead of wedging on a permanent 401.
+			key := modelRegistry.RefreshApiKeyForProvider(resolvedProvider)
 			if key == "" {
 				if keyErr := modelRegistry.GetApiKeyError(resolvedProvider); keyErr != nil {
 					return "", fmt.Errorf(

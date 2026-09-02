@@ -99,6 +99,31 @@ A provider can hold several accounts at once. Running `fir login <provider-id>` 
 
 Each account appears as its own labelled group in the model selector and `--list-models` (e.g. "Anthropic (Claude Pro/Max) (work@x.com)"), so switching accounts live is just selecting a model under that group — no env juggling, no restart. `fir login list` also prints the stored accounts. Remove a single account with `fir logout <provider[#account]>` (or `fir logout list` to see slots).
 
+### Keeping an OAuth login alive on an idle machine
+
+`fir auth refresh [provider-id]` performs the OAuth refresh grant and nothing else — no model, no tools, no inference, no quota. It exists because fir otherwise only refreshes a token as a side effect of running a turn, so a box that sits idle (a bot host, a rarely-used fleet machine) eventually lets its *refresh* token expire and needs an interactive browser re-login. Put it in cron:
+
+```
+0 4 * * *  fir auth refresh
+```
+
+- Provider defaults to `anthropic`; any registered OAuth provider id works. Nothing provider-specific is hardcoded — endpoints, client id and expiry normalisation come from the extension's `declare_oauth_provider` spec and `auth_post_exchange` hook.
+- Every stored account slot of that provider is refreshed, default first. One slot failing does not stop the others, and the exit status is non-zero if any failed.
+- Output is one greppable tab-separated line per slot: `<slot> <label> <outcome> expires=<RFC3339> in=<duration>`, where outcome is `refreshed`, `fresh`, `skipped` or `failed`.
+- A credential more than an hour from expiry is left alone rather than needlessly rotated. `--within DURATION` moves that guard; `--force` rotates regardless.
+
+**Rotation is destructive — know this before you use `--force`.** OAuth refresh tokens rotate on every grant, and Anthropic **revokes the previous access token the instant the rotation happens** — it does not survive to its stated `expires`. fir handles this: any process resolving a key re-reads `auth.json` when it has changed on disk, and the request path re-reads unconditionally before reporting an auth failure, so a session that is live across a rotation picks up the new token and retries rather than dying on a `401 OAuth access token has been revoked`. Never hand-write `auth.json` or run a refresh grant outside fir — an out-of-tree writer racing fir over a rotating credential can replay a consumed refresh token and get the entire token family revoked.
+
+> **Copying the agent dir does NOT isolate a `--force` test.**
+> `cp -a ~/.config/fir /tmp/firtest && FIR_AGENT_DIR=/tmp/firtest fir auth refresh --force`
+> looks safe and is not. The copy duplicates the *file*, but the refresh token inside it is
+> the same credential upstream — forcing a grant on the copy rotates the real credential at
+> the provider and revokes the access token every live fir session is holding. A copied
+> agent dir is only safe for paths that spend no grant (a plain `fir auth refresh` that
+> reports `fresh`, `skipped`, or an unknown-provider error). Genuinely isolated `--force`
+> testing needs a **separate login**, not a file copy.
+
+
 ### Amazon Bedrock accounts
 
 `fir login bedrock` configures one or more Bedrock accounts (these are credential configs, not OAuth flows). Three modes:

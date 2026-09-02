@@ -85,6 +85,14 @@ var subcommands = []subcommand{
 		},
 	},
 	{
+		Name: "auth",
+		Run:  runAuthSubcommand,
+		Help: [][2]string{
+			{"fir auth refresh [provider]", "Refresh stored OAuth tokens (no inference; for cron)"},
+			{"", "  Options: --force, --within DURATION (default 1h)"},
+		},
+	},
+	{
 		Name: "mcp",
 		Run:  runMCPSubcommand,
 		Help: [][2]string{

@@ -124,6 +124,47 @@ Refresh expired credentials.
 }
 ```
 
+##### When fir calls it
+
+Three paths reach a provider's refresh, and all three funnel through the same
+locked read-decide-rotate-write section in `pkg/auth` — never a second writer:
+
+1. **Mid-turn**, when the stored access token has expired and a request needs a
+   key.
+2. **`fir auth refresh [provider]`**, the zero-inference keepalive intended for
+   cron on machines that sit idle. It walks every stored account slot of the
+   provider, refreshing only credentials at or near expiry (`--within`,
+   default 1h; `--force` overrides), and exits non-zero if any slot failed.
+3. **Manually**, via a re-login, which replaces the credential outright.
+
+##### Rotation is destructive — design for it
+
+Assume the refresh token **rotates on every grant**, and assume the previous
+access token is **revoked the moment it does**. Anthropic behaves exactly this
+way: the old access token starts returning
+`401 OAuth access token has been revoked` immediately, long before its stated
+`expires`. Two consequences for provider authors:
+
+- The new `refresh` value from `auth/refresh` **must** be returned so fir can
+  persist it. Losing it strands the account at the next refresh. (If your
+  provider omits `refresh_token` on a refresh response because nothing changed
+  — Google does this — fir carries the previous one forward for you.)
+- Never write `auth.json` yourself, and never refresh a credential outside
+  fir. An out-of-tree writer racing fir over a rotating credential can replay
+  an already-consumed refresh token and get the whole token family revoked.
+
+> **Testing note: copying the agent dir does not isolate a `--force` refresh.**
+> `FIR_AGENT_DIR=/tmp/copy fir auth refresh --force` duplicates the *file*, but
+> the refresh token inside it is the same credential upstream — the grant rotates
+> the real credential at the provider and revokes the access token every live fir
+> session holds. Use a copied agent dir only for paths that spend no grant; a real
+> `--force` test needs a **separate login**.
+
+fir's side of that contract: any process resolving a key re-reads `auth.json`
+when it has changed on disk, and the request path re-reads unconditionally
+before reporting an auth failure, so a session that was live across someone
+else's rotation picks up the new token instead of wedging on the revoked one.
+
 #### `auth/api_key`
 
 Extract the API key string from credentials. Most providers just return

@@ -1209,6 +1209,14 @@ func (r *ModelRegistry) GetApiKeyForProvider(provider string) string {
 	return r.authStorage.GetApiKey(provider)
 }
 
+// RefreshApiKeyForProvider re-reads auth.json from disk and then resolves the
+// provider's API key. Use it on the request path (and after an auth rejection)
+// so a credential rotated by another process — notably `fir auth refresh` from
+// cron — is picked up instead of the revoked token this process still holds.
+func (r *ModelRegistry) RefreshApiKeyForProvider(provider string) string {
+	return r.authStorage.RefreshApiKey(provider)
+}
+
 // GetApiKeyError returns the last error encountered when resolving an API key
 // for the given provider (e.g. an OAuth token refresh failure).
 func (r *ModelRegistry) GetApiKeyError(provider string) error {

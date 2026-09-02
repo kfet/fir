@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -76,6 +77,18 @@ type AuthStorageBackend interface {
 	WithLockFallible(fn func(current []byte) (result any, next []byte, err error)) (any, error)
 }
 
+// externallyMutableBackend is implemented by backends whose contents can change
+// behind this process's back — i.e. the file backend, which another fir process
+// (or `fir auth refresh` from cron) can rewrite at any moment. Stamp returns a
+// cheap value that changes whenever the stored bytes might have; AuthStorage
+// uses it to notice a rotation without re-reading the file on every lookup.
+//
+// Backends that cannot be mutated externally (the in-memory one) simply don't
+// implement this, and the staleness check becomes a no-op.
+type externallyMutableBackend interface {
+	Stamp() string
+}
+
 // FileAuthStorageBackend stores credentials in a JSON file.
 type FileAuthStorageBackend struct {
 	mu       sync.Mutex
@@ -90,6 +103,20 @@ func NewFileAuthStorageBackend(authPath string) *FileAuthStorageBackend {
 func (b *FileAuthStorageBackend) ensureParentDir() error {
 	dir := filepath.Dir(b.authPath)
 	return os.MkdirAll(dir, 0700)
+}
+
+// Stamp returns a cheap fingerprint of the auth file's current state
+// (modification time plus size). It is deliberately a stat, not a read: the
+// caller uses it to decide whether a full locked read is warranted.
+//
+// A missing or unstattable file yields a constant, so a not-yet-created
+// auth.json doesn't look like it's changing on every check.
+func (b *FileAuthStorageBackend) Stamp() string {
+	fi, err := os.Stat(b.authPath)
+	if err != nil {
+		return "absent"
+	}
+	return strconv.FormatInt(fi.ModTime().UnixNano(), 10) + ":" + strconv.FormatInt(fi.Size(), 10)
 }
 
 // readFromFile reads all content from the locked file descriptor.
@@ -208,6 +235,11 @@ type AuthStorage struct {
 	errors           []error
 	lastKeyErrors    map[string]error // per-provider last key resolution error
 	audit            *auditWriter     // append-only mutation log; nil for in-memory
+	// lastStamp is the backend fingerprint (see externallyMutableBackend) as
+	// of the last load. Used by reloadIfStale to detect an out-of-process
+	// rewrite of auth.json — e.g. `fir auth refresh` rotating tokens from
+	// cron while this session is live.
+	lastStamp string
 }
 
 // NewAuthStorage creates an AuthStorage backed by the given file path.
@@ -301,6 +333,10 @@ func decodeStorageData(content []byte) (AuthStorageData, error) {
 func (s *AuthStorage) Reload() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// Stamp BEFORE reading. If the file changes between the stat and the
+	// locked read we record the older stamp, so the next staleness check
+	// re-reads redundantly rather than missing an update — the safe direction.
+	stamp := s.backendStamp()
 	var parseErr error
 	_, err := s.storage.WithLock(func(current []byte) (any, []byte) {
 		data, perr := decodeStorageData(current)
@@ -316,10 +352,60 @@ func (s *AuthStorage) Reload() {
 		s.recordError(err)
 		return
 	}
+	s.lastStamp = stamp
 	s.loadError = nil
 	if parseErr != nil {
 		s.recordError(parseErr)
 	}
+}
+
+// backendStamp returns the backend's change fingerprint, or "" for backends
+// that cannot be mutated externally. Callers must hold s.mu.
+func (s *AuthStorage) backendStamp() string {
+	if b, ok := s.storage.(externallyMutableBackend); ok {
+		return b.Stamp()
+	}
+	return ""
+}
+
+// reloadIfStale re-reads auth.json when it has changed on disk since this
+// AuthStorage last loaded it.
+//
+// This is what keeps a long-running session honest about credential rotation.
+// OAuth refresh tokens rotate on every grant, and at least one provider
+// (Anthropic) REVOKES the previous access token the instant the rotation
+// happens — so a session holding a pre-rotation access token in memory is
+// already dead, even though its cached `expires` is hours in the future and
+// auth.json on disk is perfectly healthy. Without this check the session would
+// 401 forever, because nothing in the expiry-driven refresh path ever looks at
+// the file again. See RefreshApiKey for the post-401 belt-and-braces.
+func (s *AuthStorage) reloadIfStale() {
+	s.mu.RLock()
+	last := s.lastStamp
+	stamp := s.backendStamp()
+	s.mu.RUnlock()
+	if stamp == "" || stamp == last {
+		return
+	}
+	s.Reload()
+}
+
+// RefreshApiKey re-reads auth.json from disk and then resolves the provider's
+// API key. Callers use it when the key they were holding was REJECTED — an
+// HTTP 401/403 from the provider — because the most likely cause is not an
+// expired credential but a rotated one: another fir process, or `fir auth
+// refresh` running from cron, performed a refresh grant, and the provider
+// revoked the access token this session still holds.
+//
+// The re-read is unconditional rather than stamp-gated: a filesystem with
+// coarse mtime granularity must not be what decides whether a live session
+// recovers. If the key comes back unchanged, the credential really is bad and
+// the caller should surface the error — deliberately NOT spending a refresh
+// grant here, which on a genuinely dead credential would just produce a storm
+// of failing grants.
+func (s *AuthStorage) RefreshApiKey(provider string) string {
+	s.Reload()
+	return s.GetApiKey(provider)
 }
 
 func (s *AuthStorage) persistProviderChange(provider string, cred *AuthCredential) {
@@ -338,7 +424,11 @@ func (s *AuthStorage) persistProviderChange(provider string, cred *AuthCredentia
 	})
 	if err != nil {
 		s.recordError(err)
+		return
 	}
+	// We just wrote the file — adopt the new stamp so the next staleness
+	// check doesn't re-read our own write.
+	s.lastStamp = s.backendStamp()
 }
 
 // Get returns the credential for a provider, or nil if not found.
@@ -447,6 +537,10 @@ func (s *AuthStorage) GetApiKeyError(provider string) error {
 // 4. Environment variable
 // 5. Fallback resolver (models.json custom providers)
 func (s *AuthStorage) GetApiKey(provider string) string {
+	// Pick up an out-of-process credential rotation before resolving. Cheap
+	// (a stat) in the common case where nothing changed.
+	s.reloadIfStale()
+
 	s.mu.RLock()
 
 	// Runtime override takes highest priority
@@ -515,105 +609,36 @@ func (s *AuthStorage) GetApiKey(provider string) string {
 	return ""
 }
 
-// refreshOAuthToken handles token refresh using the storage backend lock.
+// refreshOAuthToken handles the mid-turn token refresh triggered from
+// GetApiKey when a stored access token has expired. The rotate-and-persist
+// mechanics live in refreshOAuthLocked (see there for the single-writer
+// argument); this wrapper only supplies the "expired right now" policy and the
+// GetApiKey-shaped return value.
 func (s *AuthStorage) refreshOAuthToken(provider string, oauthProvider ai.OAuthProvider) string {
-	type refreshResult struct {
-		apiKey      string
-		updatedData AuthStorageData
-		wrote       bool
-	}
-
-	result, err := s.storage.WithLockFallible(func(current []byte) (any, []byte, error) {
-		currentData := s.parseStorageData(current)
-
-		cred, ok := currentData[provider]
-		if !ok || cred.Type != CredentialTypeOAuth {
-			return refreshResult{updatedData: currentData}, nil, nil
-		}
-
-		// Check if another process already refreshed
-		if cred.Expires > 0 && time.Now().UnixMilli() < cred.Expires {
-			oauthCreds := AuthCredToOAuthCreds(&cred)
-			return refreshResult{apiKey: oauthProvider.GetAPIKey(oauthCreds), updatedData: currentData}, nil, nil
-		}
-
-		// Perform the refresh.
-		// TODO(pinoauth-migration): RefreshToken now takes a context, but
-		// the synchronous GetApiKey path has no natural ctx to thread.
-		// Using Background until/unless GetApiKey grows a ctx parameter.
-		oauthCreds := AuthCredToOAuthCreds(&cred)
-		newCreds, err := oauthProvider.RefreshToken(context.Background(), oauthCreds)
-		if err != nil {
-			return refreshResult{updatedData: currentData}, nil, fmt.Errorf("OAuth token refresh failed for %s: %w", provider, err)
-		}
-
-		currentData[provider] = OAuthCredsToAuthCred(newCreds)
-		// Preserve account metadata across refresh — RefreshToken returns only
-		// the token triple and may not re-derive the profile. Without this the
-		// account Label and identity (Extra.accountId) would evaporate, which
-		// would later spawn a duplicate slot on the next re-login of the same
-		// account (assignSlot keys on Extra.accountId).
-		if updated, ok := currentData[provider]; ok {
-			if cred.Label != "" {
-				updated.Label = cred.Label
-			}
-			if accountIDFromCreds(AuthCredToOAuthCreds(&updated)) == "" && len(cred.Extra) > 0 {
-				if updated.Extra == nil {
-					updated.Extra = make(map[string]any, len(cred.Extra))
-				}
-				for k, v := range cred.Extra {
-					if _, exists := updated.Extra[k]; !exists {
-						updated.Extra[k] = v
-					}
-				}
-			}
-			currentData[provider] = updated
-		}
-		b, _ := json.MarshalIndent(currentData, "", "  ")
-		return refreshResult{apiKey: oauthProvider.GetAPIKey(newCreds), updatedData: currentData, wrote: true}, b, nil
+	// TODO(pinoauth-migration): RefreshToken takes a context, but the
+	// synchronous GetApiKey path has no natural ctx to thread. Using
+	// Background until/unless GetApiKey grows a ctx parameter.
+	out, err := s.refreshOAuthLocked(context.Background(), provider, oauthProvider, func(cred AuthCredential) bool {
+		// Refresh only if still expired as read under the lock — a
+		// credential another process just rotated is usable as-is.
+		return credentialNeedsRefresh(cred, 0)
 	})
-	// Update in-memory state now that the backend lock is released.
-	if r, ok := result.(refreshResult); ok {
-		s.mu.Lock()
-		s.data = r.updatedData
-		s.loadError = nil
-		if err == nil {
-			delete(s.lastKeyErrors, provider)
-		}
-		remain := len(s.data)
-		refreshedCred, hadCred := s.data[provider]
-		wrote := r.wrote
-		s.mu.Unlock()
-		if err == nil {
-			if wrote && hadCred {
-				s.audit.record(AuditActionRefresh, provider, &refreshedCred, remain)
-			}
-			return r.apiKey
-		}
+	if err == nil {
+		return out.apiKey
 	}
-	if err != nil {
+
+	// Refresh failed — re-read to check if another process succeeded.
+	s.Reload()
+	s.mu.RLock()
+	cred, ok := s.data[provider]
+	s.mu.RUnlock()
+	if ok && cred.Type == CredentialTypeOAuth && cred.Expires > 0 && time.Now().UnixMilli() < cred.Expires {
 		s.mu.Lock()
-		s.recordError(err)
-		s.lastKeyErrors[provider] = err
+		delete(s.lastKeyErrors, provider)
 		s.mu.Unlock()
-		// Refresh failed — re-read to check if another process succeeded.
-		s.Reload()
-		s.mu.RLock()
-		cred, ok := s.data[provider]
-		s.mu.RUnlock()
-		if ok && cred.Type == CredentialTypeOAuth {
-			// Check if another process refreshed the token successfully
-			if cred.Expires > 0 && time.Now().UnixMilli() < cred.Expires {
-				s.mu.Lock()
-				delete(s.lastKeyErrors, provider)
-				s.mu.Unlock()
-				oauthCreds := AuthCredToOAuthCreds(&cred)
-				return oauthProvider.GetAPIKey(oauthCreds)
-			}
-			// Token still expired after re-read — another process didn't help.
-			// Fall through to return "".
-		}
+		return oauthProvider.GetAPIKey(AuthCredToOAuthCreds(&cred))
 	}
+	// Token still expired after re-read — another process didn't help.
 	return ""
 }
 
