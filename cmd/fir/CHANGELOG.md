@@ -2,8 +2,13 @@
 
 ## [Unreleased]
 
+## [1.6.3] - 2026-09-03
+
 ### Fixed
 - **`fir auth refresh` now accepts an account slot key, not just a provider id.** The command prints slot keys in its own output (`<slot> <label> <outcome> …`) and slot keys are what `fir login list` and `fir logout` speak — but the positional argument was validated as a provider id only, so pasting one back in (`fir auth refresh anthropic#me@x.com-inventory`) answered `Unknown OAuth provider` right above a list that visibly contained its provider. The argument is now split on the first `#`: the provider half is validated as before, and when an account half is present exactly that slot is refreshed, leaving its siblings untouched. A bare provider id still refreshes every slot, default first. An unknown slot under a valid provider now says so and lists the provider's actual stored slot keys instead of falling through to the unknown-provider path or silently refreshing everything, and when the argument contained a `#` the unknown-provider error names the *provider half* it rejected so it lines up with the list printed beneath it. Bash and zsh completions now offer stored slot keys for `fir auth refresh`.
+
+### Changed
+- **Model catalog regenerated** at release time: routine upstream refresh of model ids, pricing and limits.
 
 ## [1.6.2] - 2026-09-03
 
