@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Changed
+- **`self_handoff` no longer wipes the visible chat in the TUI.** A handoff reset the LLM context *and* cleared the terminal transcript, so the whole conversation vanished the moment the tool fired — disruptive, and the wipe was purely display state the new session did not need. The new-session path is now split (`startNewSession(initialPrompt, prependContext, preserveTranscript)`): `/new` and `/clear` keep clearing everything, while a handoff keeps the scrollback and appends a muted in-line rule — `──── context handoff — new session started (previous context cleared) ────` — so the new session's briefing and first message read as one continuous history. Transient state (activity spinner, pending tool components, status line, footer, streaming component) is still reset either way. Known limitation: an `auto_compaction_end` event calls `rebuildChatFromMessages()`, which rebuilds the container from the *current* session's messages and would drop the preserved pre-handoff history; that is rare immediately after a handoff (the context is fresh) and fixing it properly means deciding when a preserved prefix should survive `/session`, `/tree` and theme rebuilds, so it is left as is.
+
 ## [1.6.3] - 2026-09-03
 
 ### Fixed

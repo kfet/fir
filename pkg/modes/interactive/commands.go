@@ -734,10 +734,22 @@ func (m *InteractiveMode) handleHandoff(prompt, prependContext string) {
 	if m.session != nil {
 		m.session.Agent.WaitForIdle()
 	}
-	m.handleClearCommand(prompt, prependContext)
+	m.startNewSession(prompt, prependContext, true)
 }
 
+// handoffNoticeText is the in-line rule appended to the chat transcript when a
+// handoff starts a new session while preserving the visible scrollback.
+const handoffNoticeText = "──── context handoff — new session started (previous context cleared) ────"
+
 func (m *InteractiveMode) handleClearCommand(initialPrompt, prependContext string) {
+	m.startNewSession(initialPrompt, prependContext, false)
+}
+
+// startNewSession swaps in a fresh agent session and optionally wipes the
+// visible chat transcript. /new and /clear pass preserveTranscript=false and
+// clear everything; a handoff passes true so the terminal scrollback survives
+// (only the LLM context is reset) and gets an in-line notice instead.
+func (m *InteractiveMode) startNewSession(initialPrompt, prependContext string, preserveTranscript bool) {
 	if m.session != nil {
 		// Cancel any in-progress LLM stream before starting a new session.
 		if m.session.IsStreaming() {
@@ -751,10 +763,30 @@ func (m *InteractiveMode) handleClearCommand(initialPrompt, prependContext strin
 		}
 	}
 	if m.messageContainer != nil {
-		m.messageContainer.Clear()
+		if preserveTranscript {
+			// Keep the visible history; mark the boundary in-line so the new
+			// session's first message reads as a continuation of the scrollback.
+			t := itheme.GetTheme()
+			m.messageContainer.AddChild(tuicomp.NewSpacer(1))
+			m.messageContainer.AddChild(tuicomp.NewText(t.Fg("muted", handoffNoticeText), 1, 0, nil))
+			m.messageContainer.AddChild(tuicomp.NewSpacer(1))
+		} else {
+			m.messageContainer.Clear()
+		}
 	}
+	// The aborted turn's streaming state now belongs to history: stop the
+	// spinner and drop the component references so the next turn starts clean.
+	if m.loadingAnimation != nil {
+		m.loadingAnimation.Stop()
+		m.loadingAnimation = nil
+	}
+	m.streamingComponent = nil
+	m.pendingTools = make(map[string]*components.ToolExecutionComponent)
 	if m.activityContainer != nil {
 		m.activityContainer.Clear()
+		// A tool that hid the spinner may have been aborted mid-flight; make
+		// sure the new session's spinner is visible again.
+		m.activityContainer.SetVisible(true)
 	}
 	if m.commandStatusContainer != nil {
 		m.commandStatusContainer.Clear()

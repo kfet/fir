@@ -25,6 +25,7 @@ import (
 	"github.com/kfet/fir/pkg/resources/clipboard"
 	"github.com/kfet/fir/pkg/session"
 	"github.com/kfet/fir/pkg/session/store"
+	tuicomp "github.com/kfet/fir/pkg/tui/components"
 	"github.com/kfet/fir/pkg/update"
 	"github.com/kfet/tui"
 )
@@ -2764,5 +2765,82 @@ func TestInteractiveMode_DispatchInitialPrompt_Unknown(t *testing.T) {
 			t.Fatal("unknown initial command never reported to the user")
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// New session / handoff transcript preservation
+// ---------------------------------------------------------------------------
+
+// TestStartNewSession_HandoffPreservesTranscript asserts that a handoff keeps
+// the pre-handoff chat children visible and appends the handoff notice, while
+// clearing the transient activity/status containers.
+func TestStartNewSession_HandoffPreservesTranscript(t *testing.T) {
+	tm := newTestMode(t)
+	m := tm.mode
+
+	m.addUserMessageToChat("before the handoff")
+	m.activityContainer.AddChild(tuicomp.NewText("busy", 0, 0, nil))
+	m.activityContainer.SetVisible(false)
+	m.pendingTools = map[string]*components.ToolExecutionComponent{
+		"stale": components.NewToolExecutionComponent("bash", nil, nil, nil, nil),
+	}
+	m.showStatus("working")
+	before := tm.messageCount()
+	if before == 0 {
+		t.Fatal("expected pre-handoff messages in the container")
+	}
+
+	m.startNewSession("", "", true)
+
+	if got, want := tm.messageCount(), before+3; got != want {
+		t.Errorf("expected transcript preserved plus notice (%d children), got %d", want, got)
+	}
+	tm.waitRender()
+	out := tm.renderedOutput()
+	if !strings.Contains(out, "before the handoff") {
+		t.Error("pre-handoff message was wiped from the transcript")
+	}
+	if !strings.Contains(out, "context handoff") {
+		t.Error("handoff notice was not rendered")
+	}
+	if n := len(m.activityContainer.ChildrenSnapshot()); n != 0 {
+		t.Errorf("expected activity container cleared, got %d children", n)
+	}
+	if n := len(m.commandStatusContainer.ChildrenSnapshot()); n != 1 {
+		t.Errorf("expected stale status replaced by the new-session status, got %d children", n)
+	}
+	if !strings.Contains(out, "New session started") {
+		t.Error("expected new-session status line")
+	}
+	if m.streamingComponent != nil {
+		t.Error("expected streamingComponent reset after new session")
+	}
+	if len(m.pendingTools) != 0 {
+		t.Errorf("expected pendingTools reset, got %d entries", len(m.pendingTools))
+	}
+	// The container has no visibility getter: prove it renders again.
+	m.activityContainer.AddChild(tuicomp.NewText("spinner-after-handoff", 0, 0, nil))
+	tm.waitRender()
+	if !strings.Contains(tm.renderedOutput(), "spinner-after-handoff") {
+		t.Error("expected activity container visible again for the new session")
+	}
+}
+
+// TestStartNewSession_ClearEmptiesTranscript asserts /new and /clear keep
+// today's behaviour: the whole chat transcript is wiped.
+func TestStartNewSession_ClearEmptiesTranscript(t *testing.T) {
+	tm := newTestMode(t)
+	m := tm.mode
+
+	m.addUserMessageToChat("before the clear")
+	if tm.messageCount() == 0 {
+		t.Fatal("expected messages in the container")
+	}
+
+	m.handleClearCommand("", "")
+
+	if got := tm.messageCount(); got != 0 {
+		t.Errorf("expected empty transcript after /new, got %d children", got)
 	}
 }
