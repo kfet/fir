@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-09-02T01:02:03Z",
+  "generatedAt": "2026-09-03T01:01:02Z",
   "providers": {
     "huggingface": {
       "modelOverrides": {
@@ -13,100 +13,14 @@
     },
     "openrouter": {
       "modelOverrides": {
-        "deepseek/deepseek-chat-v3.1": {
+        "~z-ai/glm-latest": {
           "cost": {
-            "input": 0.25,
-            "output": 0.95,
-            "cacheRead": 0.13,
+            "input": 1.092,
+            "output": 3.432,
+            "cacheRead": 0.1794,
             "cacheWrite": 0
           },
-          "maxTokens": 32768
-        },
-        "deepseek/deepseek-v4-flash": {
-          "cost": {
-            "input": 0.088606,
-            "output": 0.177212,
-            "cacheRead": 0.0177212,
-            "cacheWrite": 0
-          }
-        },
-        "deepseek/deepseek-v4-pro": {
-          "cost": {
-            "input": 1.6,
-            "output": 3.2,
-            "cacheRead": 0.135,
-            "cacheWrite": 0
-          },
-          "maxTokens": 393216
-        },
-        "deepseek/deepseek-v4-pro-0813": {
-          "cost": {
-            "input": 1.1154,
-            "output": 3.3462,
-            "cacheRead": 0.03718,
-            "cacheWrite": 0
-          }
-        },
-        "nvidia/nemotron-3-ultra-550b-a55b": {
-          "cost": {
-            "input": 0.625,
-            "output": 3.125,
-            "cacheRead": 0.1875,
-            "cacheWrite": 0
-          },
-          "maxTokens": 32768
-        },
-        "qwen/qwen3-235b-a22b-2507": {
-          "cost": {
-            "input": 0.09,
-            "output": 0.55,
-            "cacheRead": 0,
-            "cacheWrite": 0
-          },
-          "maxTokens": 16384
-        },
-        "qwen/qwen3.8-2.4t-a95b": {
-          "cost": {
-            "input": 2,
-            "output": 6,
-            "cacheRead": 0.2,
-            "cacheWrite": 0
-          },
-          "maxTokens": 131072
-        },
-        "qwen/qwen3.8-2.4t-a95b:batch": {
-          "cost": {
-            "input": 2,
-            "output": 6,
-            "cacheRead": 0.25,
-            "cacheWrite": 0
-          }
-        },
-        "tencent/hy3": {
-          "cost": {
-            "input": 0.132,
-            "output": 0.528,
-            "cacheRead": 0.033,
-            "cacheWrite": 0
-          }
-        },
-        "z-ai/glm-5.2": {
-          "cost": {
-            "input": 0.966,
-            "output": 3.036,
-            "cacheRead": 0.1932,
-            "cacheWrite": 0
-          },
-          "maxTokens": 131072
-        },
-        "~deepseek/deepseek-v4-flash-latest": {
-          "cost": {
-            "input": 0.05,
-            "output": 0.16,
-            "cacheRead": 0.013,
-            "cacheWrite": 0
-          },
-          "maxTokens": 393216
+          "maxTokens": 943718
         }
       }
     }
