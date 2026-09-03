@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Changed
+- **`review-and-fix`, `ship-it`, and `wrap-up` skills now carry a Writing section.** Commit subject line only, PR description one sentence, comments only where necessary.
+
 ## [1.6.0] - 2026-09-02
 
 ### Added

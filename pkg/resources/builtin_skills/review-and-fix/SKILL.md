@@ -60,6 +60,12 @@ advisor before exiting the loop.
 Fix all issues found this pass, including from other authors or features. Use the
 advisor for guidance. For bugs, write a failing test first, then fix.
 
+## Writing
+
+Comments only where the code cannot be understood without them.
+Commit: subject line only.
+PR description: one sentence.
+
 ## Commit
 
 When the loop exits clean, stage and commit **all** changes.

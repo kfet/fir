@@ -36,6 +36,12 @@ Run only on a worktree feature branch with implementation complete and
 5. **Cleanup** — remove the worktree and branch.
 6. **Instruction friction log** — see below.
 
+## Writing
+
+Comments only where the code cannot be understood without them.
+Commit: subject line only.
+PR description: one sentence.
+
 ## Instruction friction log
 
 **Empty by default. Silence is the signal.** Only act if something actively got

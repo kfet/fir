@@ -12,3 +12,9 @@ Simplify
 Loop until no issues found, use advisor to confirm
 
 ff-merge to main
+
+## Writing
+
+Comments only where the code cannot be understood without them.
+Commit: subject line only.
+PR description: one sentence.
