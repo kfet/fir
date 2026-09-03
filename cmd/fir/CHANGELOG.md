@@ -2,8 +2,13 @@
 
 ## [Unreleased]
 
+## [1.6.2] - 2026-09-03
+
 ### Fixed
 - **`fir update` works when two taps provide `fir`.** Resolving the fully-qualified formula name relied on `brew info --json=v2 --formula fir`, which exits non-zero with `Formulae found in multiple taps` in exactly that case — so fir fell back to the bare keg name and `brew upgrade fir` failed with the same ambiguity error. The tap is now read from Homebrew's own `INSTALL_RECEIPT.json` in the keg directory (`.source.tap`), which is unambiguous, costs no subprocess, and works even when `brew` is not on `PATH`. `brew info` and the bare keg name remain fallbacks.
+
+### Changed
+- **Model catalog regenerated** at release time: routine upstream refresh of model ids, pricing and limits.
 
 ## [1.6.1] - 2026-09-03
 
