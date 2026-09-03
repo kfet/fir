@@ -2,7 +2,10 @@
 
 ## [Unreleased]
 
+## [1.6.1] - 2026-09-03
+
 ### Changed
+- **Model catalog regenerated** at release time: routine upstream refresh of model ids, pricing and limits.
 - **`review-and-fix`, `ship-it`, and `wrap-up` skills now carry a Writing section.** Commit subject line only, PR description one sentence, comments only where necessary.
 
 ## [1.6.0] - 2026-09-02
