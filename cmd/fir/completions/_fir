@@ -258,7 +258,7 @@ _fir_auth() {
         '--within=[Refresh only if expiry is within this window]:duration:(30m 1h 6h 20h)' \
         '--no-extensions[Do not load extensions]' \
         '--debug[Enable debug logging]' \
-        '*:provider:_fir_providers'
+        '*:provider or account slot:_fir_providers_or_slots'
 }
 
 _fir_mcp() {
@@ -314,6 +314,23 @@ _fir_providers() {
     fi
     compadd -a _fir_providers_cache
     compadd -a providers
+}
+
+# Stored account slot keys ("anthropic", "anthropic#work@x.com") as printed by
+# `fir login list` — what `fir auth refresh` and `fir logout` accept.
+_fir_slots() {
+    local cache_var=_fir_slots_cache
+    if (( ${(P)+cache_var} == 0 )); then
+        typeset -ga _fir_slots_cache
+        _fir_slots_cache=( ${(f)"$(fir login list 2>/dev/null | awk '$2 ~ /^\[/ {print $1}')"} )
+    fi
+    compadd -a _fir_slots_cache
+}
+
+# A `fir auth refresh` argument may be either a provider id or a stored slot key.
+_fir_providers_or_slots() {
+    _fir_slots
+    _fir_providers
 }
 
 _fir_extension_names() {

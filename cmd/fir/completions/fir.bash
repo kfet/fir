@@ -187,7 +187,7 @@ _fir_complete_subcommand() {
             if [[ $pos -eq 1 ]]; then
                 COMPREPLY=( $(compgen -W "refresh" -- "$cur") )
             else
-                COMPREPLY=( $(compgen -W "--force --within --no-extensions --debug $(_fir_providers)" -- "$cur") )
+                COMPREPLY=( $(compgen -W "--force --within --no-extensions --debug $(_fir_providers) $(_fir_slots)" -- "$cur") )
             fi ;;
         mcp)
             if [[ $pos -eq 1 ]]; then
@@ -226,6 +226,15 @@ _fir_providers() {
         _FIR_PROVIDERS_CACHE=$(fir --list-models 2>/dev/null | awk -F/ '{print $1}' | sort -u)
     fi
     printf '%s\n%s\n' "$builtin" "$_FIR_PROVIDERS_CACHE"
+}
+
+# Stored account slot keys ("anthropic", "anthropic#work@x.com") as printed by
+# `fir login list` — what `fir auth refresh` and `fir logout` accept.
+_fir_slots() {
+    if [[ -z ${_FIR_SLOTS_CACHE+x} ]]; then
+        _FIR_SLOTS_CACHE=$(fir login list 2>/dev/null | awk '$2 ~ /^\[/ {print $1}')
+    fi
+    printf '%s\n' "$_FIR_SLOTS_CACHE"
 }
 
 _fir_extension_names() {

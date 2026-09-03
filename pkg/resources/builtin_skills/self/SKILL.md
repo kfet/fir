@@ -101,7 +101,7 @@ Each account appears as its own labelled group in the model selector and `--list
 
 ### Keeping an OAuth login alive on an idle machine
 
-`fir auth refresh [provider-id]` performs the OAuth refresh grant and nothing else — no model, no tools, no inference, no quota. It exists because fir otherwise only refreshes a token as a side effect of running a turn, so a box that sits idle (a bot host, a rarely-used fleet machine) eventually lets its *refresh* token expire and needs an interactive browser re-login. Put it in cron:
+`fir auth refresh [provider-id | provider-id#account]` performs the OAuth refresh grant and nothing else — no model, no tools, no inference, no quota. It exists because fir otherwise only refreshes a token as a side effect of running a turn, so a box that sits idle (a bot host, a rarely-used fleet machine) eventually lets its *refresh* token expire and needs an interactive browser re-login. Put it in cron:
 
 ```
 0 4 * * *  fir auth refresh
@@ -109,6 +109,7 @@ Each account appears as its own labelled group in the model selector and `--list
 
 - Provider defaults to `anthropic`; any registered OAuth provider id works. Nothing provider-specific is hardcoded — endpoints, client id and expiry normalisation come from the extension's `declare_oauth_provider` spec and `auth_post_exchange` hook.
 - Every stored account slot of that provider is refreshed, default first. One slot failing does not stop the others, and the exit status is non-zero if any failed.
+- Pass an **account slot key** (`fir auth refresh anthropic#work@x.com`) to refresh just that one account. This is the same `provider#account` form this command prints, and the one `fir login list` and `fir logout` accept, so a slot key pasted straight back in works. An unknown slot under a valid provider lists the provider's stored slot keys instead of refreshing anything.
 - Output is one greppable tab-separated line per slot: `<slot> <label> <outcome> expires=<RFC3339> in=<duration>`, where outcome is `refreshed`, `fresh`, `skipped` or `failed`.
 - A credential more than an hour from expiry is left alone rather than needlessly rotated. `--within DURATION` moves that guard; `--force` rotates regardless.
 

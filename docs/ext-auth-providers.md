@@ -131,10 +131,13 @@ locked read-decide-rotate-write section in `pkg/auth` — never a second writer:
 
 1. **Mid-turn**, when the stored access token has expired and a request needs a
    key.
-2. **`fir auth refresh [provider]`**, the zero-inference keepalive intended for
-   cron on machines that sit idle. It walks every stored account slot of the
-   provider, refreshing only credentials at or near expiry (`--within`,
-   default 1h; `--force` overrides), and exits non-zero if any slot failed.
+2. **`fir auth refresh [provider | provider#account]`**, the zero-inference
+   keepalive intended for cron on machines that sit idle. Given a bare provider
+   id it walks every stored account slot of the provider; given an account slot
+   key (the form it prints itself, and the one `fir login list` / `fir logout`
+   speak) it refreshes only that account. Either way it refreshes only
+   credentials at or near expiry (`--within`, default 1h; `--force` overrides),
+   and exits non-zero if any slot failed.
 3. **Manually**, via a re-login, which replaces the credential outright.
 
 ##### Rotation is destructive — design for it

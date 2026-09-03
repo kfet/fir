@@ -52,15 +52,17 @@ func runAuthSubcommand() error {
 }
 
 func printAuthHelp() {
-	fmt.Println("Usage: fir auth refresh [provider-id] [--force] [--within DURATION]")
+	fmt.Println("Usage: fir auth refresh [provider-id | provider-id#account] [--force] [--within DURATION]")
 	fmt.Println()
 	fmt.Println("Refresh stored OAuth credentials without running a turn — for cron on")
 	fmt.Println("idle machines, where the refresh token would otherwise expire and")
 	fmt.Println("force an interactive browser re-login.")
 	fmt.Println()
-	fmt.Println("Every account slot of the provider is refreshed, default account first.")
-	fmt.Println("One slot failing does not stop the others; the exit status is non-zero")
-	fmt.Println("if any slot failed.")
+	fmt.Println("Given a bare provider id, every account slot of the provider is refreshed,")
+	fmt.Println("default account first. Given an account slot key (the `provider#account`")
+	fmt.Println("form printed below and by `fir login list`), only that one account is")
+	fmt.Println("refreshed. One slot failing does not stop the others; the exit status is")
+	fmt.Println("non-zero if any slot failed.")
 	fmt.Println()
 	fmt.Println("Options:")
 	fmt.Printf("  --within DURATION   Refresh only if expiry is within this window (default %s)\n", auth.DefaultRefreshWindow)
@@ -76,7 +78,7 @@ func printAuthHelp() {
 	fmt.Println("upstream. Use a separate login to test --force.")
 }
 
-// runAuthRefresh implements `fir auth refresh [provider-id]`.
+// runAuthRefresh implements `fir auth refresh [provider-id|provider-id#account]`.
 func runAuthRefresh(subArgs []string) error {
 	cliArgs := &Args{}
 	var positional []string
@@ -118,11 +120,11 @@ func runAuthRefresh(subArgs []string) error {
 		}
 	}
 	if len(positional) > 1 {
-		return fmt.Errorf("fir auth refresh: expected at most one provider id, got %d arguments", len(positional))
+		return fmt.Errorf("fir auth refresh: expected at most one provider id or account slot key, got %d arguments", len(positional))
 	}
-	providerID := defaultAuthProvider
+	target := defaultAuthProvider
 	if len(positional) == 1 {
-		providerID = positional[0]
+		target = positional[0]
 	}
 
 	// Subcommand dispatch happens before run()'s log init, so we own it here.
@@ -147,14 +149,6 @@ func runAuthRefresh(subArgs []string) error {
 	}
 	defer cleanup()
 
-	if ai.GetOAuthProvider(providerID) == nil {
-		fmt.Fprintf(os.Stderr, "Unknown OAuth provider: %s\n\nAvailable providers:\n", providerID)
-		for _, p := range ai.GetOAuthProviders() {
-			fmt.Fprintf(os.Stderr, "  %s - %s\n", p.ID(), p.Name())
-		}
-		return fmt.Errorf("unknown OAuth provider: %s", providerID)
-	}
-
 	// Fresh storage handle so we read the file as it is right now, and write
 	// through the same flock-protected path everything else uses.
 	authStorage := auth.NewAuthStorage(filepath.Join(resolveAgentDir(), "auth.json"))
@@ -162,11 +156,79 @@ func runAuthRefresh(subArgs []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), authRefreshTimeout)
 	defer cancel()
 
-	results := authStorage.RefreshAccounts(ctx, providerID, window, force)
-	if len(results) == 0 {
-		return fmt.Errorf("no stored accounts for provider %q — run: fir login %s", providerID, providerID)
+	results, err := refreshTargetResults(ctx, authStorage, target, window, force, os.Stderr)
+	if err != nil {
+		return err
 	}
 	return reportRefreshResults(os.Stdout, results)
+}
+
+// refreshTargetResults resolves the positional argument — a bare provider id
+// ("anthropic") or an account slot key ("anthropic#work") — and performs the
+// corresponding refresh. Slot keys are accepted because `fir auth refresh`
+// prints them in its own output, and they are what `fir login list` and
+// `fir logout` speak, so pasting one straight back in must work.
+//
+// Split out of runAuthRefresh so it can be exercised against a temp auth.json
+// and a stub OAuth provider; the caller owns process-level concerns (session,
+// logging, the real credential file).
+func refreshTargetResults(
+	ctx context.Context,
+	st *auth.AuthStorage,
+	target string,
+	window time.Duration,
+	force bool,
+	errOut io.Writer,
+) ([]auth.RefreshResult, error) {
+	providerID, accountID := auth.SplitSlot(target)
+	targeted := auth.IsSlotKey(target)
+
+	if ai.GetOAuthProvider(providerID) == nil {
+		// Name the provider half we actually rejected, so the error lines up
+		// with the provider list printed beneath it. A blank provider half
+		// ("#work") has nothing to name, so report the raw argument.
+		named := providerID
+		if named == "" {
+			named = target
+		}
+		fmt.Fprintf(errOut, "Unknown OAuth provider: %s\n\nAvailable providers:\n", named)
+		for _, p := range ai.GetOAuthProviders() {
+			fmt.Fprintf(errOut, "  %s - %s\n", p.ID(), p.Name())
+		}
+		return nil, fmt.Errorf("unknown OAuth provider: %s", named)
+	}
+
+	if !targeted {
+		results := st.RefreshAccounts(ctx, providerID, window, force)
+		if len(results) == 0 {
+			return nil, fmt.Errorf("no stored accounts for provider %q — run: fir login %s", providerID, providerID)
+		}
+		return results, nil
+	}
+
+	slotKey := auth.SlotKey(providerID, accountID)
+	accounts := st.AccountsForProvider(providerID)
+	found := false
+	for _, a := range accounts {
+		if a.SlotKey == slotKey {
+			found = true
+			break
+		}
+	}
+	if !found {
+		fmt.Fprintf(errOut, "No stored account %q for provider %s.\n\n", slotKey, providerID)
+		if len(accounts) == 0 {
+			fmt.Fprintf(errOut, "No accounts are stored for %s — run: fir login %s\n", providerID, providerID)
+		} else {
+			fmt.Fprintf(errOut, "Stored accounts for %s:\n", providerID)
+			for _, a := range accounts {
+				fmt.Fprintf(errOut, "  %s\t%s\n", a.SlotKey, a.DisplayName())
+			}
+		}
+		return nil, fmt.Errorf("unknown account slot: %s", slotKey)
+	}
+
+	return []auth.RefreshResult{st.RefreshAccount(ctx, slotKey, window, force)}, nil
 }
 
 // reportRefreshResults prints one tab-separated line per slot and returns a
