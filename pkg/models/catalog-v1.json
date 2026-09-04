@@ -1,26 +1,62 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-09-03T01:01:02Z",
+  "generatedAt": "2026-09-04T01:05:00Z",
   "providers": {
-    "huggingface": {
-      "modelOverrides": {
-        "zai-org/GLM-5.3": {
-          "compat": {
-            "supportsDeveloperRole": false
-          }
-        }
-      }
-    },
     "openrouter": {
       "modelOverrides": {
-        "~z-ai/glm-latest": {
+        "deepseek/deepseek-v4-flash": {
           "cost": {
-            "input": 1.092,
-            "output": 3.432,
-            "cacheRead": 0.1794,
+            "input": 0.088606,
+            "output": 0.177212,
+            "cacheRead": 0.0177212,
+            "cacheWrite": 0
+          }
+        },
+        "deepseek/deepseek-v4-pro": {
+          "cost": {
+            "input": 1.04226,
+            "output": 2.08452,
+            "cacheRead": 0.086855,
+            "cacheWrite": 0
+          }
+        },
+        "deepseek/deepseek-v4-pro-0813": {
+          "cost": {
+            "input": 1.1154,
+            "output": 3.3462,
+            "cacheRead": 0.03718,
+            "cacheWrite": 0
+          }
+        },
+        "mistralai/mistral-medium-3-5:batch": {
+          "contextWindow": 32768,
+          "maxTokens": 26214
+        },
+        "nvidia/nemotron-3-ultra-550b-a55b": {
+          "cost": {
+            "input": 0.625,
+            "output": 3.125,
+            "cacheRead": 0.1875,
             "cacheWrite": 0
           },
-          "maxTokens": 943718
+          "maxTokens": 32768
+        },
+        "tencent/hy3": {
+          "cost": {
+            "input": 0.132,
+            "output": 0.528,
+            "cacheRead": 0.033,
+            "cacheWrite": 0
+          }
+        },
+        "~z-ai/glm-latest": {
+          "cost": {
+            "input": 1.15,
+            "output": 3.5,
+            "cacheRead": 0.1,
+            "cacheWrite": 0
+          },
+          "maxTokens": 235929
         }
       }
     }
