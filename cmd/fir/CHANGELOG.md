@@ -2,8 +2,13 @@
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-09-04
+
 ### Added
 - **New `codex-usage` builtin skill** — reports OpenAI Codex / ChatGPT subscription usage (plan type, rate-limit windows, credits) from `GET chatgpt.com/backend-api/wham/usage`, using the OAuth token fir stores for `openai-codex` (all accounts, including `openai-codex#<accountId>` slots) or the Codex CLI's `~/.codex/auth.json` as a fallback. Windows are labelled from their declared `limit_window_seconds` (5-Hour / Weekly / Monthly) rather than by slot, since which window lands in which slot varies by plan.
+
+### Changed
+- **Model catalog regenerated** at release time: routine upstream refresh of model ids, pricing and limits.
 
 ## [1.6.4] - 2026-09-03
 
