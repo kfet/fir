@@ -21,6 +21,7 @@ func TestLoadBuiltinSkills_ReturnsExpectedSkills(t *testing.T) {
 		"acp-shepherd":        false,
 		"autoresearch-create": false,
 		"claude-usage":        false,
+		"codex-usage":         false,
 		"extension-creator":   false,
 		"instruction-tune":    false,
 		"loop":                false,
