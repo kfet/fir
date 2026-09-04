@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [1.7.1] - 2026-09-04
+
+### Fixed
+- **Extension integration tests no longer flake with `callHook …: timed out`.** The test harness sent a JSON-RPC request and only *then* registered its response waiter, so a reply that landed inside that window was dropped by the pump goroutine and the caller burned the full 20s `rpcTimeout` before failing — reproducibly on loaded CI runners, and not fixable by widening the timeout. Unclaimed responses are now parked and picked up by `recv`.
+
 ## [1.7.0] - 2026-09-04
 
 ### Added

@@ -82,6 +82,10 @@ type demoProc struct {
 	// channels for async recv
 	mu      sync.Mutex
 	waiters map[int]chan jrpcMsg
+	// pending holds responses that arrived before recv registered a waiter.
+	// The request is already on the wire when recv runs, so the extension can
+	// answer first; an unclaimed response must be parked, not dropped.
+	pending map[int]jrpcMsg
 }
 
 func (d *demoProc) send(msg any) {
@@ -231,20 +235,31 @@ func (d *demoProc) pump(scanner *bufio.Scanner) {
 
 		// Response → route to waiter.
 		if msg.ID != nil {
-			d.mu.Lock()
-			ch, ok := d.waiters[*msg.ID]
-			d.mu.Unlock()
-			if ok {
-				ch <- msg
-			}
+			d.deliver(msg)
 		}
 	}
+}
+
+// deliver hands a response to its waiter, or parks it until recv asks for it.
+func (d *demoProc) deliver(msg jrpcMsg) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if ch, ok := d.waiters[*msg.ID]; ok {
+		ch <- msg
+		return
+	}
+	d.pending[*msg.ID] = msg
 }
 
 // recv waits for the response to the given request ID.
 func (d *demoProc) recv(wantID int, timeout time.Duration) (jrpcMsg, bool) {
 	ch := make(chan jrpcMsg, 1)
 	d.mu.Lock()
+	if msg, ok := d.pending[wantID]; ok {
+		delete(d.pending, wantID)
+		d.mu.Unlock()
+		return msg, true
+	}
 	d.waiters[wantID] = ch
 	d.mu.Unlock()
 
@@ -379,6 +394,7 @@ func startDemo(t *testing.T) (*demoProc, context.CancelFunc) {
 		rec:     rec,
 		nextID:  1,
 		waiters: make(map[int]chan jrpcMsg),
+		pending: make(map[int]jrpcMsg),
 	}
 
 	t.Cleanup(func() {
@@ -776,6 +792,36 @@ func TestDemo_Event_TurnStart(t *testing.T)    { testNoActionEvent(t, "turn_star
 func TestDemo_Event_TurnEnd(t *testing.T)      { testNoActionEvent(t, "turn_end") }
 func TestDemo_Event_MessageStart(t *testing.T) { testNoActionEvent(t, "message_start") }
 func TestDemo_Event_MessageEnd(t *testing.T)   { testNoActionEvent(t, "message_end") }
+
+// A response that arrives before recv registers its waiter must not be
+// dropped. The request is already on the wire when recv runs, so the extension
+// can answer inside that window; the pump used to discard such a response and
+// the caller then burned a full rpcTimeout before failing — the flake behind
+// "callHook ...: timed out" on loaded CI runners.
+func TestDemoProc_ResponseBeforeRecvIsNotDropped(t *testing.T) {
+	d := &demoProc{
+		t:       t,
+		rec:     newRecorded(),
+		nextID:  1,
+		waiters: make(map[int]chan jrpcMsg),
+		pending: make(map[int]jrpcMsg),
+	}
+
+	id := d.nextid()
+	// Pump delivers the response before anyone is waiting for it.
+	d.deliver(jrpcMsg{ID: &id, Result: json.RawMessage(`{"ok":true}`)})
+
+	msg, ok := d.recv(id, time.Second)
+	if !ok {
+		t.Fatal("response delivered before recv was dropped")
+	}
+	if string(msg.Result) != `{"ok":true}` {
+		t.Errorf("result = %s", msg.Result)
+	}
+	if len(d.pending) != 0 {
+		t.Errorf("pending not drained: %v", d.pending)
+	}
+}
 
 // A write that loses the race with teardown must not fail the test: the pump
 // goroutine can still be answering a late outbound request when t.Cleanup
