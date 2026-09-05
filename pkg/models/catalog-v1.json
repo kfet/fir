@@ -1,64 +1,385 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-09-04T01:05:00Z",
+  "generatedAt": "2026-09-05T01:02:24Z",
   "providers": {
+    "azure-openai-responses": {
+      "models": [
+        {
+          "id": "gpt-6-astra",
+          "name": "GPT-6 Astra",
+          "api": "azure-openai-responses",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 10,
+            "output": 50,
+            "cacheRead": 1,
+            "cacheWrite": 12.5
+          },
+          "contextWindow": 1050000,
+          "maxTokens": 128000
+        }
+      ]
+    },
+    "github-copilot": {
+      "models": [
+        {
+          "id": "claude-fable-5.1",
+          "name": "Claude Fable 5.1",
+          "api": "openai-completions",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 10,
+            "output": 50,
+            "cacheRead": 0.25,
+            "cacheWrite": 12.5
+          },
+          "contextWindow": 1000000,
+          "maxTokens": 128000,
+          "compat": {
+            "supportsStore": false,
+            "supportsDeveloperRole": false,
+            "supportsReasoningEffort": false
+          },
+          "sweScore": 95.5
+        },
+        {
+          "id": "gemini-3.8-flash",
+          "name": "Gemini 3.8 Flash",
+          "api": "openai-completions",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 0.75,
+            "output": 3.75,
+            "cacheRead": 0.075,
+            "cacheWrite": 0
+          },
+          "contextWindow": 1000000,
+          "maxTokens": 64000,
+          "compat": {
+            "supportsStore": false,
+            "supportsDeveloperRole": false,
+            "supportsReasoningEffort": false
+          }
+        },
+        {
+          "id": "gpt-6-astra",
+          "name": "GPT-6 Astra",
+          "api": "openai-completions",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 10,
+            "output": 50,
+            "cacheRead": 1,
+            "cacheWrite": 12.5
+          },
+          "contextWindow": 1050000,
+          "maxTokens": 128000,
+          "compat": {
+            "supportsStore": false,
+            "supportsDeveloperRole": false,
+            "supportsReasoningEffort": false
+          }
+        }
+      ],
+      "modelOverrides": {
+        "gpt-5.6-sol": {
+          "cost": {
+            "input": 4,
+            "output": 20,
+            "cacheRead": 0.4,
+            "cacheWrite": 5
+          }
+        }
+      }
+    },
+    "openai": {
+      "models": [
+        {
+          "id": "gpt-6-astra",
+          "name": "GPT-6 Astra",
+          "api": "openai-responses",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 10,
+            "output": 50,
+            "cacheRead": 1,
+            "cacheWrite": 12.5
+          },
+          "contextWindow": 1050000,
+          "maxTokens": 128000
+        }
+      ]
+    },
+    "opencode-go": {
+      "models": [
+        {
+          "id": "omen-alpha",
+          "name": "Omen Alpha",
+          "api": "openai-completions",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 0.2,
+            "output": 0.66,
+            "cacheRead": 0.04,
+            "cacheWrite": 0
+          },
+          "contextWindow": 500000,
+          "maxTokens": 128000
+        }
+      ]
+    },
     "openrouter": {
+      "models": [
+        {
+          "id": "openai/gpt-6-astra",
+          "name": "OpenAI: GPT-6 Astra",
+          "api": "openai-completions",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 10,
+            "output": 50,
+            "cacheRead": 1,
+            "cacheWrite": 12.5
+          },
+          "contextWindow": 1050000,
+          "maxTokens": 128000
+        },
+        {
+          "id": "openai/gpt-6-astra:batch",
+          "name": "OpenAI: GPT-6 Astra (batch)",
+          "api": "openai-completions",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 5,
+            "output": 25,
+            "cacheRead": 0.5,
+            "cacheWrite": 6.25
+          },
+          "contextWindow": 1050000,
+          "maxTokens": 128000
+        },
+        {
+          "id": "openai/gpt-6-astra-pro",
+          "name": "OpenAI: GPT-6 Astra Pro",
+          "api": "openai-completions",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 10,
+            "output": 50,
+            "cacheRead": 1,
+            "cacheWrite": 12.5
+          },
+          "contextWindow": 1050000,
+          "maxTokens": 128000
+        },
+        {
+          "id": "openai/gpt-6-astra-pro:batch",
+          "name": "OpenAI: GPT-6 Astra Pro (batch)",
+          "api": "openai-completions",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 5,
+            "output": 25,
+            "cacheRead": 0.5,
+            "cacheWrite": 6.25
+          },
+          "contextWindow": 1050000,
+          "maxTokens": 128000
+        },
+        {
+          "id": "inclusionai/ling-3.0-flash-sante:free",
+          "name": "inclusionAI: Ling 3.0 Flash Sante (free)",
+          "api": "openai-completions",
+          "reasoning": true,
+          "input": [
+            "text"
+          ],
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          },
+          "contextWindow": 262144,
+          "maxTokens": 32768
+        }
+      ],
       "modelOverrides": {
         "deepseek/deepseek-v4-flash": {
           "cost": {
-            "input": 0.088606,
-            "output": 0.177212,
-            "cacheRead": 0.0177212,
+            "input": 0.08722,
+            "output": 0.17444,
+            "cacheRead": 0.017444,
             "cacheWrite": 0
           }
         },
         "deepseek/deepseek-v4-pro": {
           "cost": {
-            "input": 1.04226,
-            "output": 2.08452,
-            "cacheRead": 0.086855,
+            "input": 0.981708,
+            "output": 1.963416,
+            "cacheRead": 0.081809,
             "cacheWrite": 0
           }
         },
         "deepseek/deepseek-v4-pro-0813": {
           "cost": {
-            "input": 1.1154,
-            "output": 3.3462,
-            "cacheRead": 0.03718,
+            "input": 1.12068,
+            "output": 3.36204,
+            "cacheRead": 0.037356,
             "cacheWrite": 0
           }
         },
-        "mistralai/mistral-medium-3-5:batch": {
-          "contextWindow": 32768,
-          "maxTokens": 26214
-        },
-        "nvidia/nemotron-3-ultra-550b-a55b": {
+        "qwen/qwen3-235b-a22b-2507": {
           "cost": {
-            "input": 0.625,
-            "output": 3.125,
-            "cacheRead": 0.1875,
+            "input": 0.09,
+            "output": 0.55,
+            "cacheRead": 0,
             "cacheWrite": 0
           },
-          "maxTokens": 32768
+          "maxTokens": 16384
         },
-        "tencent/hy3": {
+        "qwen/qwen3.5-35b-a3b": {
           "cost": {
-            "input": 0.132,
-            "output": 0.528,
-            "cacheRead": 0.033,
-            "cacheWrite": 0
-          }
-        },
-        "~z-ai/glm-latest": {
-          "cost": {
-            "input": 1.15,
-            "output": 3.5,
-            "cacheRead": 0.1,
+            "input": 0.08,
+            "output": 0.75,
+            "cacheRead": 0,
             "cacheWrite": 0
           },
-          "maxTokens": 235929
+          "maxTokens": 16384
+        },
+        "qwen/qwen3.6-27b": {
+          "cost": {
+            "input": 0.3,
+            "output": 2,
+            "cacheRead": 0.03,
+            "cacheWrite": 0
+          },
+          "maxTokens": 65536
+        },
+        "~deepseek/deepseek-v4-flash-latest": {
+          "cost": {
+            "input": 0.04998,
+            "output": 0.09996,
+            "cacheRead": 0.009996,
+            "cacheWrite": 0
+          },
+          "maxTokens": 131072
         }
       }
+    },
+    "vercel-ai-gateway": {
+      "models": [
+        {
+          "id": "openai/gpt-6-astra",
+          "name": "GPT-6 Astra",
+          "api": "anthropic-messages",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 10,
+            "output": 50,
+            "cacheRead": 1,
+            "cacheWrite": 12.5
+          },
+          "contextWindow": 1050000,
+          "maxTokens": 128000
+        },
+        {
+          "id": "openai/gpt-6-astra-fast",
+          "name": "GPT-6 Astra (Fast)",
+          "api": "anthropic-messages",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 20,
+            "output": 100,
+            "cacheRead": 2,
+            "cacheWrite": 12.5
+          },
+          "contextWindow": 1050000,
+          "maxTokens": 128000
+        },
+        {
+          "id": "inclusionai/ling-3.0-flash-sante",
+          "name": "Ling 3.0 Flash Sante",
+          "api": "anthropic-messages",
+          "reasoning": true,
+          "input": [
+            "text"
+          ],
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          },
+          "contextWindow": 256000,
+          "maxTokens": 32000
+        },
+        {
+          "id": "inclusionai/ling-3.0-flash-sante-free",
+          "name": "Ling 3.0 Flash Sante (Free)",
+          "api": "anthropic-messages",
+          "reasoning": true,
+          "input": [
+            "text"
+          ],
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          },
+          "contextWindow": 256000,
+          "maxTokens": 32000
+        }
+      ]
     }
   }
 }
