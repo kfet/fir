@@ -200,7 +200,7 @@ _fir_complete_subcommand() {
                 COMPREPLY=( $(compgen -W "bash zsh" -- "$cur") )
             fi ;;
         update)
-            : ;;
+            COMPREPLY=( $(compgen -W "-check" -- "$cur") ) ;;
     esac
 }
 

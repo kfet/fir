@@ -16,7 +16,10 @@ var subcommands = []subcommand{
 	{
 		Name: "update",
 		Run:  runUpdate,
-		Help: [][2]string{{"fir update", "Self-update to the latest release"}},
+		Help: [][2]string{
+			{"fir update", "Self-update to the latest release"},
+			{"fir update -check", "Report whether an update is available (exit 3 if so)"},
+		},
 	},
 	{
 		Name: "skills",

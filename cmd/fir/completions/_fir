@@ -34,7 +34,7 @@ _fir() {
     # Top-level dispatch: if word 1 is a known subcommand, delegate.
     if (( CURRENT > 1 )); then
         case ${words[2]} in
-            update)      _fir_no_more_args; return ;;
+            update)      _fir_update; return ;;
             skills)      _fir_skills; return ;;
             extensions)  _fir_extensions; return ;;
             install)     _fir_install; return ;;
@@ -157,6 +157,11 @@ _fir_rest_arg() {
 }
 
 _fir_no_more_args() { _message 'no more arguments' }
+
+# Subcommand: update
+_fir_update() {
+    _arguments '-check[Report whether an update is available (exit 3 if so)]'
+}
 
 # Subcommand: skills
 _fir_skills() {

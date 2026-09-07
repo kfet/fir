@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+- **`github.com/kfet/distkit` wired in as a DORMANT second update path — this is a bridge release.** distkit is the family's single home for binary distribution and self-update (six sibling repos already use it; `pkg/update/brew.go` is in fact where distkit's brew support was lifted from). fir is the tool you need in working order to recover from a bad update, so no shipped binary performs its first swap with an implementation the fleet has not already exercised read-only. In this release distkit **resolves and reports only**; `go-selfupdate` still performs every byte of the actual swap, and `pkg/update` is untouched as the update path. The swap moves to distkit in a later release, gated on this one running clean on the fleet and producing agreement data. `pkg/update/distkit_dormant_test.go` parses every Go file in the module and fails if any of them so much as names `distkit.Update`, `Main`, `Download`, `Apply`, `StagingDir` or `UpgradeViaBrew` — the dormant path cannot swap, by construction, including via code added tomorrow.
+- **`fir update -check`** — report-only update check backed by distkit. Prints the running and latest versions and exits **3** when an update is available (0 up to date, 1 on error) so a fleet script can branch without parsing text. Nothing is downloaded or written. A Homebrew-managed install is reported as such, with the `brew upgrade` command to use.
+- **Asset-name parity test against the real distribution repo.** `TestDistkitAssetNameParity` fetches the latest `kfet/fir-dist` release and asserts distkit renders exactly the asset names it publishes, for all five shipped platforms plus `checksums.txt`. It skips when GitHub is unreachable or the anonymous API budget (60/hour, shared per IP by a NAT'd fleet) is spent; `FIR_PARITY_STRICT=1` turns those skips into failures for a release check.
+
+### Changed
+- **The cached 24h background update check now runs both resolvers and records disagreement.** go-selfupdate remains authoritative; distkit resolves concurrently (so the shadow adds latency only when it is the slower of the two) and anonymously — no `gh auth token` exec on a startup path, and no resolution path that differs between a host with `gh` logged in and one without, which is what makes the agreement data interpretable. Disagreement, or a shadow that cannot resolve at all, is logged at WARN and persisted in `<agentDir>/update-check.json` as `distkit_version` / `distkit_error`, so a fleet can be swept after the fact without debug logging having been enabled at the right moment. The cache stays in fir: a CLI-oriented distribution library should not own a state file in another program's agent directory.
+
 ## [1.7.1] - 2026-09-04
 
 ### Fixed

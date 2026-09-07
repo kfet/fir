@@ -684,7 +684,15 @@ func run() error {
 
 // runUpdate implements the "fir update" subcommand.
 // Downloads and replaces the running binary from the latest GitHub release.
+//
+// `fir update -check` is report-only and takes a different route: it resolves
+// through distkit, the family's distribution library, which in this release is
+// wired in DORMANT — it resolves and reports, and go-selfupdate below still
+// performs every actual swap. See pkg/update/distkit.go.
 func runUpdate() error {
+	if updateCheckOnly(os.Args[2:]) {
+		return runUpdateCheck()
+	}
 
 	// A brew-managed install must be upgraded by brew: self-updating would
 	// rewrite the binary inside the Cellar behind Homebrew's back, and the
@@ -731,6 +739,54 @@ func runUpdate() error {
 
 	fmt.Fprintf(os.Stderr, "Successfully updated to fir %s.\n", rel.Version)
 	return nil
+}
+
+// updateCheckOnly reports whether the args after `fir update` ask for a
+// report-only check.
+func updateCheckOnly(args []string) bool {
+	for _, a := range args {
+		if a == "-check" || a == "--check" {
+			return true
+		}
+	}
+	return false
+}
+
+// runUpdateCheck implements `fir update -check`: resolve the latest release
+// and report, touching nothing. It exits 3 when an update is available, so a
+// fleet script can branch on the status without parsing text.
+//
+// The resolution goes through distkit deliberately: this is the read-only
+// half of the bridge, the part that lets the fleet exercise the new resolver
+// for a release before it is ever trusted with a binary swap.
+func runUpdateCheck() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	rep, err := update.DistkitCheck(ctx, version)
+	if err != nil {
+		return fmt.Errorf("check for updates: %w", err)
+	}
+
+	fmt.Printf("current: %s\nlatest:  %s\n", rep.Current, rep.Target)
+	if note := update.LastDisagreement(resolveAgentDir()); note != "" {
+		fmt.Println(note)
+	}
+	if !rep.Available {
+		if rep.Dev {
+			fmt.Printf("fir %s is a development build; there is nothing to update to.\n", rep.Current)
+			return nil
+		}
+		fmt.Println("fir is up to date.")
+		return nil
+	}
+	if rep.Brew != "" {
+		fmt.Printf("update available: %s → %s. fir is Homebrew-managed; run `brew upgrade %s`.\n",
+			rep.Current, rep.Target, rep.Brew)
+	} else {
+		fmt.Printf("update available: %s → %s. run `fir update` to install.\n", rep.Current, rep.Target)
+	}
+	return errExitCode(3)
 }
 
 // runListModels lists available models and exits.

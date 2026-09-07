@@ -129,6 +129,13 @@ func applyAgentDirFlag() error {
 	return nil
 }
 
+// errExitCode is an error that carries a specific process exit status and no
+// message: the command has already told the user what it found on stdout, and
+// the status is the machine-readable half of that report. main() honours it.
+type errExitCode int
+
+func (e errExitCode) Error() string { return fmt.Sprintf("exit status %d", int(e)) }
+
 func main() {
 	if err := applyChdirFlag(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -139,6 +146,11 @@ func main() {
 		os.Exit(1)
 	}
 	if err := run(); err != nil {
+		var code errExitCode
+		if errors.As(err, &code) {
+			// Deliberate status, nothing left to say.
+			os.Exit(int(code))
+		}
 		if errors.Is(err, printmode.ErrAgentAborted) {
 			// Error message already written to stderr by print mode.
 			os.Exit(1)

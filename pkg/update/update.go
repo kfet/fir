@@ -40,9 +40,18 @@ type Release struct {
 }
 
 // cacheEntry is persisted to agentDir/update-check.json to limit API calls.
+//
+// The cache lives here, not in distkit: a CLI-oriented distribution library
+// should not own a state file in another program's agent directory.
 type cacheEntry struct {
 	CheckedAt     time.Time `json:"checked_at"`
 	LatestVersion string    `json:"latest_version"`
+	// DistkitVersion is what the dormant distkit resolver returned for the
+	// same check, and DistkitError what it failed with. They are recorded
+	// so a fleet sweep can grep update-check.json for disagreement without
+	// needing debug logging to have been enabled at the right moment.
+	DistkitVersion string `json:"distkit_version,omitempty"`
+	DistkitError   string `json:"distkit_error,omitempty"`
 }
 
 // newUpdater creates a go-selfupdate Updater configured for our asset naming.
@@ -102,6 +111,12 @@ func checkLatest(ctx context.Context, currentVersion, cacheDir string, forceRefr
 	}
 
 	// Slow path: fetch from GitHub (no auth for background check).
+	//
+	// The dormant distkit resolver runs CONCURRENTLY with go-selfupdate, so
+	// the shadow costs latency only when it is the slower of the two, not
+	// on top of the authoritative check.
+	shadowCh := startShadowResolve(ctx, currentVersion)
+
 	source, err := newGitHubSource("")
 	if err != nil {
 		return nil, err
@@ -121,10 +136,17 @@ func checkLatest(ctx context.Context, currentVersion, cacheDir string, forceRefr
 
 	version := latest.Version()
 
+	// Shadow resolve through distkit and record any disagreement. This is
+	// the whole point of the bridge release: the fleet exercises distkit
+	// read-only for a version before it is ever allowed to swap a binary.
+	shadow, shadowErr := shadowCh.result(version)
+
 	// Update cache (best-effort).
 	writeCache(cachePath, &cacheEntry{
-		CheckedAt:     time.Now(),
-		LatestVersion: version,
+		CheckedAt:      time.Now(),
+		LatestVersion:  version,
+		DistkitVersion: shadow,
+		DistkitError:   shadowErr,
 	})
 
 	if !IsNewer(version, currentVersion) {
