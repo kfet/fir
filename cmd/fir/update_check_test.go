@@ -5,22 +5,30 @@ import (
 	"testing"
 )
 
-func TestUpdateCheckOnly(t *testing.T) {
+func TestParseUpdateArgs(t *testing.T) {
 	tests := []struct {
-		args []string
-		want bool
+		args    []string
+		want    bool
+		wantErr bool
 	}{
-		{nil, false},
-		{[]string{}, false},
-		{[]string{"-check"}, true},
-		{[]string{"--check"}, true},
-		{[]string{"-v", "--check"}, true},
-		{[]string{"check"}, false},
-		{[]string{"-checkx"}, false},
+		{args: nil},
+		{args: []string{}},
+		{args: []string{"-check"}, want: true},
+		{args: []string{"--check"}, want: true},
+		{args: []string{"-check", "--check"}, want: true},
+		// A typo must not fall through to a real self-update.
+		{args: []string{"-checkx"}, wantErr: true},
+		{args: []string{"check"}, wantErr: true},
+		{args: []string{"-check", "-force"}, wantErr: true},
 	}
 	for _, tc := range tests {
-		if got := updateCheckOnly(tc.args); got != tc.want {
-			t.Errorf("updateCheckOnly(%v) = %v, want %v", tc.args, got, tc.want)
+		got, err := parseUpdateArgs(tc.args)
+		if (err != nil) != tc.wantErr {
+			t.Errorf("parseUpdateArgs(%v) error = %v, wantErr %v", tc.args, err, tc.wantErr)
+			continue
+		}
+		if err == nil && got != tc.want {
+			t.Errorf("parseUpdateArgs(%v) = %v, want %v", tc.args, got, tc.want)
 		}
 	}
 }

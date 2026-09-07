@@ -690,7 +690,11 @@ func run() error {
 // wired in DORMANT — it resolves and reports, and go-selfupdate below still
 // performs every actual swap. See pkg/update/distkit.go.
 func runUpdate() error {
-	if updateCheckOnly(os.Args[2:]) {
+	checkOnly, err := parseUpdateArgs(os.Args[2:])
+	if err != nil {
+		return err
+	}
+	if checkOnly {
 		return runUpdateCheck()
 	}
 
@@ -741,15 +745,19 @@ func runUpdate() error {
 	return nil
 }
 
-// updateCheckOnly reports whether the args after `fir update` ask for a
-// report-only check.
-func updateCheckOnly(args []string) bool {
+// parseUpdateArgs reads the args after `fir update`. The only one it takes is
+// -check; anything else is rejected rather than ignored, so a typo'd flag
+// cannot silently start a real self-update instead of a report.
+func parseUpdateArgs(args []string) (checkOnly bool, err error) {
 	for _, a := range args {
-		if a == "-check" || a == "--check" {
-			return true
+		switch a {
+		case "-check", "--check":
+			checkOnly = true
+		default:
+			return false, fmt.Errorf("unknown argument %q\nUsage: fir update [-check]", a)
 		}
 	}
-	return false
+	return checkOnly, nil
 }
 
 // runUpdateCheck implements `fir update -check`: resolve the latest release
@@ -769,7 +777,9 @@ func runUpdateCheck() error {
 	}
 
 	fmt.Printf("current: %s\nlatest:  %s\n", rep.Current, rep.Target)
-	if note := update.LastDisagreement(resolveAgentDir()); note != "" {
+	// The live resolve above just succeeded, so a cached failure note is
+	// stale by definition; a cached disagreement is not.
+	if note := update.LastDisagreement(resolveAgentDir(), true); note != "" {
 		fmt.Println(note)
 	}
 	if !rep.Available {

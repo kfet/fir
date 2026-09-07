@@ -1,6 +1,7 @@
 package update
 
 import (
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -33,15 +34,92 @@ var swapEntryPoints = map[string]string{
 // any of them so much as names a distkit entry point that could replace a
 // binary. It is a source-level pin, not a behavioural one, and that is the
 // point: a behavioural test can only prove that the paths exercised today do
-// not swap, while this proves no path can, including one added tomorrow.
+// not swap, while this proves no path in this module can, including one added
+// tomorrow. Its reach ends at the module — a dependency that itself imported
+// distkit and called Update would be invisible — which is one reason fir
+// imports distkit directly rather than through some wrapper library.
 //
 // When the swap does move to distkit — a later release, gated on this one
 // running clean on the fleet — this test is what you delete, deliberately, in
 // the same commit that makes the move.
 func TestDistkitPathCannotSwap(t *testing.T) {
-	root := moduleRoot(t)
-	fset := token.NewFileSet()
+	violations, err := scanForSwapEntryPoints(moduleRoot(t))
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	for _, v := range violations {
+		t.Errorf("%s\ndistkit is DORMANT in this release: it may resolve and report, never write a binary.", v)
+	}
+}
 
+// TestScanForSwapEntryPointsCatchesViolations pins the pin. A guard that
+// silently stopped catching anything would be worse than no guard at all, so
+// the scanner is pointed at a synthetic tree containing each way one could
+// reach a swap.
+func TestScanForSwapEntryPointsCatchesViolations(t *testing.T) {
+	tests := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{
+			name: "plain call",
+			src:  "package p\nimport \"github.com/kfet/distkit\"\nfunc f() { _, _ = distkit.Update(nil, distkit.Config{}) }\n",
+			want: "distkit.Update",
+		},
+		{
+			name: "aliased import",
+			src:  "package p\nimport dk \"github.com/kfet/distkit\"\nfunc f() { _ = dk.Apply(\"a\", \"b\") }\n",
+			want: "distkit.Apply",
+		},
+		{
+			name: "dot import hides the selector entirely",
+			src:  "package p\nimport . \"github.com/kfet/distkit\"\nfunc f() { _ = Apply(\"a\", \"b\") }\n",
+			want: "dot-imports distkit",
+		},
+		{
+			name: "download",
+			src:  "package p\nimport \"github.com/kfet/distkit\"\nfunc f() { _, _ = distkit.Download(nil, distkit.Config{}, nil, \"\") }\n",
+			want: "distkit.Download",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, "x.go"), []byte(tc.src), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			got, err := scanForSwapEntryPoints(dir)
+			if err != nil {
+				t.Fatalf("scan: %v", err)
+			}
+			if len(got) != 1 || !strings.Contains(got[0], tc.want) {
+				t.Fatalf("scan reported %v, want one violation mentioning %q", got, tc.want)
+			}
+		})
+	}
+
+	// And it must not cry wolf over the resolve-and-report calls the bridge
+	// is actually built on.
+	dir := t.TempDir()
+	ok := "package p\nimport \"github.com/kfet/distkit\"\nfunc f() { _, _ = distkit.Check(nil, distkit.Config{}); _ = distkit.EnsureV(\"1\") }\n"
+	if err := os.WriteFile(filepath.Join(dir, "x.go"), []byte(ok), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := scanForSwapEntryPoints(dir)
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("resolve-only code flagged: %v", got)
+	}
+}
+
+// scanForSwapEntryPoints returns a human-readable violation line for every
+// reference to a swapping distkit entry point under root.
+func scanForSwapEntryPoints(root string) ([]string, error) {
+	var violations []string
+	fset := token.NewFileSet()
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -65,7 +143,18 @@ func TestDistkitPathCannotSwap(t *testing.T) {
 			// A file that does not parse cannot be calling anything.
 			return nil
 		}
+		rel, relErr := filepath.Rel(root, path)
+		if relErr != nil {
+			rel = path
+		}
 		local := distkitImportName(file)
+		if local == "." {
+			// A dot-import would make Update(...) a bare identifier and
+			// slip past the selector scan entirely.
+			violations = append(violations,
+				rel+" dot-imports distkit; the dormancy check cannot see through that")
+			return nil
+		}
 		if local == "" {
 			return nil
 		}
@@ -79,18 +168,14 @@ func TestDistkitPathCannotSwap(t *testing.T) {
 				return true
 			}
 			if why, forbidden := swapEntryPoints[sel.Sel.Name]; forbidden {
-				rel, _ := filepath.Rel(root, path)
-				t.Errorf("%s:%d references distkit.%s, which %s.\n"+
-					"distkit is DORMANT in this release: it may resolve and report, never write a binary.",
-					rel, fset.Position(sel.Pos()).Line, sel.Sel.Name, why)
+				violations = append(violations, fmt.Sprintf("%s:%d references distkit.%s, which %s",
+					rel, fset.Position(sel.Pos()).Line, sel.Sel.Name, why))
 			}
 			return true
 		})
 		return nil
 	})
-	if err != nil {
-		t.Fatalf("walk %s: %v", root, err)
-	}
+	return violations, err
 }
 
 // distkitImportName returns the local name distkit is imported under in file,
@@ -111,8 +196,9 @@ func distkitImportName(file *ast.File) string {
 }
 
 // TestDistkitCheckReportHasNoRelease pins the shape of the report-only result:
-// it carries version strings, not a release handle. Nothing downstream of
-// `fir update -check` can be handed something it could download from.
+// it carries version strings and flags, not a release handle. Nothing
+// downstream of `fir update -check` can be handed something it could download
+// from.
 func TestDistkitCheckReportHasNoRelease(t *testing.T) {
 	root := moduleRoot(t)
 	fset := token.NewFileSet()
@@ -132,7 +218,7 @@ func TestDistkitCheckReportHasNoRelease(t *testing.T) {
 			t.Fatalf("CheckReport is not a struct")
 		}
 		for _, f := range st.Fields.List {
-			if _, isString := f.Type.(*ast.Ident); !isString {
+			if _, scalar := f.Type.(*ast.Ident); !scalar {
 				t.Errorf("CheckReport has a non-scalar field %v; it must not carry anything downloadable", f.Names)
 			}
 		}

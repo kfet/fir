@@ -136,18 +136,14 @@ func checkLatest(ctx context.Context, currentVersion, cacheDir string, forceRefr
 
 	version := latest.Version()
 
-	// Shadow resolve through distkit and record any disagreement. This is
-	// the whole point of the bridge release: the fleet exercises distkit
-	// read-only for a version before it is ever allowed to swap a binary.
-	shadow, shadowErr := shadowCh.result(version)
-
-	// Update cache (best-effort).
-	writeCache(cachePath, &cacheEntry{
-		CheckedAt:      time.Now(),
-		LatestVersion:  version,
-		DistkitVersion: shadow,
-		DistkitError:   shadowErr,
-	})
+	// Persist the authoritative answer straight away, and never block it on
+	// the dormant resolver: a distkit call that hangs until the context
+	// deadline must not delay the update notice the user actually sees.
+	// The shadow rewrites this entry when it lands, and if the process exits
+	// first the next check simply asks again.
+	checkedAt := time.Now()
+	writeCache(cachePath, &cacheEntry{CheckedAt: checkedAt, LatestVersion: version})
+	shadowCh.recordAsync(cachePath, version, checkedAt)
 
 	if !IsNewer(version, currentVersion) {
 		return nil, nil

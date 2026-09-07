@@ -31,6 +31,8 @@ func fakeDist(t *testing.T, tag string) *httptest.Server {
 }
 
 // useFakeDist points the dormant resolver at srv for the duration of a test.
+// It writes package-level seam variables, so a test that calls it must not be
+// t.Parallel().
 // The API base is pointed at a server that fails the test if it is called:
 // the background check must never spend the 60/hour anonymous API budget a
 // NAT'd fleet shares between its hosts.
@@ -202,7 +204,7 @@ func TestLastDisagreement(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(dir, "update-check.json"), data, 0o600); err != nil {
 				t.Fatal(err)
 			}
-			got := LastDisagreement(dir)
+			got := LastDisagreement(dir, false)
 			switch {
 			case tc.want == "" && got != "":
 				t.Fatalf("want no note, got %q", got)
@@ -212,7 +214,7 @@ func TestLastDisagreement(t *testing.T) {
 		})
 	}
 
-	if got := LastDisagreement(t.TempDir()); got != "" {
+	if got := LastDisagreement(t.TempDir(), false); got != "" {
 		t.Fatalf("missing cache should yield no note, got %q", got)
 	}
 }
@@ -234,5 +236,52 @@ func TestCacheCarriesShadowResult(t *testing.T) {
 	}
 	if got.DistkitVersion != "v1.7.1" || got.LatestVersion != "1.7.1" {
 		t.Fatalf("round-trip lost data: %+v", got)
+	}
+}
+
+// A cached failure is stale the moment a live resolve succeeds: the cache is
+// rewritten at most once per 24h, so one GitHub blip would otherwise have a
+// host reporting a broken dormant check for a day after it recovered. A
+// cached DISAGREEMENT is about the answer, not reachability, so it survives.
+func TestLastDisagreementSuppressesStaleErrorWhenLiveCheckWorked(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "update-check.json")
+
+	writeCache(path, &cacheEntry{CheckedAt: time.Now(), LatestVersion: "1.7.1", DistkitError: "boom"})
+	if got := LastDisagreement(dir, true); got != "" {
+		t.Errorf("stale failure surfaced after a working live check: %q", got)
+	}
+	if got := LastDisagreement(dir, false); got == "" {
+		t.Error("failure note suppressed with no live evidence to the contrary")
+	}
+
+	writeCache(path, &cacheEntry{CheckedAt: time.Now(), LatestVersion: "1.7.1", DistkitVersion: "v1.7.0"})
+	if got := LastDisagreement(dir, true); got == "" {
+		t.Error("a disagreement must survive a successful live check")
+	}
+}
+
+// The authoritative answer is cached and returned without waiting for the
+// dormant resolver; the shadow rewrites the entry when it lands.
+func TestRecordAsyncRewritesTheCacheEntry(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "update-check.json")
+	checkedAt := time.Now().Truncate(time.Second)
+
+	writeCache(path, &cacheEntry{CheckedAt: checkedAt, LatestVersion: "1.7.1"})
+
+	ch := make(chan shadowOutcome, 1)
+	ch <- shadowOutcome{version: "v1.7.0"} // disagreement
+	<-shadowResolve{ch: ch}.recordAsync(path, "1.7.1", checkedAt)
+
+	got, ok := readCache(path)
+	if !ok {
+		t.Fatal("cache unreadable")
+	}
+	if got.LatestVersion != "1.7.1" || got.DistkitVersion != "v1.7.0" || got.DistkitError != "" {
+		t.Fatalf("entry not rewritten as expected: %+v", got)
+	}
+	if !got.CheckedAt.Equal(checkedAt) {
+		t.Errorf("CheckedAt drifted: %v, want %v", got.CheckedAt, checkedAt)
 	}
 }

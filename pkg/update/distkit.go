@@ -120,17 +120,51 @@ func (s shadowResolve) result(authoritative string) (version string, errText str
 	return out.version, ""
 }
 
+// recordAsync joins the shadow resolver off the caller's critical path and
+// rewrites the cache entry with what it found. The authoritative answer has
+// already been cached and returned by then, so a dormant resolver that hangs
+// until the context deadline costs the user nothing.
+//
+// The returned channel is closed once the record is written. Production
+// ignores it — if the process exits first the next check simply asks again —
+// and tests join on it instead of sleeping.
+func (s shadowResolve) recordAsync(cachePath, authoritative string, checkedAt time.Time) <-chan struct{} {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		version, errText := s.result(authoritative)
+		writeCache(cachePath, &cacheEntry{
+			CheckedAt:      checkedAt,
+			LatestVersion:  authoritative,
+			DistkitVersion: version,
+			DistkitError:   errText,
+		})
+	}()
+	return done
+}
+
 // LastDisagreement returns a human-readable line when the most recent cached
 // background check found the two resolvers disagreeing, and "" otherwise.
+//
+// liveOK says the caller has just resolved through distkit successfully, in
+// which case a cached FAILURE is stale by definition — the cache is rewritten
+// at most once per 24h, so one GitHub blip would otherwise have a host
+// reporting a failed dormant check for a day after it started working again.
+// A cached disagreement is still reported: that one is about the answer, not
+// about reachability, and the live check does not refute it.
+//
 // It reads the cache only — no network — so a command can surface the state
 // cheaply. cacheDir is the agent directory.
-func LastDisagreement(cacheDir string) string {
+func LastDisagreement(cacheDir string, liveOK bool) string {
 	entry, ok := readCache(cacheDir + "/update-check.json")
 	if !ok {
 		return ""
 	}
 	switch {
 	case entry.DistkitError != "":
+		if liveOK {
+			return ""
+		}
 		return fmt.Sprintf("note: the dormant distkit update check failed at %s: %s",
 			entry.CheckedAt.Format(time.RFC3339), entry.DistkitError)
 	case entry.DistkitVersion == "" || entry.LatestVersion == "":
@@ -150,7 +184,7 @@ type CheckReport struct {
 	// Target is the tag distkit resolved as latest, with a leading "v".
 	Target string
 	// Available reports whether Target is strictly newer than Current, by
-	// fir's IsNewer (which treats a "-dev" build as ahead of its tag).
+	// fir's IsNewer. Always false for a Dev build: it sits after its tag.
 	Available bool
 	// Brew names the Homebrew formula when this install is a keg, in which
 	// case an update comes from `brew upgrade`, not from a self-update.
@@ -187,7 +221,12 @@ func DistkitCheck(ctx context.Context, currentVersion string) (*CheckReport, err
 		return nil, err
 	}
 	rep.Target = target
-	rep.Available = IsNewer(target, currentVersion)
+	// One predicate decides: a working-tree build sits AFTER its tag, so
+	// there is nothing to update to and the report says exactly that rather
+	// than offering to install the release it was built past. Everything
+	// else is fir's own IsNewer, the same comparison the background notice
+	// uses.
+	rep.Available = !rep.Dev && IsNewer(target, currentVersion)
 	return rep, nil
 }
 
