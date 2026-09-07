@@ -16,10 +16,10 @@
 //   - go-selfupdate still performs every byte of the actual swap (see
 //     SelfUpdate in update.go).
 //
-// Nothing in this file may call distkit.Update, distkit.Download,
-// distkit.Apply, distkit.Main or distkit.StagingDir: those write a binary.
-// TestDistkitPathCannotSwap in distkit_dormant_test.go scans the source tree
-// and fails if any of them appears anywhere in fir.
+// No file in fir may name distkit.Update, Main, Download, Apply, StagingDir
+// or UpgradeViaBrew: those write a binary. TestDistkitPathCannotSwap in
+// distkit_dormant_test.go parses every Go file in the module and fails if one
+// of them does.
 //
 // The swap moves to distkit in a later release, once the fleet has produced
 // agreement data from the logging below.
@@ -79,13 +79,27 @@ type shadowOutcome struct {
 	err     error
 }
 
+// shadowTimeout bounds the dormant resolve. It is generous because it blocks
+// nothing: the authoritative answer is cached and returned without waiting for
+// it.
+const shadowTimeout = 15 * time.Second
+
 // startShadowResolve kicks off the dormant distkit resolve so it runs
 // alongside the authoritative go-selfupdate one. The channel is buffered, so
 // a caller that gives up (because the authoritative check failed) leaks
 // nothing: the goroutine sends and exits regardless.
+//
+// The shadow gets its OWN lifetime, detached from the caller's cancellation.
+// The caller returns as soon as go-selfupdate answers and its deferred
+// cancel() fires — which would abort a shadow that had merely lost the race
+// and record it as a failure for 24h. Spurious failures are precisely the
+// ambiguous data this bridge exists not to produce. Process exit still
+// truncates the resolve, which is fine: the next check asks again.
 func startShadowResolve(ctx context.Context, currentVersion string) shadowResolve {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), shadowTimeout)
 	ch := make(chan shadowOutcome, 1)
 	go func() {
+		defer cancel()
 		v, err := DistkitResolve(ctx, currentVersion, true /* anonymous */)
 		ch <- shadowOutcome{version: v, err: err}
 	}()
@@ -139,6 +153,32 @@ func (s shadowResolve) recordAsync(cachePath, authoritative string, checkedAt ti
 			DistkitVersion: version,
 			DistkitError:   errText,
 		})
+	}()
+	return done
+}
+
+// logPrimaryFailure reports what the dormant resolver made of a check that
+// go-selfupdate could not complete. Nothing is cached — an entry with no
+// authoritative version would satisfy the 24h fast path and silence the
+// update notice for a day — but the outcome is exactly the data this bridge
+// exists to collect: the anonymous distkit path succeeding where the API path
+// is rate-limited (60/hour per IP, shared by a NAT'd fleet) is the motivating
+// case for moving the swap over.
+//
+// The returned channel is closed once the outcome is logged; production
+// ignores it, tests join on it.
+func (s shadowResolve) logPrimaryFailure(primaryErr error) <-chan struct{} {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		out := <-s.ch
+		if out.err != nil {
+			log.Debug("both update resolvers failed",
+				"go_selfupdate_error", primaryErr, "distkit_error", out.err)
+			return
+		}
+		log.Warn("distkit resolved an update check that go-selfupdate could not",
+			"distkit", out.version, "go_selfupdate_error", primaryErr)
 	}()
 	return done
 }
@@ -216,7 +256,7 @@ func DistkitCheck(ctx context.Context, currentVersion string) (*CheckReport, err
 		rep.Brew = inst.Formula
 	}
 
-	target, err := DistkitResolve(ctx, currentVersion, false)
+	target, err := DistkitResolve(ctx, currentVersion, false /* discover a token */)
 	if err != nil {
 		return nil, err
 	}

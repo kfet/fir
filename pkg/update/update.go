@@ -4,8 +4,10 @@ package update
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -30,6 +32,10 @@ const (
 	repoName  = "fir-dist"
 	cacheTTL  = 24 * time.Hour
 )
+
+// errNoRelease is what a check that reached GitHub but found no release
+// reports to the dormant resolver, which has no error of its own to log.
+var errNoRelease = errors.New("no release found")
 
 // Release holds information about a release for the current platform.
 type Release struct {
@@ -111,12 +117,6 @@ func checkLatest(ctx context.Context, currentVersion, cacheDir string, forceRefr
 	}
 
 	// Slow path: fetch from GitHub (no auth for background check).
-	//
-	// The dormant distkit resolver runs CONCURRENTLY with go-selfupdate, so
-	// the shadow costs latency only when it is the slower of the two, not
-	// on top of the authoritative check.
-	shadowCh := startShadowResolve(ctx, currentVersion)
-
 	source, err := newGitHubSource("")
 	if err != nil {
 		return nil, err
@@ -126,11 +126,18 @@ func checkLatest(ctx context.Context, currentVersion, cacheDir string, forceRefr
 		return nil, err
 	}
 
+	// The dormant distkit resolver runs CONCURRENTLY with go-selfupdate, so
+	// the shadow costs latency only when it is the slower of the two, not
+	// on top of the authoritative check.
+	shadowCh := startShadowResolve(ctx, currentVersion)
+
 	latest, found, err := updater.DetectLatest(ctx, repo())
 	if err != nil {
+		shadowCh.logPrimaryFailure(err)
 		return nil, err
 	}
 	if !found {
+		shadowCh.logPrimaryFailure(errNoRelease)
 		return nil, nil
 	}
 
@@ -266,10 +273,28 @@ func readCache(path string) (*cacheEntry, bool) {
 	return &e, true
 }
 
+// writeCache persists the entry atomically: the file is now written twice per
+// check (the authoritative answer immediately, then again when the dormant
+// resolver lands), and a concurrent fir process reading a half-written file
+// would throw away a perfectly good check. Rename over the target is atomic on
+// the same filesystem, so a reader sees either the old entry or the new one.
 func writeCache(path string, e *cacheEntry) {
 	data, err := json.Marshal(e)
 	if err != nil {
 		return
 	}
-	_ = os.WriteFile(path, data, 0o600)
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".update-check-*.json")
+	if err != nil {
+		return
+	}
+	name := tmp.Name()
+	defer os.Remove(name) // no-op once the rename succeeds
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return
+	}
+	if err := tmp.Close(); err != nil {
+		return
+	}
+	_ = os.Rename(name, path)
 }

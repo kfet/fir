@@ -165,16 +165,25 @@ func TestShadowResolveResult(t *testing.T) {
 	}
 }
 
-// A caller that abandons the shadow — because the authoritative check failed
-// — must not leak the goroutine that is still resolving.
-func TestStartShadowResolveDoesNotBlockOnAnAbandonedCaller(t *testing.T) {
+// The authoritative result is returned without waiting for the shadow, so the
+// caller's deferred cancel() fires while the shadow may still be in flight.
+// If the shadow inherited that cancellation, every resolve that merely lost
+// the race to api.github.com would be recorded as a failure — exactly the
+// ambiguous fleet data this bridge exists to avoid producing.
+func TestShadowResolveSurvivesCallerCancellation(t *testing.T) {
 	useFakeDist(t, fakeDist(t, "v1.0.0"))
 
-	s := startShadowResolve(context.Background(), "v1.0.0")
+	ctx, cancel := context.WithCancel(context.Background())
+	s := startShadowResolve(ctx, "v0.9.0")
+	cancel()
+
 	select {
 	case out := <-s.ch:
 		if out.err != nil {
-			t.Fatalf("shadow resolve: %v", out.err)
+			t.Fatalf("shadow aborted with the caller: %v", out.err)
+		}
+		if out.version != "v1.0.0" {
+			t.Fatalf("resolved %q, want v1.0.0", out.version)
 		}
 	case <-time.After(20 * time.Second):
 		t.Fatal("shadow resolve never reported")
@@ -283,5 +292,73 @@ func TestRecordAsyncRewritesTheCacheEntry(t *testing.T) {
 	}
 	if !got.CheckedAt.Equal(checkedAt) {
 		t.Errorf("CheckedAt drifted: %v, want %v", got.CheckedAt, checkedAt)
+	}
+}
+
+// The motivating case for the whole migration: the API path go-selfupdate uses
+// is rate-limited (60/hour per IP, shared by a NAT'd fleet) while distkit's
+// anonymous redirect path answers fine. That must be recorded, and it must NOT
+// be cached — an entry with no authoritative version would satisfy the 24h
+// fast path and silence the update notice for a day.
+func TestLogPrimaryFailureCachesNothing(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "update-check.json")
+
+	ch := make(chan shadowOutcome, 1)
+	ch <- shadowOutcome{version: "v1.7.1"}
+	<-shadowResolve{ch: ch}.logPrimaryFailure(errors.New("403 rate limited"))
+
+	if _, ok := readCache(path); ok {
+		t.Fatal("a failed authoritative check must leave no cache entry")
+	}
+}
+
+// Both resolvers failing is the ordinary offline case and must not wedge.
+func TestLogPrimaryFailureWithBothFailing(t *testing.T) {
+	ch := make(chan shadowOutcome, 1)
+	ch <- shadowOutcome{err: errors.New("no route to host")}
+	select {
+	case <-shadowResolve{ch: ch}.logPrimaryFailure(errors.New("no route to host")):
+	case <-time.After(10 * time.Second):
+		t.Fatal("logPrimaryFailure never completed")
+	}
+}
+
+// The cache is written twice per check now (authoritative, then shadow), so a
+// concurrent reader must never see a half-written file.
+func TestWriteCacheIsAtomic(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "update-check.json")
+
+	writeCache(path, &cacheEntry{CheckedAt: time.Now(), LatestVersion: "1.7.1"})
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 200; i++ {
+			writeCache(path, &cacheEntry{CheckedAt: time.Now(), LatestVersion: "1.7.1", DistkitVersion: "v1.7.1"})
+		}
+	}()
+	for i := 0; i < 200; i++ {
+		if entry, ok := readCache(path); ok && entry.LatestVersion != "1.7.1" {
+			t.Fatalf("torn read: %+v", entry)
+		}
+	}
+	<-done
+
+	// No temp files left behind.
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("writeCache left litter: %v", entries)
+	}
+	info, err := entries[0].Info()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Errorf("cache mode = %v, want 0600", info.Mode().Perm())
 	}
 }
