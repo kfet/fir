@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.8.1] - 2026-09-08
+
 ### Changed
 - **The cache directory is now the one the OS actually specifies, per platform.** `pkg/cache.Dir` asks `os.UserCacheDir`, so extracted trees land in `~/.cache/fir/…` on Linux/BSD (or `$XDG_CACHE_HOME`), `~/Library/Caches/fir/…` on macOS, and `%LocalAppData%\fir\…` on Windows. `~/.cache` is the **XDG Base Directory** answer and it is canonical on Linux only — Apple's cache directory is `~/Library/Caches` (`NSCachesDirectory`) — so the previous hardcoded path put fir's caches in a non-standard place on every Mac it ran on, which is also the one platform whose OS cleans caches under disk pressure. `$XDG_CACHE_HOME` is honoured on *all* platforms when absolute, one step beyond `os.UserCacheDir` (which consults it on unix only): a user who exports it has said where caches go, and this matches fir already honouring `$XDG_CONFIG_HOME` everywhere for its agent dir. The abandoned `~/.cache/fir/<sub>` location is collected wherever it is no longer the real cache dir, so a Mac migrates itself.
 - **One cache location and one collection policy for everything fir extracts out of its own binary.** Builtin skills, builtin extensions and the extension SDKs each answered "where does an extracted tree live, and who deletes it" differently: two hardcoded `~/.cache` paths, one `$TMPDIR` path, and no collection anywhere. New `pkg/cache` is the single answer.
