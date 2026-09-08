@@ -4,9 +4,8 @@
 //
 // Each of those grew its own answer to the same two questions — where does
 // an extracted tree live, and who deletes it — and got a different one:
-// two hardcoded `~/.cache` paths that ignored $XDG_CACHE_HOME, one
-// $TMPDIR path, and no collection anywhere. This package is the single
-// answer.
+// two hardcoded `~/.cache` paths, one $TMPDIR path, and no collection
+// anywhere. This package is the single answer.
 package cache
 
 import (
@@ -16,32 +15,74 @@ import (
 	"time"
 )
 
-// homeDir and statDir are indirected for tests: one so a test never
-// touches a real $HOME, the other so the "entry vanished under us" race
-// in SweepAged is reachable without actually racing.
+// Indirected for tests: one so a test never touches a real $HOME, one so
+// the "entry vanished under us" race in SweepAged is reachable without
+// actually racing.
 var (
-	homeDir = os.UserHomeDir
-	statDir = os.Stat
+	homeDir      = os.UserHomeDir
+	userCacheDir = os.UserCacheDir
+	statDir      = os.Stat
 )
 
-// Dir returns <cache>/fir/<sub>, where <cache> is $XDG_CACHE_HOME when
-// set and ~/.cache otherwise.
+const (
+	// MaxAge is how long an extracted tree survives without being claimed
+	// by a starting process before it is collected. It has to outlast the
+	// longest plausible live session still holding paths into an older
+	// tree — those paths are absolute, and the process holding them will
+	// never re-resolve them.
+	MaxAge = 14 * 24 * time.Hour
+	// LegacyTmpMaxAge applies to the $TMPDIR locations earlier fir
+	// versions extracted into and no current fir creates. Temp dirs are
+	// disposable by definition and the OS may purge them anyway, so this
+	// is deliberately shorter.
+	LegacyTmpMaxAge = 3 * 24 * time.Hour
+)
+
+// Dir returns the per-OS user cache directory joined with fir/<sub>:
 //
-// $XDG_CACHE_HOME is honoured because fir already honours
-// $XDG_CONFIG_HOME for its agent dir (session.DefaultAgentDir,
-// mcp.defaultConfigDir). Respecting one half of the spec and hardcoding
-// the other is not a policy, it is an oversight — on a host that sets
-// both, fir read its config from where it was told and then wrote
-// hundreds of megabytes to where it was not.
+//	Linux/BSD   $XDG_CACHE_HOME/fir/<sub>, else ~/.cache/fir/<sub>
+//	macOS       ~/Library/Caches/fir/<sub>
+//	Windows     %LocalAppData%/fir/<sub>
+//
+// via os.UserCacheDir, which is where the per-platform convention
+// actually lives. ~/.cache is the XDG Base Directory answer and it is
+// canonical on Linux only; Apple's cache directory is ~/Library/Caches
+// (NSCachesDirectory), and hardcoding ~/.cache put fir's caches in a
+// non-standard place on every Mac it ran on.
+//
+// $XDG_CACHE_HOME is honoured on ALL platforms when set to an absolute
+// path, which is one step beyond os.UserCacheDir (it consults the
+// variable on unix only). A user who exports it has said where caches
+// go, and a CLI that ignores that on macOS is second-guessing an
+// explicit instruction — the same reasoning by which fir already
+// honours $XDG_CONFIG_HOME for its agent dir on every platform.
 func Dir(sub string) (string, error) {
-	if xdg := os.Getenv("XDG_CACHE_HOME"); xdg != "" {
+	if xdg := os.Getenv("XDG_CACHE_HOME"); filepath.IsAbs(xdg) {
 		return filepath.Join(xdg, "fir", sub), nil
 	}
+	base, err := userCacheDir()
+	if err != nil {
+		return "", fmt.Errorf("cache: resolve user cache dir: %w", err)
+	}
+	return filepath.Join(base, "fir", sub), nil
+}
+
+// legacyDotCacheDir is ~/.cache/fir/<sub> — the hardcoded location fir
+// used before Dir consulted the platform. It is returned only when it
+// differs from the current Dir(sub), i.e. exactly when there is
+// something to migrate away from: a Mac, or a host that set
+// $XDG_CACHE_HOME somewhere else.
+func legacyDotCacheDir(sub string) (string, bool) {
 	home, err := homeDir()
 	if err != nil {
-		return "", fmt.Errorf("cache: resolve home dir: %w", err)
+		return "", false
 	}
-	return filepath.Join(home, ".cache", "fir", sub), nil
+	legacy := filepath.Join(home, ".cache", "fir", sub)
+	current, err := Dir(sub)
+	if err != nil || current == legacy {
+		return "", false
+	}
+	return legacy, true
 }
 
 // Claim marks dir as in use by this process by refreshing its mtime, so
@@ -84,6 +125,29 @@ func SweepAged(base, keep string, maxAge time.Duration, match func(name string) 
 			continue
 		}
 		os.RemoveAll(path)
+	}
+}
+
+// SweepDir ages out every tree under one abandoned location and removes
+// the location itself once it is empty. Used for the paths fir no longer
+// extracts into: the $TMPDIR bases of older versions, and ~/.cache on
+// platforms where that is not the OS's cache directory.
+func SweepDir(base string, maxAge time.Duration) {
+	SweepAged(base, "", maxAge, NotDotted)
+	// Fails while the location still holds a young tree, which is the
+	// intended outcome — it is retried on the next run.
+	_ = os.Remove(base)
+}
+
+// SweepLegacy collects the locations fir used to extract <sub> into: the
+// pre-platform ~/.cache path (a no-op where that is still the real cache
+// dir) and any $TMPDIR bases passed by the caller.
+func SweepLegacy(sub string, tmpBases ...string) {
+	if legacy, ok := legacyDotCacheDir(sub); ok {
+		SweepDir(legacy, MaxAge)
+	}
+	for _, base := range tmpBases {
+		SweepDir(base, LegacyTmpMaxAge)
 	}
 }
 

@@ -32,7 +32,7 @@ Run standalone: `node pi_compat.js <extension-path>`
 
 ### 2. `pkg/extension/sdk/node/run.sh` — Generic Runtime Wrapper
 
-Shipped alongside the SDK (embedded, extracted to `~/.cache/fir/sdks/<hash>/node/`). Symlinked into extension directories as `main` (extensionless).
+Shipped alongside the SDK (embedded, extracted to `<cache>/fir/sdks/<hash>/node/`). Symlinked into extension directories as `main` (extensionless).
 
 **Entry point discovery:** `index.ts` → `index.js` → `main.ts` → `main.js` → `<dirname>.ts` → `<dirname>.js` → first `*.ts` → first `*.js`
 

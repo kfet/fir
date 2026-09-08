@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/kfet/fir/pkg/cache"
 )
@@ -211,22 +210,13 @@ func extractBuiltinExtensions() (string, error) {
 // real cache.
 var builtinExtensionsCacheDir = func() (string, error) { return cache.Dir("builtin-extensions") }
 
-// builtinExtensionsMaxAge is how long an extracted tree survives without
-// being claimed before collection; long enough to outlast a live session
-// still launching subprocesses out of an older tree.
-const builtinExtensionsMaxAge = 14 * 24 * time.Hour
-
 // sweepStaleBuiltinExtensions collects trees from older binaries: past
 // hashes under the cache dir, and the whole legacy $TMPDIR location,
 // where extensions were extracted before they moved under the cache dir
 // alongside skills and SDKs.
 func sweepStaleBuiltinExtensions(base, keep string) {
-	cache.SweepAged(base, keep, builtinExtensionsMaxAge, cache.NotDotted)
-	legacy := filepath.Join(os.TempDir(), "fir-builtin-extensions")
-	cache.SweepAged(legacy, "", LegacyTmpMaxAge, cache.NotDotted)
-	// The legacy parent itself is removable once emptied; ignore the
-	// error when it still holds a young tree.
-	_ = os.Remove(legacy)
+	cache.SweepAged(base, keep, cache.MaxAge, cache.NotDotted)
+	cache.SweepLegacy("builtin-extensions", filepath.Join(os.TempDir(), "fir-builtin-extensions"))
 }
 
 // extractBuiltinExtensionsTo materialises the embedded builtin_extensions tree

@@ -7,7 +7,7 @@ _Updated 2025-03-24 after initial implementation and end-to-end testing_
 - **Pi-mono compat shim** (`pi_compat.js`) — maps `ExtensionAPI` to `fir_ext.js`
 - **Generic runtime wrapper** (`run.sh`) — auto-detects runtime and pi-mono imports
 - **Install post-hook** (`install.py`) — symlinks `main` → `run.sh` for JS/TS packages
-- **SDK extraction** — `run.sh`, `pi_compat.js`, `fir_ext.js` all extracted to `~/.cache/fir/sdks/<hash>/node/`
+- **SDK extraction** — `run.sh`, `pi_compat.js`, `fir_ext.js` all extracted to `<cache>/fir/sdks/<hash>/node/`
 - **Discovery** — reordered candidates in `discovery.go` (`.py` → `.sh` → `.ts` → `.js`)
 - **Tested end-to-end** — pi-mono TypeScript extension with `pi.registerTool()` works in a live fir session
 

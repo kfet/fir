@@ -7,7 +7,7 @@ import (
 )
 
 // sharedForks holds process-lifetime ForkServer singletons keyed by SDK dir.
-// The SDK dir is content-addressed (~/.cache/fir/sdks/<hash>) and Python is
+// The SDK dir is content-addressed (the SDK cache dir (<cache>/fir/sdks/<hash>)) and Python is
 // the only forked runtime, so the key is equivalent to (runtime, sdk-hash).
 //
 // The template heap is session-free by construction (it imports only fir_ext

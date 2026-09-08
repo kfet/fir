@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/kfet/fir/pkg/cache"
 	"github.com/kfet/fir/pkg/envvars"
@@ -30,18 +29,6 @@ var (
 var builtinSkillsCacheDir = defaultBuiltinSkillsCacheDir
 
 func defaultBuiltinSkillsCacheDir() (string, error) { return cache.Dir("builtin-skills") }
-
-const (
-	// builtinSkillsMaxAge is how long an extracted tree survives without
-	// being claimed by a starting process before it is collected. It has
-	// to outlast the longest plausible live session that is still holding
-	// paths into an older tree.
-	builtinSkillsMaxAge = 14 * 24 * time.Hour
-	// LegacyTmpMaxAge applies to the pre-cache $TMPDIR extractions, which
-	// no current fir creates. Anything that old belongs to a process that
-	// has long since exited.
-	LegacyTmpMaxAge = 3 * 24 * time.Hour
-)
 
 // builtinSkillsHash is a deterministic hash of the extracted tree's
 // contents — embedded file paths and their *post-expansion* bytes, so a
@@ -77,7 +64,7 @@ func builtinSkillsHash() (string, error) {
 // BaseDir/scripts paths work at runtime, and returns the directory.
 // Called once per process via sync.Once.
 //
-// The destination is content-addressed — ~/.cache/fir/builtin-skills/<hash>/
+// The destination is content-addressed — <cache>/fir/builtin-skills/<hash>/
 // — not a fresh os.MkdirTemp. A per-process temp dir leaked one copy of
 // the whole tree per fir invocation (hundreds of megabytes over a week
 // on a busy host, with nothing ever collecting them) and made the skill
@@ -181,8 +168,11 @@ func extractBuiltinSkillsTo() (string, error) {
 // started by an older binary still holds absolute paths into its tree.
 // Best-effort throughout: a failure here is not worth failing a session.
 func sweepStaleBuiltinSkills(base, keep string) {
-	cache.SweepAged(base, keep, builtinSkillsMaxAge, cache.NotDotted)
-	cache.SweepAged(os.TempDir(), "", LegacyTmpMaxAge, func(name string) bool {
+	cache.SweepAged(base, keep, cache.MaxAge, cache.NotDotted)
+	cache.SweepLegacy("builtin-skills")
+	// The pre-cache extractions were per-process dirs sitting directly in
+	// $TMPDIR, not trees under one base, so they are matched by name.
+	cache.SweepAged(os.TempDir(), "", cache.LegacyTmpMaxAge, func(name string) bool {
 		return strings.HasPrefix(name, "fir-builtin-skills-")
 	})
 }
