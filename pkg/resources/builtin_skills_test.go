@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestLoadBuiltinSkills_ReturnsExpectedSkills(t *testing.T) {
@@ -307,5 +308,99 @@ override: true
 		if d.Type == "override-conflict" {
 			t.Errorf("unexpected override-conflict diagnostic on plain load: %s", d.Message)
 		}
+	}
+}
+
+// TestExtractBuiltinSkills_IsContentAddressedAndStable is the regression
+// guard for a leak: extraction used os.MkdirTemp, so every fir process
+// wrote a fresh copy of the whole builtin tree into $TMPDIR and nothing
+// ever collected it (594 dirs / 398 MB in one week on one host). The
+// destination is now derived from the content, so repeated extraction
+// lands in the same place and the paths handed to the model are stable
+// across processes.
+func TestExtractBuiltinSkills_IsContentAddressedAndStable(t *testing.T) {
+	base := t.TempDir()
+	t.Setenv("TMPDIR", t.TempDir()) // contain the legacy sweep
+	builtinSkillsCacheDir = func() (string, error) { return base, nil }
+	t.Cleanup(func() { builtinSkillsCacheDir = defaultBuiltinSkillsCacheDir })
+
+	first, err := extractBuiltinSkillsTo()
+	if err != nil {
+		t.Fatalf("extract: %v", err)
+	}
+	second, err := extractBuiltinSkillsTo()
+	if err != nil {
+		t.Fatalf("re-extract: %v", err)
+	}
+	if first != second {
+		t.Fatalf("extraction not stable: %q then %q", first, second)
+	}
+	if filepath.Dir(first) != base {
+		t.Fatalf("extracted to %q, want a child of %q", first, base)
+	}
+	if _, err := os.Stat(filepath.Join(first, "notify", "SKILL.md")); err != nil {
+		t.Fatalf("extracted tree incomplete: %v", err)
+	}
+
+	entries, err := os.ReadDir(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		var names []string
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Fatalf("expected exactly one extraction dir, got %v", names)
+	}
+}
+
+// TestSweepStaleBuiltinSkills_CollectsOldTreesOnly: a long-running
+// session started by an older binary still holds absolute paths into its
+// own tree, so collection ages dirs out instead of deleting eagerly, and
+// never touches the tree this process just claimed.
+func TestSweepStaleBuiltinSkills_CollectsOldTreesOnly(t *testing.T) {
+	base := t.TempDir()
+	tmp := t.TempDir()
+	t.Setenv("TMPDIR", tmp)
+
+	mk := func(dir, name string, age time.Duration) string {
+		p := filepath.Join(dir, name)
+		if err := os.MkdirAll(p, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		ts := time.Now().Add(-age)
+		if err := os.Chtimes(p, ts, ts); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+
+	keep := mk(base, "aaaaaaaaaaaaaaaa", 0)
+	fresh := mk(base, "bbbbbbbbbbbbbbbb", time.Hour)
+	stale := mk(base, "cccccccccccccccc", 30*24*time.Hour)
+	legacyOld := mk(tmp, "fir-builtin-skills-123456", 30*24*time.Hour)
+	legacyNew := mk(tmp, "fir-builtin-skills-654321", time.Hour)
+	unrelated := mk(tmp, "something-else-999", 30*24*time.Hour)
+
+	sweepStaleBuiltinSkills(base, keep)
+
+	for _, p := range []string{keep, fresh, legacyNew, unrelated} {
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("%s was collected but should have survived: %v", filepath.Base(p), err)
+		}
+	}
+	for _, p := range []string{stale, legacyOld} {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Errorf("%s survived but should have been collected (err=%v)", filepath.Base(p), err)
+		}
+	}
+
+	// The claimed tree survives even when its mtime is ancient, because
+	// extraction refreshes the mtime on claim and the sweep skips it.
+	staleButClaimed := mk(base, "dddddddddddddddd", 30*24*time.Hour)
+	sweepStaleBuiltinSkills(base, staleButClaimed)
+	if _, err := os.Stat(staleButClaimed); err != nil {
+		t.Errorf("claimed tree collected despite being the keep target: %v", err)
 	}
 }

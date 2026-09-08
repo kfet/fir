@@ -1,13 +1,16 @@
 package resources
 
 import (
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/kfet/fir/pkg/envvars"
 )
@@ -21,50 +24,197 @@ var (
 	builtinExtractErr  error
 )
 
-// extractBuiltinSkills extracts the entire builtin_skills/ tree to a temp
-// directory so that BaseDir/scripts paths work at runtime. Called once per
-// process via sync.Once.
+// builtinSkillsCacheDir locates the parent directory holding extracted
+// builtin-skill trees. Tests override it to avoid touching ~/.cache.
+var builtinSkillsCacheDir = defaultBuiltinSkillsCacheDir
+
+func defaultBuiltinSkillsCacheDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve home dir: %w", err)
+	}
+	return filepath.Join(home, ".cache", "fir", "builtin-skills"), nil
+}
+
+const (
+	// builtinSkillsMaxAge is how long an extracted tree survives without
+	// being claimed by a starting process before it is collected. It has
+	// to outlast the longest plausible live session that is still holding
+	// paths into an older tree.
+	builtinSkillsMaxAge = 14 * 24 * time.Hour
+	// legacyBuiltinSkillsMaxAge applies to the pre-cache $TMPDIR dirs,
+	// which no current fir creates. Anything that old belongs to a
+	// process that has long since exited.
+	legacyBuiltinSkillsMaxAge = 3 * 24 * time.Hour
+)
+
+// builtinSkillsHash is a deterministic hash of the extracted tree's
+// contents — embedded file paths and their *post-expansion* bytes, so a
+// change to the env-vars table that expandSkillPlaceholders injects
+// produces a different directory rather than a stale one.
+func builtinSkillsHash() (string, error) {
+	h := sha256.New()
+	err := fs.WalkDir(BuiltinSkillsFS, "builtin_skills", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		h.Write([]byte(path))
+		if d.IsDir() {
+			return nil
+		}
+		data, err := BuiltinSkillsFS.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if d.Name() == "SKILL.md" {
+			data = expandSkillPlaceholders(data)
+		}
+		h.Write(data)
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil))[:16], nil
+}
+
+// extractBuiltinSkills extracts the entire builtin_skills/ tree so that
+// BaseDir/scripts paths work at runtime, and returns the directory.
+// Called once per process via sync.Once.
+//
+// The destination is content-addressed — ~/.cache/fir/builtin-skills/<hash>/
+// — not a fresh os.MkdirTemp. A per-process temp dir leaked one copy of
+// the whole tree per fir invocation (hundreds of megabytes over a week
+// on a busy host, with nothing ever collecting them) and made the skill
+// paths this package hands the model unstable across processes for no
+// benefit: the content is identical whenever the binary is. Extraction
+// is atomic (write to a sibling temp dir, rename into place), so
+// concurrent fir processes never observe a partial tree.
 func extractBuiltinSkills() (string, error) {
 	builtinExtractOnce.Do(func() {
-		dir, err := os.MkdirTemp("", "fir-builtin-skills-")
-		if err != nil {
-			builtinExtractErr = fmt.Errorf("create temp dir for builtin skills: %w", err)
-			return
-		}
-		builtinExtractDir = dir
-
-		err = fs.WalkDir(BuiltinSkillsFS, "builtin_skills", func(path string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			// Strip "builtin_skills/" prefix to get relative path
-			rel := strings.TrimPrefix(path, "builtin_skills/")
-			if rel == "" || path == "builtin_skills" {
-				return nil
-			}
-			target := filepath.Join(dir, rel)
-			if d.IsDir() {
-				return os.MkdirAll(target, 0o755)
-			}
-			data, err := BuiltinSkillsFS.ReadFile(path)
-			if err != nil {
-				return err
-			}
-			perm := os.FileMode(0o644)
-			if strings.HasSuffix(path, ".sh") {
-				perm = 0o755
-			}
-			// Expand template placeholders in SKILL.md files.
-			if d.Name() == "SKILL.md" {
-				data = expandSkillPlaceholders(data)
-			}
-			return os.WriteFile(target, data, perm)
-		})
-		if err != nil {
-			builtinExtractErr = fmt.Errorf("extract builtin skills: %w", err)
-		}
+		builtinExtractDir, builtinExtractErr = extractBuiltinSkillsTo()
 	})
 	return builtinExtractDir, builtinExtractErr
+}
+
+func extractBuiltinSkillsTo() (string, error) {
+	base, err := builtinSkillsCacheDir()
+	if err != nil {
+		return "", fmt.Errorf("extract builtin skills: %w", err)
+	}
+	hash, err := builtinSkillsHash()
+	if err != nil {
+		return "", fmt.Errorf("hash builtin skills: %w", err)
+	}
+	dir := filepath.Join(base, hash)
+
+	// Already extracted: claim it (mtime = last use, which is what the
+	// collector below ages out on) and use it as-is.
+	if _, statErr := os.Stat(dir); statErr == nil {
+		now := time.Now()
+		_ = os.Chtimes(dir, now, now)
+		go sweepStaleBuiltinSkills(base, dir)
+		return dir, nil
+	}
+
+	if err := os.MkdirAll(base, 0o755); err != nil {
+		return "", fmt.Errorf("extract builtin skills: mkdir cache: %w", err)
+	}
+	tmp, err := os.MkdirTemp(base, ".extract-")
+	if err != nil {
+		return "", fmt.Errorf("create temp dir for builtin skills: %w", err)
+	}
+	success := false
+	defer func() {
+		if !success {
+			os.RemoveAll(tmp)
+		}
+	}()
+
+	err = fs.WalkDir(BuiltinSkillsFS, "builtin_skills", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		// Strip "builtin_skills/" prefix to get relative path
+		rel := strings.TrimPrefix(path, "builtin_skills/")
+		if rel == "" || path == "builtin_skills" {
+			return nil
+		}
+		target := filepath.Join(tmp, rel)
+		if d.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		data, err := BuiltinSkillsFS.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		perm := os.FileMode(0o644)
+		if strings.HasSuffix(path, ".sh") {
+			perm = 0o755
+		}
+		// Expand template placeholders in SKILL.md files.
+		if d.Name() == "SKILL.md" {
+			data = expandSkillPlaceholders(data)
+		}
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return err
+		}
+		return os.WriteFile(target, data, perm)
+	})
+	if err != nil {
+		return "", fmt.Errorf("extract builtin skills: %w", err)
+	}
+
+	if err := os.Rename(tmp, dir); err != nil {
+		// Another process won the race — its tree has identical content.
+		if _, statErr := os.Stat(dir); statErr == nil {
+			success = true // already renamed away or superseded; nothing to clean
+			os.RemoveAll(tmp)
+			go sweepStaleBuiltinSkills(base, dir)
+			return dir, nil
+		}
+		return "", fmt.Errorf("extract builtin skills: rename: %w", err)
+	}
+	success = true
+	go sweepStaleBuiltinSkills(base, dir)
+	return dir, nil
+}
+
+// sweepStaleBuiltinSkills collects extracted trees nobody has claimed in
+// a while: older hashes under the cache dir, plus the legacy per-process
+// $TMPDIR extractions that earlier fir versions left behind. Both are
+// aged out rather than deleted eagerly, because a long-running session
+// started by an older binary still holds absolute paths into its tree.
+// Best-effort throughout: a failure here is not worth failing a session.
+func sweepStaleBuiltinSkills(base, keep string) {
+	sweepAged(base, keep, builtinSkillsMaxAge, func(name string) bool {
+		return !strings.HasPrefix(name, ".")
+	})
+	sweepAged(os.TempDir(), "", legacyBuiltinSkillsMaxAge, func(name string) bool {
+		return strings.HasPrefix(name, "fir-builtin-skills-")
+	})
+}
+
+func sweepAged(base, keep string, maxAge time.Duration, match func(name string) bool) {
+	entries, err := os.ReadDir(base)
+	if err != nil {
+		return
+	}
+	cutoff := time.Now().Add(-maxAge)
+	for _, e := range entries {
+		if !e.IsDir() || !match(e.Name()) {
+			continue
+		}
+		path := filepath.Join(base, e.Name())
+		if path == keep {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil || info.ModTime().After(cutoff) {
+			continue
+		}
+		os.RemoveAll(path)
+	}
 }
 
 // BuiltinSkillsDir returns the directory where builtin skills are extracted.

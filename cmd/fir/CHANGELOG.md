@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- **Builtin skills no longer leak a copy of the whole skill tree per fir process.** `pkg/resources/builtin_skills.go` extracted the embedded tree with `os.MkdirTemp`, so every invocation wrote a fresh `/tmp/fir-builtin-skills-XXXX/` that nothing ever collected — one host had accumulated 594 directories and 398 MB in a week, ~85/day. Extraction is now content-addressed under `~/.cache/fir/builtin-skills/<hash>/`, the same scheme `pkg/extension/sdk` already uses for the embedded SDKs: identical content lands in the same directory, so a re-run reuses it instead of duplicating it, and the absolute skill paths handed to the model are stable across processes rather than differing per invocation. Extraction stays atomic (write to a sibling temp dir, rename into place), so concurrent fir processes never observe a partial tree. The hash covers the *post-expansion* bytes, so a change to the `{{FIR_ENV_VARS_TABLE}}` the loader injects yields a new directory rather than a stale one. Leftovers are collected on startup, in the background: older hashes under the cache dir and the legacy `$TMPDIR` extractions from earlier versions. Collection ages directories out (14 days for cache trees, 3 days for legacy ones) instead of deleting eagerly, because a long-running session started by an older binary still holds absolute paths into its own tree; the tree the current process claimed has its mtime refreshed and is never a candidate.
+
 ## [1.8.0] - 2026-09-07
 
 ### Added
