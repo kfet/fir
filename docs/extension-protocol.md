@@ -998,7 +998,7 @@ Response:
 ```json
 [
   {"name": "mood", "id": "builtin__mood", "scope": "builtin",
-   "path": "/tmp/fir-builtin-extensions/ab12/mood.py",
+   "path": "/home/you/.cache/fir/builtin-extensions/ab12/mood.py",
    "tools": ["mood_note", "mood_recent"]}
 ]
 ```

@@ -7,19 +7,23 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"time"
+
+	"github.com/kfet/fir/pkg/cache"
 )
 
 // cacheDir is the function used to locate the cache directory.
 // Tests override this to avoid touching ~/.cache.
 var cacheDir = defaultCacheDir
 
-func defaultCacheDir() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("sdk: resolve home dir: %w", err)
-	}
-	return filepath.Join(home, ".cache", "fir", "sdks"), nil
-}
+func defaultCacheDir() (string, error) { return cache.Dir("sdks") }
+
+// sdkMaxAge is how long an extracted SDK survives without being claimed
+// by a starting process before it is collected. Every release ships a
+// new hash and nothing ever deleted the old one, so this directory grew
+// one full SDK copy per version, forever. It has to outlast the longest
+// plausible live session still executing out of an older tree.
+const sdkMaxAge = 14 * 24 * time.Hour
 
 // embeddedHash returns a deterministic hash of all embedded SDK files.
 // Used as the directory name so extraction is skipped when unchanged.
@@ -68,6 +72,8 @@ func EnsureExtracted() (string, error) {
 
 	// If the directory already exists, the SDK is up to date.
 	if _, err := os.Stat(dir); err == nil {
+		cache.Claim(dir)
+		go cache.SweepAged(base, dir, sdkMaxAge, cache.NotDotted)
 		return dir, nil
 	}
 
@@ -118,11 +124,13 @@ func EnsureExtracted() (string, error) {
 		// Another process won the race — use their copy.
 		if _, statErr := os.Stat(dir); statErr == nil {
 			success = true // prevent cleanup of already-renamed dir
+			go cache.SweepAged(base, dir, sdkMaxAge, cache.NotDotted)
 			return dir, nil
 		}
 		return "", fmt.Errorf("sdk: rename: %w", err)
 	}
 	success = true
 
+	go cache.SweepAged(base, dir, sdkMaxAge, cache.NotDotted)
 	return dir, nil
 }

@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kfet/fir/pkg/cache"
 	"github.com/kfet/fir/pkg/envvars"
 )
 
@@ -25,16 +26,10 @@ var (
 )
 
 // builtinSkillsCacheDir locates the parent directory holding extracted
-// builtin-skill trees. Tests override it to avoid touching ~/.cache.
+// builtin-skill trees. Tests override it to avoid touching the real cache.
 var builtinSkillsCacheDir = defaultBuiltinSkillsCacheDir
 
-func defaultBuiltinSkillsCacheDir() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("resolve home dir: %w", err)
-	}
-	return filepath.Join(home, ".cache", "fir", "builtin-skills"), nil
-}
+func defaultBuiltinSkillsCacheDir() (string, error) { return cache.Dir("builtin-skills") }
 
 const (
 	// builtinSkillsMaxAge is how long an extracted tree survives without
@@ -42,10 +37,10 @@ const (
 	// to outlast the longest plausible live session that is still holding
 	// paths into an older tree.
 	builtinSkillsMaxAge = 14 * 24 * time.Hour
-	// legacyBuiltinSkillsMaxAge applies to the pre-cache $TMPDIR dirs,
-	// which no current fir creates. Anything that old belongs to a
-	// process that has long since exited.
-	legacyBuiltinSkillsMaxAge = 3 * 24 * time.Hour
+	// LegacyTmpMaxAge applies to the pre-cache $TMPDIR extractions, which
+	// no current fir creates. Anything that old belongs to a process that
+	// has long since exited.
+	LegacyTmpMaxAge = 3 * 24 * time.Hour
 )
 
 // builtinSkillsHash is a deterministic hash of the extracted tree's
@@ -111,8 +106,7 @@ func extractBuiltinSkillsTo() (string, error) {
 	// Already extracted: claim it (mtime = last use, which is what the
 	// collector below ages out on) and use it as-is.
 	if _, statErr := os.Stat(dir); statErr == nil {
-		now := time.Now()
-		_ = os.Chtimes(dir, now, now)
+		cache.Claim(dir)
 		go sweepStaleBuiltinSkills(base, dir)
 		return dir, nil
 	}
@@ -187,34 +181,10 @@ func extractBuiltinSkillsTo() (string, error) {
 // started by an older binary still holds absolute paths into its tree.
 // Best-effort throughout: a failure here is not worth failing a session.
 func sweepStaleBuiltinSkills(base, keep string) {
-	sweepAged(base, keep, builtinSkillsMaxAge, func(name string) bool {
-		return !strings.HasPrefix(name, ".")
-	})
-	sweepAged(os.TempDir(), "", legacyBuiltinSkillsMaxAge, func(name string) bool {
+	cache.SweepAged(base, keep, builtinSkillsMaxAge, cache.NotDotted)
+	cache.SweepAged(os.TempDir(), "", LegacyTmpMaxAge, func(name string) bool {
 		return strings.HasPrefix(name, "fir-builtin-skills-")
 	})
-}
-
-func sweepAged(base, keep string, maxAge time.Duration, match func(name string) bool) {
-	entries, err := os.ReadDir(base)
-	if err != nil {
-		return
-	}
-	cutoff := time.Now().Add(-maxAge)
-	for _, e := range entries {
-		if !e.IsDir() || !match(e.Name()) {
-			continue
-		}
-		path := filepath.Join(base, e.Name())
-		if path == keep {
-			continue
-		}
-		info, err := e.Info()
-		if err != nil || info.ModTime().After(cutoff) {
-			continue
-		}
-		os.RemoveAll(path)
-	}
 }
 
 // BuiltinSkillsDir returns the directory where builtin skills are extracted.

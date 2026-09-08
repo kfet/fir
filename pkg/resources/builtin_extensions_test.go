@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 )
 
 func TestParseCommentFrontmatter(t *testing.T) {
@@ -200,5 +201,86 @@ func TestParseCommentFrontmatter_ForgeInjectedHeader(t *testing.T) {
 	}
 	if len(fm.Modes) != 0 {
 		t.Fatalf("forge injects no modes (all modes), got %v", fm.Modes)
+	}
+}
+
+// TestBuiltinExtensions_LiveUnderTheCacheDir: extension trees used to be
+// extracted under $TMPDIR, which is a different answer to the same
+// question skills and SDKs answer with ~/.cache/fir — and on macOS the
+// temp cleaner can delete a tree out from under a live session that is
+// still launching subprocesses from it.
+func TestBuiltinExtensions_LiveUnderTheCacheDir(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	base, err := builtinExtensionsCacheDir()
+	if err != nil {
+		t.Fatalf("cache dir: %v", err)
+	}
+	if want := filepath.Join(os.Getenv("XDG_CACHE_HOME"), "fir", "builtin-extensions"); base != want {
+		t.Fatalf("cache dir = %q, want %q", base, want)
+	}
+
+	first, err := extractBuiltinExtensionsTo(base)
+	if err != nil {
+		t.Fatalf("extract: %v", err)
+	}
+	second, err := extractBuiltinExtensionsTo(base)
+	if err != nil {
+		t.Fatalf("re-extract: %v", err)
+	}
+	if first != second {
+		t.Fatalf("extraction not stable: %q then %q", first, second)
+	}
+	if filepath.Dir(first) != base {
+		t.Fatalf("extracted to %q, want a child of %q", first, base)
+	}
+}
+
+// TestSweepStaleBuiltinExtensions_CollectsOldTreesAndTheLegacyLocation
+// covers both halves of the migration: past hashes under the cache dir,
+// and the whole $TMPDIR tree earlier versions left behind.
+func TestSweepStaleBuiltinExtensions_CollectsOldTreesAndTheLegacyLocation(t *testing.T) {
+	base := t.TempDir()
+	tmp := t.TempDir()
+	t.Setenv("TMPDIR", tmp)
+
+	mk := func(dir, name string, age time.Duration) string {
+		p := filepath.Join(dir, name)
+		if err := os.MkdirAll(p, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		ts := time.Now().Add(-age)
+		if err := os.Chtimes(p, ts, ts); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+
+	keep := mk(base, "aaaaaaaaaaaaaaaa", 30*24*time.Hour)
+	fresh := mk(base, "bbbbbbbbbbbbbbbb", time.Hour)
+	stale := mk(base, "cccccccccccccccc", 30*24*time.Hour)
+	legacyRoot := filepath.Join(tmp, "fir-builtin-extensions")
+	legacyOld := mk(legacyRoot, "dddddddddddddddd", 30*24*time.Hour)
+	legacyNew := mk(legacyRoot, "eeeeeeeeeeeeeeee", time.Hour)
+
+	sweepStaleBuiltinExtensions(base, keep)
+
+	for _, p := range []string{keep, fresh, legacyNew} {
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("%s was collected but should have survived: %v", filepath.Base(p), err)
+		}
+	}
+	for _, p := range []string{stale, legacyOld} {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Errorf("%s survived but should have been collected (err=%v)", filepath.Base(p), err)
+		}
+	}
+
+	// Once the last legacy tree ages out, the legacy parent goes too.
+	if err := os.RemoveAll(legacyNew); err != nil {
+		t.Fatal(err)
+	}
+	sweepStaleBuiltinExtensions(base, keep)
+	if _, err := os.Stat(legacyRoot); !os.IsNotExist(err) {
+		t.Errorf("emptied legacy root survived (err=%v)", err)
 	}
 }

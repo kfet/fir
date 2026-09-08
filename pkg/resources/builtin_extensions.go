@@ -9,6 +9,9 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
+
+	"github.com/kfet/fir/pkg/cache"
 )
 
 //go:embed builtin_extensions
@@ -190,10 +193,40 @@ func parseCommaSeparatedList(value string) []string {
 // directory so extension scripts can be executed as subprocesses.
 func extractBuiltinExtensions() (string, error) {
 	builtinExtExtractOnce.Do(func() {
-		cacheBase := filepath.Join(os.TempDir(), "fir-builtin-extensions")
+		cacheBase, err := builtinExtensionsCacheDir()
+		if err != nil {
+			builtinExtExtractErr = err
+			return
+		}
 		builtinExtExtractDir, builtinExtExtractErr = extractBuiltinExtensionsTo(cacheBase)
+		if builtinExtExtractErr == nil {
+			go sweepStaleBuiltinExtensions(cacheBase, builtinExtExtractDir)
+		}
 	})
 	return builtinExtExtractDir, builtinExtExtractErr
+}
+
+// builtinExtensionsCacheDir locates the parent directory holding
+// extracted extension trees. Tests override it to avoid touching the
+// real cache.
+var builtinExtensionsCacheDir = func() (string, error) { return cache.Dir("builtin-extensions") }
+
+// builtinExtensionsMaxAge is how long an extracted tree survives without
+// being claimed before collection; long enough to outlast a live session
+// still launching subprocesses out of an older tree.
+const builtinExtensionsMaxAge = 14 * 24 * time.Hour
+
+// sweepStaleBuiltinExtensions collects trees from older binaries: past
+// hashes under the cache dir, and the whole legacy $TMPDIR location,
+// where extensions were extracted before they moved under the cache dir
+// alongside skills and SDKs.
+func sweepStaleBuiltinExtensions(base, keep string) {
+	cache.SweepAged(base, keep, builtinExtensionsMaxAge, cache.NotDotted)
+	legacy := filepath.Join(os.TempDir(), "fir-builtin-extensions")
+	cache.SweepAged(legacy, "", LegacyTmpMaxAge, cache.NotDotted)
+	// The legacy parent itself is removable once emptied; ignore the
+	// error when it still holds a young tree.
+	_ = os.Remove(legacy)
 }
 
 // extractBuiltinExtensionsTo materialises the embedded builtin_extensions tree
@@ -210,6 +243,7 @@ func extractBuiltinExtensionsTo(cacheBase string) (string, error) {
 
 	if info, err := os.Stat(dir); err == nil && info.IsDir() {
 		if _, sErr := os.Stat(sentinel); sErr == nil {
+			cache.Claim(dir)
 			return dir, nil
 		}
 		// Directory exists but is incomplete — remove and re-extract.

@@ -102,8 +102,9 @@ _Updated 2025-03-24 after initial implementation and end-to-end testing_
     - Runtime fallback chain (bun → node → npx tsx)
     - Non-pi-mono JS/TS passthrough
 
-18. **Clean up old SDK cache dirs**
-    `~/.cache/fir/sdks/` accumulates stale directories. Add a cleanup pass that removes dirs older than N days.
+18. ~~**Clean up old SDK cache dirs**~~ — done. `pkg/cache.SweepAged` ages out
+    unclaimed `<cache>/fir/sdks/<hash>/` trees (14 days), alongside the same
+    pass for builtin skills and extensions.
 
 19. **Documentation**
     - Add to `docs/extensions.md` — how to install and use pi-mono extensions
