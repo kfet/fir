@@ -749,9 +749,13 @@ def _classify_empty_blocks(blocks_str: str) -> str:
     Inputs look like "thinking(th=0,sig=940), text(len=0)". We surface the
     first non-empty block descriptor — sig_len > 0 with empty thinking is
     the canonical redacted-thinking outcome. An empty input means the
-    response carried no blocks at all. This drives the card SLUG only; the
-    routing verdict is _is_empty_content_error's, which treats every one of
-    these as the same transient class.
+    response carried no blocks at all.
+
+    This drives the card SLUG **and** one routing decision: ``empty:redacted``
+    is split out of the transient class by
+    :func:`_is_redacted_thinking_error` (see its docstring for the 8/8
+    evidence). Every other slug here shares the transient empty-content
+    routing — same-candidate retry, chain advance, executor fallback.
     """
     if not blocks_str.strip():
         return "empty:noblocks"
@@ -848,6 +852,9 @@ def _is_provider_error_without_message(msg: str) -> bool:
 # fallback are policy only the extension knows), not the root fix. If the Go
 # client ever retries empty content itself, delete the same-candidate retry
 # here and keep the advance.
+#
+# ONE member of the class is NOT transient and is routed separately:
+# ``empty:redacted`` (see _is_redacted_thinking_error). Keep the split.
 _EMPTY_CONTENT_MARKERS = (
     "no usable content",
     "returned no content",
@@ -880,6 +887,77 @@ def _is_empty_content_error(msg: str) -> bool:
         return True
     low = msg.lower()
     return any(m in low for m in _EMPTY_CONTENT_MARKERS)
+
+
+# Effort value that turns reasoning off entirely for one side_query. Supported
+# end-to-end already: extension param ``effort`` → SideQueryOptions.Effort →
+# ai.ThinkingOff (docs/extension-protocol.md, "side_query"). No host change is
+# needed to use it, which is exactly why the degraded retry below is a
+# Python-only fix.
+_REASONING_OFF_EFFORT = "off"
+
+
+def _is_redacted_thinking_error(msg: str) -> bool:
+    """True when a side_query came back as REDACTED REASONING ONLY.
+
+    Shape: ``no usable content (blocks: [thinking(th=0,sig=N>0)])`` with
+    ``stop_reason=stop`` — the model reasoned (a signature was produced), the
+    provider scrubbed the trace, and because all of the output had gone into
+    reasoning, nothing at all came back.
+
+    This is a SUBSET of the transient empty-content class and it is routed
+    DIFFERENTLY, which is the one thing a future reader must not "simplify"
+    away. Forensics from the 2026-09-08 incident (session
+    ``…c8bc9b8829d30…``, per-attempt records in its ``.cards`` sibling):
+
+      * ONE ``aside escalate=true`` call produced EIGHT consecutive attempts
+        in 77s — three distinct models, the executor fallback, and both
+        same-candidate retries. ALL 8 returned ``empty:redacted``, with sig
+        varying 544..1216: every candidate really did reason, and every trace
+        was scrubbed.
+      * 31 seconds later a differently-phrased question succeeded on the
+        FIRST candidate. No model was down.
+
+    ``SideQueryStream`` snapshots the ENTIRE session transcript and appends
+    the question, so every candidate in the chain receives byte-identical
+    input. The trigger is therefore ``question x transcript`` and it is
+    deterministic on that input: walking the chain re-measures a constant at
+    one advisor-rate call per candidate. Hence redacted does not advance —
+    it retries ONCE with reasoning off (nothing left to scrub, so the model
+    must emit text or a legible refusal) and then surfaces a diagnosis
+    telling the CALLING AGENT to rephrase, which is what actually worked in
+    the incident.
+    """
+    if not msg or not _is_empty_content_error(msg):
+        return False
+    m = _EMPTY_BLOCKS_RE.search(msg)
+    return m is not None and _classify_empty_blocks(m.group(1)) == "empty:redacted"
+
+
+def _redacted_diagnosis(role_label: str | None, attempts: int, errs: list[str]) -> str:
+    """Compose the terminal error for a redacted-reasoning-only failure.
+
+    ``advisor chain exhausted: <block summaries>`` told the calling agent
+    nothing it could act on — it looked like flaky infrastructure, so the
+    agent's only sane move was to give up or retry the identical call. The
+    diagnosis has to name the actual cause (the INPUT, not the route) and the
+    only available remedy (the caller rewording the question), while keeping
+    the per-candidate block summaries as evidence.
+    """
+    role = role_label or "side query"
+    joined = "; ".join(errs)
+    return (
+        f"{role} stopped after {attempts} attempt(s): every attempt returned "
+        "REDACTED REASONING ONLY — a scrubbed thinking block with no text — "
+        "including a retry with reasoning disabled. This is deterministic on the "
+        "INPUT: the question combined with the current session context is very "
+        "likely tripping the provider's content policy, which scrubs the reasoning "
+        "trace and leaves nothing to return. Every other model would receive the "
+        "byte-identical transcript, so advancing to another model cannot help. "
+        "FIX (only the calling agent can do this): rephrase the question — make it "
+        "narrower and less charged, and avoid asking about sensitive material "
+        f"quoted earlier in the session — then call again. Evidence: {joined}"
+    )
 
 
 def _is_model_unavailable_error(msg: str) -> bool:
@@ -1216,6 +1294,14 @@ def _run_side_query_chain(
         to the next candidate WITHOUT cooling the model off (the blip is
         transient, the model is alive — cooling it off would degrade the chain
         over a hiccup).
+      * A candidate returns REDACTED REASONING ONLY (``empty:redacted``) → the
+        same-candidate retry runs with reasoning OFF, and if that is redacted
+        too the walk STOPS with a diagnosis instead of advancing. Advancing
+        cannot help: every candidate receives the byte-identical transcript +
+        question, and that pair is what trips the scrub (8/8 across 3 models
+        plus the executor in the 2026-09-08 incident — see
+        :func:`_is_redacted_thinking_error`). Only the calling agent can fix
+        it, by rewording.
       * A candidate fails with a model-unavailability error → the model is
         cooled off for a backoff window and the walk ADVANCES to the next
         candidate.
@@ -1256,44 +1342,84 @@ def _run_side_query_chain(
     # retry, not just the call that ended up answering. Anything less
     # under-reports what the escalation actually cost.
     spent: dict[str, int] = {}
+    # Every LLM probe the walk fired, retries included — quoted in the
+    # redacted diagnosis so the caller can see the cost of re-measuring a
+    # constant.
+    attempts_made = 0
     walk_key = f"aside/chain/{int(time.time() * 1000)}"
 
     def _attempt(
         *, model: str | None, provider: str | None, effort: str | None, label: str
-    ) -> tuple[str | None, str | None, dict[str, int]]:
+    ) -> tuple[str | None, str | None, dict[str, int], bool]:
         """One candidate probe, with a single retry on empty content.
+
+        Returns ``(text, err, usage, degraded)``; ``degraded`` is True only
+        when the answer came from the reasoning-off retry, so the caller can
+        label it (a degraded path must never be silent).
 
         At most two attempts: the second happens ONLY when the first failed
         with the transient empty-content class. A request-shaped error breaks
         out even when it wears empty-content wording — a cancelled call must
         never earn another LLM call, and ``(blocks: []) (stop_reason=aborted)``
         matches the empty-content pattern.
+
+        The second attempt's SHAPE depends on the class:
+
+          * ``empty:redacted`` → same candidate, same question, reasoning
+            turned OFF. The failure mode is "all output went into reasoning,
+            reasoning got scrubbed"; with reasoning off there is nothing to
+            scrub, so the model must produce text or a legible refusal — and
+            the refusal is itself the diagnosis that was missing.
+          * everything else → an identical replay, as before: those classes
+            really are transient blips.
+
+        Only the effort changes, never the question: the transcript prefix
+        stays byte-identical so the prompt cache still hits on a 25-60k-token
+        context. Filtering or truncating the transcript to dodge the trigger
+        was considered and rejected — it invalidates that cached prefix and
+        bills advisor-rate tokens on every degraded call.
         """
+        nonlocal attempts_made
         text: str | None = None
         err: str | None = None
         usage: dict[str, int] = {}
+        use_effort = effort
+        degraded = False
+        reasoning_off_next = False
         for attempt in range(2):
             if attempt:
+                if reasoning_off_next:
+                    use_effort = _REASONING_OFF_EFFORT
+                    degraded = use_effort != effort
+                    slug = "retry:noreason"
+                    detail = (
+                        f"{label} returned redacted reasoning only — retrying once "
+                        f"with reasoning off\n\n{err}"
+                    )
+                else:
+                    slug = "retry:empty"
+                    detail = f"{label} returned no usable content — retrying once\n\n{err}"
                 # Keep the retry honest and visible — an observer sees the
                 # second probe, not a silent stall.
-                ctx.put_observable(
-                    walk_key,
-                    slug="retry:empty",
-                    detail=f"{label} returned no usable content — retrying once\n\n{err}",
-                )
+                ctx.put_observable(walk_key, slug=slug, detail=detail)
                 if _EMPTY_CONTENT_RETRY_BACKOFF > 0:
                     time.sleep(_EMPTY_CONTENT_RETRY_BACKOFF)
+            attempts_made += 1
             text, err, attempt_usage = _run_side_query_with_card(
-                ctx, question, model=model, provider=provider, effort=effort
+                ctx, question, model=model, provider=provider, effort=use_effort
             )
             usage = _merge_usage(usage, attempt_usage)
             if err is None or _is_request_shaped_error(err) or not _is_empty_content_error(err):
                 break
-        return text, err, usage
+            reasoning_off_next = _is_redacted_thinking_error(err)
+        if err is not None:
+            # A degraded attempt that still failed produced no answer to label.
+            degraded = False
+        return text, err, usage, degraded
 
     for cfg in chain:
         label = f"{cfg['provider']}/{cfg['model']}"
-        text, err, usage = _attempt(
+        text, err, usage, degraded = _attempt(
             model=cfg["model"],
             provider=cfg["provider"],
             effort=cfg.get("effort"),
@@ -1309,18 +1435,47 @@ def _run_side_query_chain(
             # it stood in for, reusing the "(fallback: … unavailable)" trace
             # style. Layer A may have already set _fallback (degrade); only
             # annotate when it hasn't.
-            if failed_models and "_fallback" not in cfg:
+            add_fallback = bool(failed_models) and "_fallback" not in cfg
+            if add_fallback or degraded:
                 # Copy before annotating — _degrade_role returns the shared
                 # _ADVISOR spec dict on the in-available path, so mutating it
                 # in place would corrupt the session config.
                 cfg = dict(cfg)
-                cfg["_fallback"] = failed_models[0]
+                if add_fallback:
+                    cfg["_fallback"] = failed_models[0]
+                if degraded:
+                    cfg["_reasoning_off"] = "1"
             return text, None, cfg, "", spent
         if _is_request_shaped_error(err):
             # Attributable to the request, not the route — surface as-is.
             # Deliberately ahead of the empty-content check so a cancellation
             # can never earn a retry.
             return None, err, None, "", spent
+        if _is_redacted_thinking_error(err):
+            # Redacted reasoning survived the reasoning-off retry. Do NOT
+            # advance: every remaining candidate — and the executor fallback —
+            # would receive the byte-identical transcript and question, and the
+            # 2026-09-08 incident measured exactly that, 8/8 redacted across 3
+            # models plus the executor in 77s (see
+            # _is_redacted_thinking_error). Stop and hand the caller a
+            # diagnosis it can act on: rewording is the only fix, and only the
+            # calling agent can do it.
+            advisor_errs.append(f"{label}: {err}")
+            ctx.put_observable(
+                walk_key,
+                slug="stop:redacted",
+                detail=(
+                    f"{label} redacted-reasoning-only with reasoning off — stopping "
+                    f"the walk (same input would fail on every candidate)\n\n{err}"
+                ),
+            )
+            return (
+                None,
+                _redacted_diagnosis(role_label, attempts_made, advisor_errs),
+                None,
+                "",
+                spent,
+            )
         if _is_empty_content_error(err):
             # Transient — retried once already. Advance, but do NOT cool the
             # model off: it is alive, the response was just empty.
@@ -1350,9 +1505,18 @@ def _run_side_query_chain(
     # Chain exhausted, stopped or empty → executor terminal fallback (the same
     # empty-content retry applies: the executor model is the last hope, one
     # blip must not sink the whole call).
-    text, err, usage = _attempt(model=None, provider=None, effort=None, label="executor model")
+    text, err, usage, degraded = _attempt(
+        model=None, provider=None, effort=None, label="executor model"
+    )
     spent = _merge_usage(spent, usage)
     if err is None:
+        # A reasoning-off answer is degraded output and says so, whether or
+        # not a role note also applies.
+        degraded_note = (
+            "[reasoning off — retried after a redacted-reasoning-only response]\n\n"
+            if degraded
+            else ""
+        )
         # Any requested-but-unfulfilled role earns the note — whether the
         # chain died on this call (advisor_errs) or was already cooling off
         # before it started (empty chain). Only a call with no role at all
@@ -1368,8 +1532,22 @@ def _run_side_query_chain(
                     "returned no usable content" if advisor_errs and empty_only else "unavailable"
                 )
                 note = f"[{role_label} {reason} — answered on executor model]\n\n"
-            return text, None, None, note, spent
-        return text, None, None, "", spent
+            return text, None, None, note + degraded_note, spent
+        return text, None, None, degraded_note, spent
+
+    # The executor's own reasoning got scrubbed too (it can be reached with an
+    # empty/exhausted-by-other-means chain). Same verdict as in the walk: the
+    # input is the problem, so say so instead of reporting a route failure.
+    if _is_redacted_thinking_error(err):
+        return (
+            None,
+            _redacted_diagnosis(
+                role_label, attempts_made, [*advisor_errs, f"executor model: {err}"]
+            ),
+            None,
+            "",
+            spent,
+        )
 
     # Executor fallback ALSO failed. When we had advisor candidates, chain both
     # error sets so neither is discarded.
@@ -1575,6 +1753,24 @@ def _run_aside(
     }
 
 
+def _trace_notes(cfg: dict[str, str]) -> str:
+    """Parenthesised routing notes for a trace line, or "" when there are none.
+
+    Two independent degradations can apply to one answer: Layer A/the walk
+    substituted a different model (``_fallback``), and/or the answer came from
+    the reasoning-off retry (``_reasoning_off``). Both must be visible — the
+    caller has to know it is reading a degraded answer — so they compose into
+    one note rather than one shadowing the other.
+    """
+    notes = []
+    fallback = cfg.get("_fallback")
+    if fallback:
+        notes.append(f"fallback: {fallback} unavailable")
+    if cfg.get("_reasoning_off"):
+        notes.append("reasoning off")
+    return f" ({', '.join(notes)})" if notes else ""
+
+
 def _prefix_advisor(text: str, advisor: dict[str, str] | None) -> str:
     """Prefix the synthesis with a single trace line when escalation was used.
 
@@ -1585,10 +1781,7 @@ def _prefix_advisor(text: str, advisor: dict[str, str] | None) -> str:
     if advisor is None:
         return text
     spec = _format_advisor_spec(advisor)
-    fallback = advisor.get("_fallback")
-    if fallback:
-        return f"[advisor: {spec} (fallback: {fallback} unavailable)]\n\n{text}"
-    return f"[advisor: {spec}]\n\n{text}"
+    return f"[advisor: {spec}{_trace_notes(advisor)}]\n\n{text}"
 
 
 def _prefix_delegate(text: str, delegate: dict[str, str] | None) -> str:
@@ -1600,10 +1793,7 @@ def _prefix_delegate(text: str, delegate: dict[str, str] | None) -> str:
     if delegate is None:
         return text
     spec = _format_advisor_spec(delegate)
-    fallback = delegate.get("_fallback")
-    if fallback:
-        return f"[delegate: {spec} (fallback: {fallback} unavailable)]\n\n{text}"
-    return f"[delegate: {spec}]\n\n{text}"
+    return f"[delegate: {spec}{_trace_notes(delegate)}]\n\n{text}"
 
 
 def _prefix_for_role(

@@ -39,6 +39,12 @@ Escalate when the cost of being wrong outweighs the cost of asking. Don't escala
 
 When framing the question, instruct the advisor to be brief: *"Respond in under 100 words using enumerated steps, not explanations."* This cuts advisor output by ~40 % without changing call frequency.
 
+## If the call comes back "redacted reasoning only"
+
+The advisor reasoned and the provider scrubbed the trace, leaving nothing to return. This is deterministic on **your question combined with your session transcript**, not a flaky model — another model gets the byte-identical input and fails identically, so the chain stops after one reasoning-off retry instead of walking to other models. Only you can fix it: **rephrase**. Ask a narrower, less charged question, and avoid asking the advisor to reason *about* sensitive material quoted earlier in the session (credentials, access-control probing, anything that reads as an attack). Reword and call again — that usually succeeds on the first candidate.
+
+An answer prefixed `(reasoning off)` is degraded: the advisor produced it with reasoning disabled after a scrub, so weigh it as a quick opinion rather than a considered one.
+
 ## Delegating down (aside with delegate=true)
 
 The mirror of escalation. When you are running an expensive flagship model yourself, route context-heavy but low-judgement asides to the cheap delegate model with `delegate=true`: bulk file reads + synthesis, log summarisation, data extraction, mechanical reformatting. The principle is **judgement density, not size** — a huge log dump with a simple question is delegate work; a three-line diff with a subtle design question is not. Never set both `escalate` and `delegate` on one call. Configure with `/aside-delegate` (show / set / off).

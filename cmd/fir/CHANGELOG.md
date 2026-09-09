@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- **An `aside escalate=true` whose reasoning gets scrubbed no longer burns the whole advisor chain re-measuring a constant.** A redacted-thinking response (`no usable content (blocks: [thinking(th=0,sig=N>0)])`) means the model *did* reason and the provider scrubbed the trace; since all the output had gone into reasoning, nothing came back. It was classified as the transient empty-content blip, so one call fanned out into 8 attempts across 3 models plus the executor fallback in 77s — **all 8 redacted**, because `SideQueryStream` snapshots the entire session transcript and every candidate therefore receives byte-identical input. The trigger is `question × transcript` and it is deterministic on that pair: 31s later a differently-phrased question succeeded on the first candidate. `empty:redacted` is now split out of the transient class in `pkg/resources/builtin_extensions/aside.py` — the same-candidate retry runs with **reasoning off** (nothing left to scrub, so the model must emit text or a legible refusal), the walk does **not** advance to another model, and the answer is labelled `[advisor: … (reasoning off)]` so a degraded path is never silent. The prompt is untouched — only the effort changes — so the cached transcript prefix still hits. When the reasoning-off retry is redacted too, the surfaced error now states the diagnosis (every attempt returned redacted reasoning only; the input is likely tripping content policy; another model cannot help) and the only available remedy — the calling agent rephrasing or narrowing the question — while keeping the per-candidate block summaries as evidence. The other empty classes (`empty:noblocks`, `empty:text`, `empty:thinking`, `empty:toolcall`) keep the retry-then-advance behaviour. The `aside-advisor` skill now tells the calling agent what to do with that diagnosis.
+
 ## [1.8.1] - 2026-09-08
 
 ### Changed

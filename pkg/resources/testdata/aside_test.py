@@ -2138,12 +2138,13 @@ class TestChainWalk(unittest.TestCase):
         self.assertTrue(mod._model_unavailable("anthropic", "claude-fable-5"))
         self.assertTrue(mod._model_unavailable("anthropic", "claude-opus-4-8"))
 
-    def test_empty_redacted_never_cools_off_a_live_model(self):
-        # A redacted-thinking response is a real generation from a LIVE
-        # model. It is retried once on the same candidate, then the walk
+    def test_empty_thinking_never_cools_off_a_live_model(self):
+        # A thinking-block-but-no-text response is a real generation from a
+        # LIVE model. It is retried once on the same candidate, then the walk
         # advances — but nothing is ever cooled off, and the note says what
         # actually happened rather than asserting an unavailability that was
-        # never established.
+        # never established. (The th=0,sig>0 REDACTED variant is routed
+        # differently — see TestRedactedThinkingRouting.)
         mod = self._mod(
             advisor=[
                 {"provider": "anthropic", "model": "claude-fable-5"},
@@ -2162,7 +2163,7 @@ class TestChainWalk(unittest.TestCase):
             if model is not None:
                 raise RuntimeError(
                     "side-query: response had no usable content "
-                    "(blocks: [thinking(th=0,sig=940)]) (stop_reason=error)"
+                    "(blocks: [thinking(th=88,sig=940)]) (stop_reason=error)"
                 )
             return "executor answered"
 
@@ -2741,8 +2742,15 @@ class TestAsideStreamingCards(unittest.TestCase):
 # Empty-content retry class (transient upstream blip)
 # ---------------------------------------------------------------------------
 
-_EMPTY_ERR = "side-query: response had no usable content (blocks: [thinking(th=0,sig=940)])"
+# A NON-redacted empty response: the generic transient class (retry, advance,
+# executor fallback). Deliberately not the th=0,sig>0 shape — that one is
+# _REDACTED_ERR below and is routed differently, so using it here would
+# silently test the wrong path.
+_EMPTY_ERR = "side-query: response had no usable content (blocks: [text(len=0)])"
 _EMPTY_NOBLOCKS_ERR = "side-query: response had no usable content (blocks: [])"
+# The redacted-reasoning-only shape: the model reasoned (sig > 0) and the
+# provider scrubbed the trace (th == 0), leaving nothing to return.
+_REDACTED_ERR = "side-query: response had no usable content (blocks: [thinking(th=0,sig=940)])"
 
 
 class TestEmptyContentPredicate(unittest.TestCase):
@@ -2751,8 +2759,9 @@ class TestEmptyContentPredicate(unittest.TestCase):
     def setUp(self):
         self.mod = _load_aside()
 
-    def test_recognises_thinking_only_variant(self):
+    def test_recognises_block_summary_variants(self):
         self.assertTrue(self.mod._is_empty_content_error(_EMPTY_ERR))
+        self.assertTrue(self.mod._is_empty_content_error(_REDACTED_ERR))
 
     def test_recognises_no_blocks_variant(self):
         self.assertTrue(self.mod._is_empty_content_error(_EMPTY_NOBLOCKS_ERR))
@@ -3018,6 +3027,202 @@ class TestEmptyContentRetry(unittest.TestCase):
         with mock.patch.object(mod.time, "sleep") as sleep:
             mod._run_aside([], "q", ctx, escalate=True)
         sleep.assert_called_once_with(1.5)
+
+
+# ---------------------------------------------------------------------------
+# Redacted-reasoning-only routing (NOT the transient empty class)
+# ---------------------------------------------------------------------------
+
+
+class TestRedactedThinkingRouting(unittest.TestCase):
+    """``empty:redacted`` is deterministic on ``question x transcript``, so the
+    walk must not spend one advisor-rate call per candidate re-measuring a
+    constant (the 2026-09-08 incident burned 8 calls across 3 models plus the
+    executor, all redacted, in 77s). Instead: ONE reasoning-off retry on the
+    same candidate, then stop with a diagnosis."""
+
+    def _mod(self, advisor=None, delegate=None):
+        mod = _load_aside()
+        mod._ADVISOR = advisor
+        mod._DELEGATE = delegate
+        return mod
+
+    def _ctx(self, sq, available=None):
+        ctx = _blocking_ctx()
+        ctx.side_query = mock.MagicMock(side_effect=sq)
+        if available is not None:
+            ctx.available_models = mock.MagicMock(return_value=available)
+        return ctx
+
+    def test_predicate_splits_redacted_from_the_rest(self):
+        mod = self._mod()
+        self.assertTrue(mod._is_redacted_thinking_error(_REDACTED_ERR))
+        for other in (
+            _EMPTY_ERR,
+            _EMPTY_NOBLOCKS_ERR,
+            "side-query: response had no usable content (blocks: [thinking(th=88,sig=940)])",
+            "side-query: response had no usable content (blocks: [toolCall(len=0)])",
+            "advisor returned no content",
+            "not_found_error: model gone",
+            "",
+        ):
+            self.assertFalse(mod._is_redacted_thinking_error(other), other)
+
+    def test_redacted_retries_same_candidate_with_reasoning_off(self):
+        mod = self._mod(advisor=list(_RETRY_CHAIN))
+        calls = []
+
+        def sq(question, model=None, provider=None, effort=None):
+            calls.append((model, effort))
+            if len(calls) == 1:
+                raise RuntimeError(_REDACTED_ERR)
+            return "fable answered with reasoning off"
+
+        ctx = self._ctx(sq, available=_RETRY_AVAILABLE)
+        result = mod._run_aside([], "q", ctx, escalate=True)
+        self.assertFalse(result["is_error"])
+        text = result["content"][0]["text"]
+        self.assertIn("fable answered with reasoning off", text)
+        # Same candidate, same question — only the effort changed, so the
+        # cached transcript prefix still hits.
+        self.assertEqual(calls, [("claude-fable-5", None), ("claude-fable-5", "off")])
+        # The degraded answer is labelled, never silent.
+        self.assertTrue(
+            text.startswith("[advisor: anthropic/claude-fable-5 (reasoning off)]"), text
+        )
+
+    def test_reasoning_off_retry_happens_once_and_does_not_advance(self):
+        mod = self._mod(advisor=list(_RETRY_CHAIN))
+        calls = []
+
+        def sq(question, model=None, provider=None, effort=None):
+            calls.append((model, effort))
+            raise RuntimeError(_REDACTED_ERR)
+
+        ctx = self._ctx(sq, available=_RETRY_AVAILABLE)
+        result = mod._run_aside([], "q", ctx, escalate=True)
+        self.assertTrue(result["is_error"])
+        # Exactly two calls: the probe and its reasoning-off retry. No second
+        # candidate, no executor fallback — they would receive byte-identical
+        # input.
+        self.assertEqual(calls, [("claude-fable-5", None), ("claude-fable-5", "off")])
+        # A live model that got scrubbed is not a dead model.
+        self.assertFalse(mod._model_unavailable("anthropic", "claude-fable-5"))
+
+    def test_exhausted_error_carries_the_diagnosis_and_the_evidence(self):
+        mod = self._mod(advisor=list(_RETRY_CHAIN))
+
+        def sq(question, model=None, provider=None, effort=None):
+            raise RuntimeError(_REDACTED_ERR)
+
+        ctx = self._ctx(sq, available=_RETRY_AVAILABLE)
+        result = mod._run_aside([], "q", ctx, escalate=True)
+        self.assertTrue(result["is_error"])
+        text = result["content"][0]["text"]
+        # What happened, how many times.
+        self.assertIn("2 attempt(s)", text)
+        self.assertIn("REDACTED REASONING ONLY", text)
+        self.assertIn("reasoning disabled", text)
+        # Why another model cannot help.
+        self.assertIn("content policy", text)
+        self.assertIn("advancing to another model cannot help", text)
+        # What the CALLING agent should do about it.
+        self.assertIn("rephrase the question", text)
+        # The per-candidate block summaries are kept as evidence.
+        self.assertIn("thinking(th=0,sig=940)", text)
+        self.assertIn("anthropic/claude-fable-5", text)
+
+    def test_stop_and_retry_are_visible_on_a_card(self):
+        mod = self._mod(advisor=list(_RETRY_CHAIN))
+
+        def sq(question, model=None, provider=None, effort=None):
+            raise RuntimeError(_REDACTED_ERR)
+
+        ctx = self._ctx(sq, available=_RETRY_AVAILABLE)
+        mod._run_aside([], "q", ctx, escalate=True)
+        slugs = [c.kwargs.get("slug") for c in ctx.put_observable.call_args_list]
+        self.assertIn("retry:noreason", slugs)
+        self.assertIn("stop:redacted", slugs)
+        self.assertNotIn("advance:empty", slugs)
+
+    def test_labels_compose_with_the_fallback_note(self):
+        # First candidate empties out (generic class → advance), second one
+        # is redacted then answers with reasoning off: BOTH degradations are
+        # visible in one trace line.
+        mod = self._mod(advisor=list(_RETRY_CHAIN))
+        calls = []
+
+        def sq(question, model=None, provider=None, effort=None):
+            calls.append((model, effort))
+            if model == "claude-fable-5":
+                raise RuntimeError(_EMPTY_ERR)
+            if effort != "off":
+                raise RuntimeError(_REDACTED_ERR)
+            return "opus answered with reasoning off"
+
+        ctx = self._ctx(sq, available=_RETRY_AVAILABLE)
+        result = mod._run_aside([], "q", ctx, escalate=True)
+        self.assertFalse(result["is_error"])
+        text = result["content"][0]["text"]
+        self.assertTrue(
+            text.startswith(
+                "[advisor: anthropic/claude-opus-4-8 "
+                "(fallback: claude-fable-5 unavailable, reasoning off)]"
+            ),
+            text,
+        )
+
+    def test_executor_redacted_also_surfaces_the_diagnosis(self):
+        # No advisor at all: the executor's own reasoning got scrubbed. Same
+        # verdict — it is the input, not the route.
+        mod = self._mod()
+        calls = []
+
+        def sq(question, model=None, provider=None, effort=None):
+            calls.append((model, effort))
+            raise RuntimeError(_REDACTED_ERR)
+
+        ctx = self._ctx(sq)
+        result = mod._run_aside([], "q", ctx)
+        self.assertTrue(result["is_error"])
+        self.assertIn("rephrase the question", result["content"][0]["text"])
+        self.assertEqual(calls, [(None, None), (None, "off")])
+
+    def test_executor_reasoning_off_answer_is_labelled(self):
+        mod = self._mod()
+        calls = []
+
+        def sq(question, model=None, provider=None, effort=None):
+            calls.append((model, effort))
+            if effort != "off":
+                raise RuntimeError(_REDACTED_ERR)
+            return "executor answered with reasoning off"
+
+        ctx = self._ctx(sq)
+        result = mod._run_aside([], "q", ctx)
+        self.assertFalse(result["is_error"])
+        text = result["content"][0]["text"]
+        self.assertTrue(text.startswith("[reasoning off"), text)
+        self.assertIn("executor answered with reasoning off", text)
+
+    def test_delegate_answer_is_labelled_too(self):
+        # The delegate trace line composes the same note — a degraded answer
+        # is degraded whichever role produced it.
+        mod = self._mod(delegate=[{"provider": "anthropic", "model": "claude-haiku-4-5"}])
+        available = [{"provider": "anthropic", "id": "claude-haiku-4-5", "name": "Haiku"}]
+
+        def sq(question, model=None, provider=None, effort=None):
+            if effort != "off":
+                raise RuntimeError(_REDACTED_ERR)
+            return "haiku answered with reasoning off"
+
+        ctx = self._ctx(sq, available=available)
+        result = mod._run_aside([], "q", ctx, delegate=True)
+        self.assertFalse(result["is_error"])
+        text = result["content"][0]["text"]
+        self.assertTrue(
+            text.startswith("[delegate: anthropic/claude-haiku-4-5 (reasoning off)]"), text
+        )
 
 
 # ---------------------------------------------------------------------------
