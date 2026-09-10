@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-09-11
+
+### Changed
+- **Model catalog regenerated** at release time: routine upstream refresh of model ids, pricing and limits.
+
 ### Added
 - **MCP `auth.redirect_uri` pins the OAuth loopback redirect URI**, for authorization servers that require an exactly pre-registered value and ignore the loopback port variance of RFC 8252 §7.3 (Okta). fir otherwise binds `127.0.0.1:0` and derives the redirect URI from the ephemeral port, which such a server rejects with `invalid_redirect_uri`. The configured URI is used verbatim in registration, authorization and the code grant — `localhost` and `127.0.0.1` are not interchangeable — and the callback server binds its host, port and path. Validation requires `http` on a loopback host with an explicit non-zero port and a non-empty path, no query or fragment, and rejects the field in `bearer`/`none` mode where the OAuth chain never runs; a busy port reports the configured `redirect_uri` instead of a bare "address already in use".
 
