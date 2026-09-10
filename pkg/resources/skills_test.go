@@ -445,3 +445,54 @@ func TestDisplayOrigin(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadSkills_MissingRootIsSilent(t *testing.T) {
+	cwd := t.TempDir()
+
+	res := LoadSkills(LoadSkillsOptions{
+		Cwd:        cwd,
+		SkillPaths: []string{"skills"}, // relative, resolves under cwd, absent
+	})
+
+	for _, d := range res.Diagnostics {
+		t.Errorf("expected no diagnostic for a missing skill root, got %s: %s (%s)",
+			d.Type, d.Message, d.Path)
+	}
+}
+
+func TestLoadSkills_UnreadableRootWarns(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses directory permissions")
+	}
+	cwd := t.TempDir()
+
+	blocked := filepath.Join(cwd, "blocked")
+	if err := os.Mkdir(blocked, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(blocked, "skills"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(blocked, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(blocked, 0o755) })
+
+	res := LoadSkills(LoadSkillsOptions{
+		Cwd:        cwd,
+		SkillPaths: []string{filepath.Join(blocked, "skills")},
+	})
+
+	var found bool
+	for _, d := range res.Diagnostics {
+		if d.Type == "warning" && strings.Contains(d.Message, "unreadable") {
+			found = true
+			if strings.Contains(d.Message, blocked) {
+				t.Errorf("message should not repeat the path (it is reported separately): %q", d.Message)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("expected an 'unreadable' warning, got %+v", res.Diagnostics)
+	}
+}

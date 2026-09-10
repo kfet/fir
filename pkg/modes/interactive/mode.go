@@ -514,7 +514,8 @@ func (m *InteractiveMode) Init() error {
 	return nil
 }
 
-// showLoadedResources displays skill diagnostics (collisions, parse errors) in the chat area.
+// showLoadedResources displays skill diagnostics (parse errors, load warnings)
+// in the chat area.
 func (m *InteractiveMode) showLoadedResources() {
 	if m.session == nil {
 		return
@@ -536,7 +537,7 @@ func (m *InteractiveMode) showLoadedResources() {
 	}
 
 	if len(filtered) > 0 {
-		lines := formatDiagnostics(t, "Skill conflicts", filtered)
+		lines := formatDiagnostics(t, "Skill issues", filtered)
 		m.messageContainer.AddChild(tuicomp.NewText(lines, 0, 0, nil))
 		m.messageContainer.AddChild(tuicomp.NewSpacer(1))
 	}

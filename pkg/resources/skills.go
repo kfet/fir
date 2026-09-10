@@ -3,6 +3,7 @@
 package resources
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -621,9 +622,22 @@ func addSkillsFromRoot(add func(LoadSkillsResult), cwd string, r SkillRoot) {
 
 	info, err := os.Stat(resolvedPath)
 	if err != nil {
+		// A configured skill root or skill file that simply isn't there is not a
+		// problem: relative paths resolve against the cwd, so "skills" is
+		// expected to be absent in any session started outside a project that
+		// uses it. Anything else (permissions, I/O) is a real fault.
+		if os.IsNotExist(err) {
+			return
+		}
+		// Report the bare reason; the path is rendered separately.
+		reason := err
+		var pathErr *fs.PathError
+		if errors.As(err, &pathErr) {
+			reason = pathErr.Err
+		}
 		add(LoadSkillsResult{Diagnostics: []ResourceDiagnostic{{
 			Type:    "warning",
-			Message: "skill path does not exist",
+			Message: fmt.Sprintf("skill path unreadable: %v", reason),
 			Path:    resolvedPath,
 		}}})
 		return
