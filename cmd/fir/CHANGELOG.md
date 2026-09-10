@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [1.8.3] - 2026-09-10
+
+### Changed
+- **Model catalog regenerated** at release time: routine upstream refresh of model ids, pricing and limits.
+
 ### Fixed
 - **A configured skill root that does not exist is no longer reported as a problem.** Relative entries in `settings.json`'s `skills` array resolve against the *session's* working directory (`addSkillsFromRoot` does `filepath.Join(cwd, path)`), so the common `"skills": ["skills"]` convention — pick up a project-local `skills/` dir — is by design absent in every session started outside such a project. Each of those sessions opened with `[Skill conflicts] … skill path does not exist`, which was wrong twice over: a missing per-project root is the expected case rather than a fault, and it is in no sense a *conflict*. `os.IsNotExist` now returns silently. A stat failure that is **not** absence (permissions, I/O) still warns, as `skill path unreadable: <err>`, since that one does mean a root the user asked for is being skipped for a reason they cannot see. The diagnostic block is now headed `[Skill issues]`: the collision classes (`duplicate-name`, `override-conflict`) are deliberately filtered out before it renders, so the only things it ever displayed were parse errors and load warnings.
 
