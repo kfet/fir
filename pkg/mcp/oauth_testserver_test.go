@@ -32,6 +32,11 @@ type asOptions struct {
 	// preRegistered, when non-empty, is the only client_id accepted at the
 	// authorization and token endpoints.
 	preRegistered string
+	// preRegisteredRedirect, when non-empty, is the exact redirect URI bound
+	// to preRegistered. Anything else is rejected at the authorization
+	// endpoint — the Okta-style server that ignores RFC 8252 §7.3 port
+	// variance and demands a byte-for-byte match.
+	preRegisteredRedirect string
 	// accessTokenTTL is the expires_in value handed out. Zero means 3600.
 	accessTokenTTL int
 	// rotateRefresh issues a new refresh token on every refresh.
@@ -62,6 +67,8 @@ type fakeAuthServer struct {
 	issued        int
 	// lastResource records the resource parameter of the last token request.
 	lastResource string
+	// lastRedirect records the redirect_uri of the last successful code grant.
+	lastRedirect string
 }
 
 type pendingCode struct {
@@ -82,8 +89,9 @@ func newFakeAuthServer(t *testing.T, opts asOptions) *fakeAuthServer {
 	}
 	if opts.preRegistered != "" {
 		// A pre-registered client accepts any loopback redirect URI, as real
-		// authorization servers do for native apps (RFC 8252 §7.3).
-		as.clients[opts.preRegistered] = ""
+		// authorization servers do for native apps (RFC 8252 §7.3) — unless
+		// the test pins one, which handleAuthorize then matches exactly.
+		as.clients[opts.preRegistered] = opts.preRegisteredRedirect
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/.well-known/oauth-authorization-server", as.handleMetadata)
@@ -238,6 +246,9 @@ func (as *fakeAuthServer) handleCodeGrant(w http.ResponseWriter, r *http.Request
 		})
 		return
 	}
+	as.mu.Lock()
+	as.lastRedirect = pc.redirectURI
+	as.mu.Unlock()
 	as.issueTokens(w)
 }
 
@@ -320,6 +331,13 @@ func (as *fakeAuthServer) refreshLive(tok string) bool {
 	as.mu.Lock()
 	defer as.mu.Unlock()
 	return as.refresh[tok]
+}
+
+// lastRedirectURI returns the redirect_uri of the last successful code grant.
+func (as *fakeAuthServer) lastRedirectURI() string {
+	as.mu.Lock()
+	defer as.mu.Unlock()
+	return as.lastRedirect
 }
 
 // resourceParam returns the resource indicator of the last token request.

@@ -250,6 +250,7 @@ func (sa *serverAuth) matches(cfg ServerConfig) bool {
 		want.Token == sa.cfg.Token &&
 		want.ClientID == sa.cfg.ClientID &&
 		want.ClientSecret == sa.cfg.ClientSecret &&
+		want.RedirectURI == sa.cfg.RedirectURI &&
 		slices.Equal(want.Scopes, sa.cfg.Scopes) &&
 		slices.Equal(want.AuthorizationServers, sa.cfg.AuthorizationServers)
 }
@@ -646,18 +647,45 @@ func (sa *serverAuth) Login(ctx context.Context, ui pinoauth.LoginCallbacks) err
 	return nil
 }
 
+// callbackTarget resolves where the loopback callback server listens and what
+// redirect URI the authorization server is told about. Without a pinned
+// auth.redirect_uri it is an ephemeral 127.0.0.1 port and the caller fills the
+// URI in from the resolved address; with one, the configured URI is used
+// verbatim — an authorization server that does not honour RFC 8252 §7.3 port
+// variance compares it literally — and the listener binds its host and port.
+func (sa *serverAuth) callbackTarget() (redirectURI, route, listenAddr string, err error) {
+	if sa.cfg.RedirectURI == "" {
+		return "", callbackRoute, "127.0.0.1:0", nil
+	}
+	u, err := validateRedirectURI(sa.cfg.RedirectURI)
+	if err != nil {
+		return "", "", "", fmt.Errorf("auth.redirect_uri: %w", err)
+	}
+	return sa.cfg.RedirectURI, u.Path, u.Host, nil
+}
+
 func (sa *serverAuth) loginLocked(ctx context.Context, ui pinoauth.LoginCallbacks) error {
 	// Bind the loopback listener FIRST: the redirect URI must be known before
 	// dynamic client registration, which registers it verbatim.
 	state := pinoauth.GenerateState()
 	cbCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	srv, resultCh, addr, err := pinoauth.StartCallbackServer(cbCtx, callbackRoute, "127.0.0.1:0", state)
+	redirectURI, route, listenAddr, err := sa.callbackTarget()
 	if err != nil {
+		return err
+	}
+	srv, resultCh, addr, err := pinoauth.StartCallbackServer(cbCtx, route, listenAddr, state)
+	if err != nil {
+		if redirectURI != "" {
+			return fmt.Errorf("start loopback callback server on %s (from auth.redirect_uri %q): %w; "+
+				"free that port or register a different redirect URI", listenAddr, redirectURI, err)
+		}
 		return fmt.Errorf("start loopback callback server: %w", err)
 	}
 	defer srv.Close() //nolint:errcheck // best-effort; cbCtx cancel also closes it
-	redirectURI := "http://" + addr + callbackRoute
+	if redirectURI == "" {
+		redirectURI = "http://" + addr + route
+	}
 
 	progress(ui, fmt.Sprintf("Discovering OAuth configuration for %s…", sa.resource))
 	prm, err := discoverResourceMetadata(ctx, sa.hc, sa.resource, sa.challenge)

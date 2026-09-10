@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -86,6 +87,18 @@ type AuthConfig struct {
 	// Only meaningful when the resolved mode runs the OAuth chain, i.e.
 	// AuthModeAuto or AuthModeOAuth.
 	AuthorizationServers []string `json:"authorization_servers,omitempty"`
+	// RedirectURI pins the OAuth loopback redirect URI, for authorization
+	// servers that require an exactly pre-registered value and do not honour
+	// the loopback port variance of RFC 8252 §7.3 (Okta, notably). When empty
+	// (the default) fir binds an ephemeral loopback port and derives the
+	// redirect URI from it.
+	//
+	// The value is used verbatim, so it must match what the authorization
+	// server has registered character for character — including "localhost"
+	// versus "127.0.0.1" and the exact path. fir binds the host and port from
+	// this URI, so the port must be free when you log in. Deployments that
+	// need this normally also issue a pre-registered ClientID; set both.
+	RedirectURI string `json:"redirect_uri,omitempty"`
 }
 
 // ResolveMode returns the effective AuthMode for a config, applying the
@@ -129,7 +142,53 @@ func (a *AuthConfig) Validate() error {
 			}
 		}
 	}
+	if a.RedirectURI != "" {
+		// Same reasoning as authorization_servers: the loopback callback
+		// server only ever runs inside the OAuth chain, so pinning its URI in
+		// bearer or none mode is dead config.
+		if mode == AuthModeBearer || mode == AuthModeNone {
+			return fmt.Errorf("auth.redirect_uri is not used in mode %q; remove it or use mode %q", mode, AuthModeOAuth)
+		}
+		if _, err := validateRedirectURI(a.RedirectURI); err != nil {
+			return fmt.Errorf("auth.redirect_uri: %w", err)
+		}
+	}
 	return nil
+}
+
+// validateRedirectURI checks a pinned loopback redirect URI, returning the
+// parsed form so callers need not parse it twice. RFC 8252 §7.3 confines a
+// native-app redirect to plain http on a loopback interface; the callback
+// server fir starts is a plain HTTP listener, so https could never complete.
+// The port must be explicit and non-zero — pinning a URI whose port fir would
+// choose at random defeats the purpose — and the path must be non-empty
+// because it is registered as the callback route. Query and fragment
+// components are rejected: the authorization server compares the URI
+// literally, and the callback route cannot carry them.
+func validateRedirectURI(raw string) (*url.URL, error) {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return nil, fmt.Errorf("parse %q: %w", raw, err)
+	}
+	if u.Scheme != "http" {
+		return nil, fmt.Errorf("%q must use http (the loopback callback server is plain HTTP; RFC 8252 §7.3)", raw)
+	}
+	if !isLoopbackHost(u.Hostname()) {
+		return nil, fmt.Errorf("%q must point at a loopback host (127.0.0.1, ::1 or localhost)", raw)
+	}
+	port := u.Port()
+	// url.Parse already guarantees the port is all digits, and Atoi("") is 0,
+	// so this one check covers a missing, zero and out-of-range port alike.
+	if n, _ := strconv.Atoi(port); n < 1 || n > 65535 {
+		return nil, fmt.Errorf("%q must specify an explicit port in 1-65535", raw)
+	}
+	if u.Path == "" {
+		return nil, fmt.Errorf("%q must include a path (for example %q)", raw, raw+callbackRoute)
+	}
+	if u.RawQuery != "" || u.Fragment != "" {
+		return nil, fmt.Errorf("%q must not carry a query or fragment", raw)
+	}
+	return u, nil
 }
 
 // validateIssuerURL checks one forced authorization-server issuer. The URL

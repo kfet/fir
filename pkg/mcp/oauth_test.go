@@ -3,6 +3,8 @@ package mcp
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -191,6 +193,187 @@ func TestMCPOAuth_NoDCRAndNoClientIDIsActionable(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "does not support dynamic client registration")
 	require.Contains(t, err.Error(), "auth.client_id")
+}
+
+// --- Pinned loopback redirect URI ------------------------------------------
+
+// freeLoopbackPort reserves and immediately releases an ephemeral port,
+// returning a port number that is free right now. That is exactly the race a
+// pinned redirect URI has in production too — there is no way to pin a port
+// and also hold it — and it is what makes the collision error message below
+// worth having.
+func freeLoopbackPort(t *testing.T) int {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	port := ln.Addr().(*net.TCPAddr).Port
+	require.NoError(t, ln.Close())
+	return port
+}
+
+func TestMCPOAuth_PinnedRedirectURI(t *testing.T) {
+	// The Okta shape: no dynamic registration, a pre-registered client_id and
+	// a redirect URI that must match byte for byte, port included.
+	redirectURI := fmt.Sprintf("http://127.0.0.1:%d/fir/callback", freeLoopbackPort(t))
+	as := newFakeAuthServer(t, asOptions{
+		noDCR:                 true,
+		preRegistered:         "okta-client",
+		preRegisteredRedirect: redirectURI,
+	})
+	srv := newFakeMCPServer(t, as, mcpOptions{})
+
+	mgr, _ := newTestManager(t, srv.config(&AuthConfig{
+		ClientID:    "okta-client",
+		RedirectURI: redirectURI,
+	}))
+
+	require.NoError(t, loginAndConnect(t, mgr, browserCallbacks(t, nil)))
+	requireToolsWork(t, mgr)
+	registrations, _, issued := as.counters()
+	require.Zero(t, registrations)
+	require.Equal(t, 1, issued)
+	// The callback route came from the configured path, not the default one:
+	// the authorization server only ever redirected to redirectURI, and the
+	// code grant re-checks the URI, so a token proves the whole chain used it.
+	require.Equal(t, redirectURI, as.lastRedirectURI())
+}
+
+func TestMCPOAuth_PinnedRedirectURIRejectedByStrictServer(t *testing.T) {
+	// Same strict server, but fir is left on its ephemeral-port default: the
+	// authorization server refuses the mismatched redirect URI. This is the
+	// failure the option exists to fix.
+	as := newFakeAuthServer(t, asOptions{
+		noDCR:                 true,
+		preRegistered:         "okta-client",
+		preRegisteredRedirect: "http://127.0.0.1:53535/fir/callback",
+	})
+	srv := newFakeMCPServer(t, as, mcpOptions{})
+
+	mgr, _ := newTestManager(t, srv.config(&AuthConfig{ClientID: "okta-client"}))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	err := mgr.LoginServer(ctx, "srv", pinoauth.LoginCallbacks{
+		OnAuth: func(info pinoauth.AuthInfo) {
+			resp, err := http.Get(info.URL) //nolint:gosec,noctx // loopback test server
+			if err != nil {
+				return
+			}
+			defer resp.Body.Close() //nolint:errcheck
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Errorf("strict server accepted the ephemeral redirect URI: HTTP %d", resp.StatusCode)
+			}
+			cancel()
+		},
+	})
+	require.Error(t, err)
+}
+
+func TestMCPOAuth_PinnedRedirectURIPortInUseIsActionable(t *testing.T) {
+	port := freeLoopbackPort(t)
+	redirectURI := fmt.Sprintf("http://127.0.0.1:%d/fir/callback", port)
+	// Squat on the port so the callback server cannot bind it.
+	squatter, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = squatter.Close() })
+
+	as := newFakeAuthServer(t, asOptions{noDCR: true, preRegistered: "okta-client"})
+	srv := newFakeMCPServer(t, as, mcpOptions{})
+	mgr, _ := newTestManager(t, srv.config(&AuthConfig{
+		ClientID: "okta-client", RedirectURI: redirectURI,
+	}))
+
+	err = loginAndConnect(t, mgr, browserCallbacks(t, nil))
+	require.Error(t, err)
+	// A bare "address already in use" says nothing about which knob to turn.
+	require.ErrorContains(t, err, "auth.redirect_uri")
+	require.ErrorContains(t, err, redirectURI)
+}
+
+func TestAuthConfigCallbackTarget(t *testing.T) {
+	target := func(uri string) (string, string, string, error) {
+		sa := &serverAuth{cfg: AuthConfig{RedirectURI: uri}}
+		return sa.callbackTarget()
+	}
+
+	// Unset: today's behaviour, an ephemeral loopback port with the default
+	// route. The redirect URI is filled in from the resolved address later.
+	redirect, route, addr, err := target("")
+	require.NoError(t, err)
+	require.Empty(t, redirect)
+	require.Equal(t, callbackRoute, route)
+	require.Equal(t, "127.0.0.1:0", addr)
+
+	// Pinned: used verbatim, with the listener bound to its host and port.
+	// "localhost" is never rewritten to 127.0.0.1 — the authorization server
+	// compares the string, so the two are not interchangeable.
+	redirect, route, addr, err = target("http://localhost:8765/fir/callback")
+	require.NoError(t, err)
+	require.Equal(t, "http://localhost:8765/fir/callback", redirect)
+	require.Equal(t, "/fir/callback", route)
+	require.Equal(t, "localhost:8765", addr)
+
+	// A bracketed IPv6 literal survives as a listenable host:port.
+	_, _, addr, err = target("http://[::1]:8765/cb")
+	require.NoError(t, err)
+	require.Equal(t, "[::1]:8765", addr)
+
+	// newServerAuth validates the same field, so in production this branch is
+	// belt and braces — do not drop the validation call because of that: it is
+	// what turns a malformed URI into an error instead of a bad listen addr.
+	_, _, _, err = target("http://example.com:8765/cb")
+	require.ErrorContains(t, err, "auth.redirect_uri")
+}
+
+func TestAuthConfigValidateRedirectURI(t *testing.T) {
+	ok := func(uri string) error {
+		return (&AuthConfig{RedirectURI: uri}).Validate()
+	}
+	require.NoError(t, ok("http://127.0.0.1:8765/fir/callback"))
+	require.NoError(t, ok("http://localhost:8765/callback"))
+	require.NoError(t, ok("http://[::1]:8765/"), "a bare / path is a valid route")
+	require.NoError(t, (&AuthConfig{
+		Mode: AuthModeOAuth, ClientID: "c", RedirectURI: "http://127.0.0.1:8765/cb",
+	}).Validate())
+
+	require.ErrorContains(t, ok("https://127.0.0.1:8765/cb"), "must use http")
+	require.ErrorContains(t, ok("http://example.com:8765/cb"), "loopback host")
+	require.ErrorContains(t, ok("http://10.0.0.1:8765/cb"), "loopback host")
+	require.ErrorContains(t, ok("http://127.0.0.1/cb"), "explicit port in 1-65535")
+	require.ErrorContains(t, ok("http://127.0.0.1:0/cb"), "explicit port in 1-65535")
+	require.ErrorContains(t, ok("http://127.0.0.1:99999/cb"), "explicit port in 1-65535")
+	require.ErrorContains(t, ok("http://127.0.0.1:8765"), "must include a path")
+	require.ErrorContains(t, ok("http://127.0.0.1:8765/cb?x=1"), "query or fragment")
+	require.ErrorContains(t, ok("http://127.0.0.1:8765/cb#f"), "query or fragment")
+	require.ErrorContains(t, ok("://nope"), "auth.redirect_uri")
+	require.ErrorContains(t, ok("127.0.0.1:8765/cb"), "auth.redirect_uri")
+
+	// Dead config where the OAuth chain never runs, exactly like
+	// authorization_servers — including the inferred bearer mode.
+	for _, a := range []*AuthConfig{
+		{Mode: AuthModeBearer, Token: "t", RedirectURI: "http://127.0.0.1:8765/cb"},
+		{Token: "t", RedirectURI: "http://127.0.0.1:8765/cb"},
+		{Mode: AuthModeNone, RedirectURI: "http://127.0.0.1:8765/cb"},
+	} {
+		require.ErrorContains(t, a.Validate(), "auth.redirect_uri is not used in mode")
+	}
+
+	// The field participates in cached-credential invalidation, and
+	// newServerAuth refuses an invalid value before any browser trip.
+	cfg := ServerConfig{Transport: "streamable", URL: "https://mcp.example.com/mcp",
+		Auth: &AuthConfig{RedirectURI: "http://127.0.0.1:8765/cb"}}
+	sa, err := newServerAuth("srv", cfg, credentialStore{})
+	require.NoError(t, err)
+	require.True(t, sa.matches(cfg))
+	changed := cfg
+	changed.Auth = &AuthConfig{RedirectURI: "http://127.0.0.1:8766/cb"}
+	require.False(t, sa.matches(changed))
+
+	bad := cfg
+	bad.Auth = &AuthConfig{RedirectURI: "http://evil.example:8765/cb"}
+	_, err = newServerAuth("srv", bad, credentialStore{})
+	require.ErrorContains(t, err, `server "srv"`)
+	require.ErrorContains(t, err, "loopback host")
 }
 
 // --- Refresh ----------------------------------------------------------------

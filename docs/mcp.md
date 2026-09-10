@@ -168,11 +168,17 @@ Every field is an escape hatch. Omit the whole object unless you need one.
 | `client_secret` | string | Accompanies `client_id` for confidential clients. Native apps normally have none. Supports `${VAR}` expansion |
 | `scopes` | array of strings | Overrides the requested scope. Otherwise fir uses the challenge's `scope`, then the protected resource's `scopes_supported`, and otherwise omits the `scope` parameter entirely |
 | `authorization_servers` | array of strings | Forces the OAuth issuer(s), for servers whose `/.well-known/oauth-protected-resource` document is absent, wrong or unreachable. **Replaces** the advertised `authorization_servers` list — it is not merged with it. Tried in order; the first issuer publishing usable RFC 8414 / OpenID Connect metadata wins. Each entry must be an `https` URL (plain `http` only for loopback) with no query or fragment. Only valid where the OAuth chain actually runs — the default mode or `"oauth"`; it is rejected with `"bearer"` and `"none"` |
+| `redirect_uri` | string | Pins the OAuth loopback redirect URI, for authorization servers that require an exactly pre-registered value and ignore the loopback port variance of RFC 8252 §7.3 (Okta). Used **verbatim**, so it must match the registered value character for character — `localhost` and `127.0.0.1` are not interchangeable. Must be `http` on a loopback host, with an explicit non-zero port and a path, and no query or fragment. fir binds that host and port, so the port must be free at login time. Only valid where the OAuth chain runs; rejected with `"bearer"` and `"none"` |
 
 When the metadata is wrong about the issuer it is often wrong about `scopes_supported` too, so
 `authorization_servers` is usually paired with `scopes`. fir still *attempts* the
 protected-resource fetch when issuers are forced — it is the only source of advertised scopes —
 but a failure is no longer fatal.
+
+`redirect_uri` is normally paired with `client_id`: a deployment strict enough to demand a fixed
+redirect URI issues you a client rather than allowing dynamic registration. Without it fir binds
+an ephemeral loopback port, which such a server rejects with `invalid_redirect_uri` — register
+`http://127.0.0.1:8765/oauth/callback` (or whatever port you pick) in the app and repeat it here.
 
 Changing `authorization_servers` invalidates any stored token for that server: a credential
 minted by an issuer no longer on the list is never reused, even across a restart. The stored row
@@ -195,6 +201,16 @@ is left in place, so putting the old issuer back recovers the credential without
       "transport": "streamable",
       "url": "https://c.example/mcp",
       "auth": {"mode": "none"}
+    },
+    "okta": {
+      "transport": "streamable",
+      "url": "https://e.example/mcp",
+      "auth": {
+        "client_id": "0oa1b2c3d4EXAMPLE",
+        "redirect_uri": "http://localhost:8765/oauth/callback",
+        "authorization_servers": ["https://dev-12345.okta.com/oauth2/default"],
+        "scopes": ["mcp:read"]
+      }
     },
     "bad-metadata": {
       "transport": "streamable",
