@@ -201,6 +201,138 @@ func compareCatalogs(fresh []modelSpec, overlayPath, trigger string) *watchResul
 	return res
 }
 
+// --- release changelog summary ---
+
+// enumeratedIDCap bounds how many ids a summary names before falling back to
+// a count. The summary is read on a phone during a release; past a handful of
+// ids it stops being a sentence and becomes a dump, which is exactly the
+// canned-line failure it replaces.
+const enumeratedIDCap = 8
+
+// catalogDiffEmpty is the summary for a refresh that changed nothing. Said
+// explicitly so the release can drop the changelog line altogether rather than
+// guess from an empty string.
+const catalogDiffEmpty = "No model-catalog changes — omit the catalog line from the CHANGELOG."
+
+// splitByTier partitions "provider/id" keys into first-party and aggregator
+// models. Aggregators list everything that exists, so their churn is a count;
+// a first-party id moving is news and gets named.
+func splitByTier(keys []string) (firstParty, aggregator []string) {
+	for _, k := range keys {
+		provider, _, _ := strings.Cut(k, "/")
+		if aggregatorProviders[provider] {
+			aggregator = append(aggregator, k)
+		} else {
+			firstParty = append(firstParty, k)
+		}
+	}
+	return firstParty, aggregator
+}
+
+// enumerate renders ids as a capped, backticked list.
+func enumerate(keys []string) string {
+	shown := keys
+	var suffix string
+	if len(shown) > enumeratedIDCap {
+		shown = shown[:enumeratedIDCap]
+		suffix = fmt.Sprintf(" +%d more", len(keys)-enumeratedIDCap)
+	}
+	return "`" + strings.Join(shown, "`, `") + "`" + suffix
+}
+
+// tierClause renders one side of the diff (added or removed): first-party ids
+// by name, aggregator churn as a count.
+func tierClause(verb string, keys []string) string {
+	firstParty, aggregator := splitByTier(keys)
+	switch {
+	case len(firstParty) == 0 && len(aggregator) == 0:
+		return ""
+	case len(firstParty) == 0:
+		return fmt.Sprintf("%s %d aggregator model(s)", verb, len(aggregator))
+	case len(aggregator) == 0:
+		return fmt.Sprintf("%s %s", verb, enumerate(firstParty))
+	default:
+		return fmt.Sprintf("%s %s (+%d on aggregators)", verb, enumerate(firstParty), len(aggregator))
+	}
+}
+
+// failedSources reduces main's "source: error" strings to bare source names —
+// the changelog is not the place for an HTTP error.
+func failedSources(failed []string) []string {
+	out := make([]string, 0, len(failed))
+	for _, f := range failed {
+		name, _, _ := strings.Cut(f, ":")
+		out = append(out, strings.TrimSpace(name))
+	}
+	sort.Strings(out)
+	return out
+}
+
+// summarizeCatalogDiff renders a catalog diff as the one-line release note a
+// human actually reads — which first-party models came and went, how much
+// aggregator and pricing churn rode along. Reports whether anything changed at
+// all, so the caller never has to recognise the no-change wording.
+//
+// When an upstream source failed, everything that source lists looks removed.
+// The removals are therefore dropped rather than caveated: a ready-to-paste
+// line that must not be pasted is a trap. Additions and churn are still true
+// of what was fetched, so they stay.
+func summarizeCatalogDiff(res *watchResult, failed []string) (string, bool) {
+	var clauses []string
+	if c := tierClause("added", res.New); c != "" {
+		clauses = append(clauses, c)
+	}
+	if len(failed) == 0 {
+		if c := tierClause("removed", res.Removed); c != "" {
+			clauses = append(clauses, c)
+		}
+	}
+	if res.Changed > 0 {
+		clauses = append(clauses, fmt.Sprintf("%d model(s) with changed pricing/limits", res.Changed))
+	}
+	// A run with nothing to report is empty even when a source died: the
+	// caveat qualifies real news, it is not news itself.
+	if len(clauses) == 0 {
+		return catalogDiffEmpty, false
+	}
+	if len(failed) > 0 {
+		clauses = append(clauses, fmt.Sprintf("removals not reported (%s fetch failed)",
+			strings.Join(failedSources(failed), ", ")))
+	}
+	return "**Model catalog regenerated**: " + strings.Join(clauses, "; ") + ".", true
+}
+
+// writeChangelog writes the summary, as a ready-to-paste markdown bullet when
+// there is in fact something to paste.
+func writeChangelog(path, summary string, changed bool) error {
+	if changed {
+		summary = "- " + summary
+	}
+	return os.WriteFile(path, []byte(summary+"\n"), 0o644)
+}
+
+// reportCatalogDiff runs on EVERY generator run, nightly watch or not: a
+// release needs to say what its catalog refresh actually changed, and the
+// canned "routine upstream refresh" line it replaces said nothing.
+//
+// The baseline is the compiled-in catalog ALONE (overlayPath ""): the overlay
+// ships without a release, so folding it in would hide precisely the models a
+// release is compiling in for the first time.
+func reportCatalogDiff(fresh []modelSpec, failed []string, changelogPath string) {
+	summary, changed := summarizeCatalogDiff(compareCatalogs(fresh, "", triggerAllNew), failed)
+	if len(failed) > 0 {
+		log.Printf("Catalog diff: %s unavailable — removals suppressed, everything they list would look deleted",
+			strings.Join(failedSources(failed), ", "))
+	}
+	log.Printf("Catalog diff vs compiled-in: %s", summary)
+	if changelogPath == "" {
+		return
+	}
+	if err := writeChangelog(changelogPath, summary, changed); err != nil {
+		log.Fatalf("write changelog summary: %v", err)
+	}
+}
+
 // metadataChanged reports whether upstream moved anything fir records about a
 // model it already knows. Deliberately narrow: these are the fields that come
 // straight from upstream, so a difference is upstream news rather than a

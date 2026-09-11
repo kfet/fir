@@ -20,12 +20,25 @@ If the user provides a version, use it. Otherwise, auto-determine:
 
 A regenerated model catalog (step 1) does **not** count towards the bump — it is
 routine data, not a user-visible feature, so it never turns a patch into a minor.
-By convention it still gets the one-line `### Changed` catalog entry the previous
-releases carry; that line alone is not grounds for a minor bump either.
+It still gets a `### Changed` catalog entry describing what actually moved (see
+step 1); that line alone is not grounds for a minor bump either.
 
 ## Steps
 
 1. **Regenerate models** — run `make generate-models` to pull the latest model definitions. If this produces changes, they will be included in the release commit automatically.
+
+   The generator logs a `Catalog diff vs compiled-in:` line — which first-party
+   models were added/removed, how much aggregator and pricing churn rode along.
+   **Write the `### Changed` catalog entry from that line**, verbatim or lightly
+   edited; never the old canned "routine upstream refresh" sentence, which hid
+   everything. `-changelog <path>` writes the same text as a ready-to-paste
+   bullet if you would rather read it from a file than the log.
+
+   If it reports no changes, **omit the catalog line entirely** — do not write a
+   line saying nothing changed. If an upstream source failed to fetch, the
+   summary says removals were not reported (everything a dead source lists looks
+   deleted); take that at face value and do not go digging for removals. Keep
+   the entry to 1–3 lines: it is read on a phone.
 2. **Full build & test** — execute `make all` and confirm everything passes.
 3. **Check CHANGELOG** — read `CHANGELOG.md` and confirm there are entries under `## [Unreleased]`. If empty, ask the user.
 4. **Determine version** — follow the rules above if the user didn't specify one. State the version and proceed.

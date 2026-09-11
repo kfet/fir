@@ -2,10 +2,13 @@
 
 ## [Unreleased]
 
+### Changed
+- **The release-time model-catalog changelog line now says what actually changed.** Every release carried the same canned "routine upstream refresh of model ids, pricing and limits", which hid whether a flagship landed or nothing at all moved. `cmd/generate-models` now diffs the fresh fetch against the compiled-in catalog on **every** run — not just when a nightly-watch flag is set — and logs a compact summary: first-party added/removed ids named explicitly (capped at 8, then `+N more`), aggregator churn rolled into counts, pricing/limit changes as a count, and an explicit "no changes" verdict so the release can drop the line entirely. `-changelog <path>` writes the same summary as a ready-to-paste markdown bullet. The diff baseline is the compiled-in catalog alone, not the catalog overlay: the overlay ships without a release, so folding it in would hide precisely the models a release compiles in for the first time. When an upstream source fails to fetch, removals are suppressed rather than caveated — everything a dead source lists looks deleted, and a ready-to-paste line that must not be pasted is a trap. The `release` skill now writes the entry from this output, and the 1.9.0 and 1.8.3 entries have been retro-fixed to their real diffs.
+
 ## [1.9.0] - 2026-09-11
 
 ### Changed
-- **Model catalog regenerated** at release time: routine upstream refresh of model ids, pricing and limits.
+- **Model catalog regenerated**: added `huggingface/deepseek-ai/DeepSeek-V4.1-Flash`, `opencode-go/deepseek-v4.1-flash` (+2 on aggregators); removed `opencode-go/deepseek-flash` (+1 on aggregators); 11 model(s) with changed pricing/limits.
 
 ### Added
 - **MCP `auth.redirect_uri` pins the OAuth loopback redirect URI**, for authorization servers that require an exactly pre-registered value and ignore the loopback port variance of RFC 8252 §7.3 (Okta). fir otherwise binds `127.0.0.1:0` and derives the redirect URI from the ephemeral port, which such a server rejects with `invalid_redirect_uri`. The configured URI is used verbatim in registration, authorization and the code grant — `localhost` and `127.0.0.1` are not interchangeable — and the callback server binds its host, port and path. Validation requires `http` on a loopback host with an explicit non-zero port and a non-empty path, no query or fragment, and rejects the field in `bearer`/`none` mode where the OAuth chain never runs; a busy port reports the configured `redirect_uri` instead of a bare "address already in use".
@@ -13,7 +16,7 @@
 ## [1.8.3] - 2026-09-10
 
 ### Changed
-- **Model catalog regenerated** at release time: routine upstream refresh of model ids, pricing and limits.
+- **Model catalog regenerated**: added `opencode-go/deepseek-flash` (+7 on aggregators); removed `opencode-go/omen-alpha` (+1 on aggregators); 22 model(s) with changed pricing/limits.
 
 ### Fixed
 - **A configured skill root that does not exist is no longer reported as a problem.** Relative entries in `settings.json`'s `skills` array resolve against the *session's* working directory (`addSkillsFromRoot` does `filepath.Join(cwd, path)`), so the common `"skills": ["skills"]` convention — pick up a project-local `skills/` dir — is by design absent in every session started outside such a project. Each of those sessions opened with `[Skill conflicts] … skill path does not exist`, which was wrong twice over: a missing per-project root is the expected case rather than a fault, and it is in no sense a *conflict*. `os.IsNotExist` now returns silently. A stat failure that is **not** absence (permissions, I/O) still warns, as `skill path unreadable: <err>`, since that one does mean a root the user asked for is being skipped for a reason they cannot see. The diagnostic block is now headed `[Skill issues]`: the collision classes (`duplicate-name`, `override-conflict`) are deliberately filtered out before it renders, so the only things it ever displayed were parse errors and load warnings.

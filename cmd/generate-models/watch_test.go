@@ -348,3 +348,134 @@ func TestMetadataChangedIgnoresEmittedPrecision(t *testing.T) {
 		t.Error("a real price change must still be reported")
 	}
 }
+
+// The release changelog line is the whole point of the diff running on every
+// generator run: it must name first-party movement and merely count the
+// aggregator flood.
+func TestSummarizeCatalogDiff(t *testing.T) {
+	manyFirstParty := make([]string, 0, 11)
+	for i := 0; i < 11; i++ {
+		manyFirstParty = append(manyFirstParty, fmt.Sprintf("openai/gpt-%d", i))
+	}
+
+	tests := []struct {
+		name        string
+		res         watchResult
+		failed      []string
+		want        string
+		contains    []string
+		absent      []string
+		wantChanged bool
+	}{
+		{
+			name: "nothing changed says so explicitly",
+			res:  watchResult{},
+			want: catalogDiffEmpty,
+		},
+		{
+			name: "first-party models are named, aggregators counted",
+			res: watchResult{
+				New:     []string{"anthropic/claude-opus-5", "openrouter/vendor/a", "poe/bot-b"},
+				Removed: []string{"google/gemini-1.5-pro"},
+				Changed: 212,
+			},
+			want: "**Model catalog regenerated**: added `anthropic/claude-opus-5` (+2 on aggregators); " +
+				"removed `google/gemini-1.5-pro`; 212 model(s) with changed pricing/limits.",
+			wantChanged: true,
+		},
+		{
+			name:        "aggregator-only churn never names an id",
+			res:         watchResult{New: []string{"openrouter/vendor/a", "vercel-ai-gateway/b"}},
+			want:        "**Model catalog regenerated**: added 2 aggregator model(s).",
+			wantChanged: true,
+		},
+		{
+			name:        "long first-party lists are truncated",
+			res:         watchResult{New: manyFirstParty},
+			contains:    []string{"`openai/gpt-0`", "`openai/gpt-7`", "+3 more"},
+			absent:      []string{"`openai/gpt-8`"},
+			wantChanged: true,
+		},
+		{
+			name:        "pricing churn alone is still worth a line",
+			res:         watchResult{Changed: 7},
+			want:        "**Model catalog regenerated**: 7 model(s) with changed pricing/limits.",
+			wantChanged: true,
+		},
+		{
+			// A dead source makes everything it lists look deleted, so the
+			// removals must not reach a changelog somebody pastes.
+			name:   "a failed upstream source suppresses removals",
+			res:    watchResult{New: []string{"anthropic/claude-opus-5"}, Removed: []string{"openrouter/vendor/a"}},
+			failed: []string{"openrouter: 503 Service Unavailable", "poe: dial tcp: timeout"},
+			want: "**Model catalog regenerated**: added `anthropic/claude-opus-5`; " +
+				"removals not reported (openrouter, poe fetch failed).",
+			wantChanged: true,
+		},
+		{
+			// The caveat qualifies real news; on its own it is not news.
+			name:   "a failed source alone is still an empty diff",
+			res:    watchResult{Removed: []string{"openrouter/vendor/a"}},
+			failed: []string{"openrouter: 503"},
+			want:   catalogDiffEmpty,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, changed := summarizeCatalogDiff(&tt.res, tt.failed)
+			if tt.want != "" && got != tt.want {
+				t.Fatalf("summary =\n%s\nwant\n%s", got, tt.want)
+			}
+			if changed != tt.wantChanged {
+				t.Errorf("changed = %v, want %v", changed, tt.wantChanged)
+			}
+			for _, want := range tt.contains {
+				if !strings.Contains(got, want) {
+					t.Errorf("summary is missing %q: %s", want, got)
+				}
+			}
+			for _, bad := range tt.absent {
+				if strings.Contains(got, bad) {
+					t.Errorf("summary should have truncated %q: %s", bad, got)
+				}
+			}
+			if lines := strings.Count(got, "\n") + 1; lines > 3 {
+				t.Errorf("summary is %d lines, want at most 3:\n%s", lines, got)
+			}
+		})
+	}
+}
+
+// reportCatalogDiff is what `make generate-models` actually calls, so the
+// end-to-end path — real compiled catalog, real file — gets its own test.
+func TestReportCatalogDiff(t *testing.T) {
+	registerCompiled(t, "watch-release", "releasemodel-1")
+	dir := t.TempDir()
+
+	path := filepath.Join(dir, "changelog.md")
+	reportCatalogDiff([]modelSpec{spec("watch-release", "releasemodel-2")}, nil, path)
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(string(body), "- **Model catalog regenerated**: added `watch-release/releasemodel-2`") {
+		t.Errorf("want a ready-to-paste bullet naming the new model, got %q", body)
+	}
+
+	// The empty case must not be a bullet: there is nothing to paste.
+	empty := filepath.Join(dir, "empty.md")
+	summary, changed := summarizeCatalogDiff(&watchResult{}, nil)
+	if err := writeChangelog(empty, summary, changed); err != nil {
+		t.Fatal(err)
+	}
+	body, err = os.ReadFile(empty)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.HasPrefix(string(body), "- ") || !strings.Contains(string(body), "omit the catalog line") {
+		t.Errorf("empty diff must say so plainly, got %q", body)
+	}
+
+	// No -changelog path: the summary is logged and nothing is written.
+	reportCatalogDiff([]modelSpec{spec("watch-release", "releasemodel-2")}, []string{"poe: boom"}, "")
+}

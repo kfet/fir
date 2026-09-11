@@ -2436,6 +2436,7 @@ func main() {
 	trigger := flag.String("trigger", triggerCurated, "what merits a PR: curated | all-new | any-diff")
 	strict := flag.Bool("strict", false, "treat any upstream fetch failure as \"no run\": report it in -summary and exit 0 without generating")
 	overlay := flag.Bool("overlay", false, "add qualifying new models to pkg/models/catalog-v1.json, so merging reaches the fleet without a release")
+	changelog := flag.String("changelog", "", "write the catalog-diff summary as a ready-to-paste markdown bullet to this path (the summary is logged either way)")
 	flag.Parse()
 
 	// Fetch from all sources. In -strict mode a partial fetch is worse than
@@ -2519,6 +2520,12 @@ func main() {
 	}
 
 	log.Printf("Generated %s", *out)
+
+	// Every run says what it changed — this is what the release changelog
+	// line is written from. Running after the file is written is not a bug:
+	// the baseline is the catalog compiled into THIS binary, never the file
+	// on disk.
+	reportCatalogDiff(all, failed, *changelog)
 
 	runWatch(watchOptions{
 		fresh:          all,
