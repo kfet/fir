@@ -39,6 +39,11 @@ step 1); that line alone is not grounds for a minor bump either.
    summary says removals were not reported (everything a dead source lists looks
    deleted); take that at face value and do not go digging for removals. Keep
    the entry to 1–3 lines: it is read on a phone.
+
+   Run the generator **once**. Its baseline is the catalog compiled into the
+   binary it just built from the checkout, so a second run diffs against the
+   first run's own output and reports nothing changed. If you have already run
+   it twice, `git checkout pkg/ai/models_generated.go` and run it once more.
 2. **Full build & test** — execute `make all` and confirm everything passes.
 3. **Check CHANGELOG** — read `CHANGELOG.md` and confirm there are entries under `## [Unreleased]`. If empty, ask the user.
 4. **Determine version** — follow the rules above if the user didn't specify one. State the version and proceed.

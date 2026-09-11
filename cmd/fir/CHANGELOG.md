@@ -2,7 +2,13 @@
 
 ## [Unreleased]
 
+## [1.9.1] - 2026-09-11
+
+### Fixed
+- **`make generate-models` had gone completely silent.** The generator imports `pkg/ai`, which pulls in `pkg/log`, whose init calls `slog.SetDefault` — and that also redirects the **standard** `log` package's default writer into fir's discard handler (deliberate for the fir binary: stray output must never corrupt the TUI or a JSON-RPC stream). For a build-time CLI whose log output *is* the product, it meant every `log.Printf` — "Generated …", the per-provider statistics, fetch-failure warnings, and now the catalog diff a release changelog is written from — vanished with no trace and an exit code of 0. `main` restores `os.Stderr` as the standard log writer before doing anything else, with a regression test.
+
 ### Changed
+- **Model catalog regenerated**: added `amazon-bedrock/us.amazon.nova-premier-v1:0`; 33 model(s) with changed pricing/limits.
 - **The release-time model-catalog changelog line now says what actually changed.** Every release carried the same canned "routine upstream refresh of model ids, pricing and limits", which hid whether a flagship landed or nothing at all moved. `cmd/generate-models` now diffs the fresh fetch against the compiled-in catalog on **every** run — not just when a nightly-watch flag is set — and logs a compact summary: first-party added/removed ids named explicitly (capped at 8, then `+N more`), aggregator churn rolled into counts, pricing/limit changes as a count, and an explicit "no changes" verdict so the release can drop the line entirely. `-changelog <path>` writes the same summary as a ready-to-paste markdown bullet. The diff baseline is the compiled-in catalog alone, not the catalog overlay: the overlay ships without a release, so folding it in would hide precisely the models a release compiles in for the first time. When an upstream source fails to fetch, removals are suppressed rather than caveated — everything a dead source lists looks deleted, and a ready-to-paste line that must not be pasted is a trap. The `release` skill now writes the entry from this output, and the 1.9.0 and 1.8.3 entries have been retro-fixed to their real diffs.
 
 ## [1.9.0] - 2026-09-11

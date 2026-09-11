@@ -2426,7 +2426,21 @@ func repoRoot() string {
 	return filepath.Join(filepath.Dir(filename), "..", "..")
 }
 
+// restoreStdLogOutput points the standard log package back at stderr.
+//
+// Importing pkg/ai pulls in pkg/log, whose init calls slog.SetDefault — and
+// slog.SetDefault ALSO redirects the standard log package's default writer
+// into that handler, which for fir is a deliberate discard (stray output must
+// never corrupt the TUI or a JSON-RPC stream). Correct for the fir binary,
+// fatal for a build-time CLI whose log output is the entire product: without
+// this every log.Printf below — "Generated …", the statistics, the catalog
+// diff a release changelog is written from — vanishes silently.
+func restoreStdLogOutput() {
+	log.SetOutput(os.Stderr)
+}
+
 func main() {
+	restoreStdLogOutput()
 	root := repoRoot()
 	out := flag.String("out", filepath.Join(root, "pkg", "ai", "models_generated.go"), "output file path")
 	// Nightly model-watch flags; see watch.go. All optional — with none of

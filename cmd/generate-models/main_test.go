@@ -1,6 +1,8 @@
 package main
 
 import (
+	"log"
+	"os"
 	"testing"
 )
 
@@ -174,5 +176,22 @@ func TestPoeSiblingCtx(t *testing.T) {
 	}
 	if got := poeSiblingCtx("glm-5.1-fw", known); got != 131072 {
 		t.Errorf("glm sibling fallback got %d, want 131072", got)
+	}
+}
+
+// Importing pkg/ai pulls in pkg/log, whose init discards the standard log
+// package's output. For a build-time CLI that output is the product, so main
+// puts it back — and this is the regression test for the day someone removes
+// that call and the generator goes silent again.
+func TestRestoreStdLogOutput(t *testing.T) {
+	orig := log.Writer()
+	t.Cleanup(func() { log.SetOutput(orig) })
+
+	if log.Writer() == os.Stderr {
+		t.Skip("standard log is not being redirected; nothing to restore")
+	}
+	restoreStdLogOutput()
+	if log.Writer() != os.Stderr {
+		t.Errorf("log.Writer() = %T, want os.Stderr", log.Writer())
 	}
 }
