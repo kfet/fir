@@ -1037,3 +1037,55 @@ func TestModelRegistry_ModelsD_RefreshPicksUpNewFragment(t *testing.T) {
 		t.Error("base model lost after Refresh")
 	}
 }
+
+// Documented in the `self` skill ("Provider routing: OpenRouter and Vercel AI
+// Gateway"): pinning a backend provider is a per-model `compat` key, settable
+// via modelOverrides on a built-in. Guards the JSON tag names, which are the
+// user-facing contract.
+func TestModelRegistry_OpenRouterRoutingOverride(t *testing.T) {
+	provider := "test-provider-openrouter-routing"
+	id := "vendor/routed-model"
+	ai.RegisterModel(&ai.Model{ID: id, Name: id, API: ai.ApiOpenAICompletions, Provider: provider, BaseURL: "https://openrouter.ai/api/v1", Input: []ai.InputModality{ai.InputText}, Cost: ai.ModelCost{}, ContextWindow: 128000, MaxTokens: 4096})
+
+	tmp := t.TempDir()
+	modelsPath := filepath.Join(tmp, "models.json")
+	content := `{
+  "providers": {
+    "` + provider + `": {
+      "modelOverrides": {
+        "` + id + `": {
+          "compat": {
+            "openRouterRouting": { "only": ["moonshot"], "order": ["moonshot", "together"] },
+            "vercelGatewayRouting": { "only": ["bedrock"] }
+          }
+        }
+      }
+    }
+  }
+}`
+	if err := os.WriteFile(modelsPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	registry, _ := setupTestModelRegistry(t, modelsPath)
+	m := registry.Find(provider, id)
+	if m == nil {
+		t.Fatal("expected overridden model")
+	}
+	c := m.GetOpenAICompletionsCompat()
+	if c == nil {
+		t.Fatal("expected openai-completions compat on model")
+	}
+	if c.OpenRouterRouting == nil {
+		t.Fatal("expected openRouterRouting to be parsed")
+	}
+	if got := c.OpenRouterRouting.Only; len(got) != 1 || got[0] != "moonshot" {
+		t.Fatalf("unexpected openRouterRouting.only: %#v", got)
+	}
+	if got := c.OpenRouterRouting.Order; len(got) != 2 || got[0] != "moonshot" || got[1] != "together" {
+		t.Fatalf("unexpected openRouterRouting.order: %#v", got)
+	}
+	if c.VercelGatewayRouting == nil || len(c.VercelGatewayRouting.Only) != 1 || c.VercelGatewayRouting.Only[0] != "bedrock" {
+		t.Fatalf("unexpected vercelGatewayRouting: %#v", c.VercelGatewayRouting)
+	}
+}

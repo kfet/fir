@@ -251,6 +251,54 @@ is run as a shell command and its stdout used; otherwise the value is used as an
 env var *name* if that variable is set, else taken literally. There is no
 `${VAR}` interpolation inside a string.
 
+#### Provider routing: OpenRouter and Vercel AI Gateway
+
+Aggregators route one model id to whichever backend provider they pick. Those
+backends are **not interchangeable**: they run different serving stacks, so the
+same id can vary in vision support, reasoning-effort handling, quantization,
+context window and latency between requests. If reproducibility matters, pin
+the backend rather than trusting the default "best available" routing.
+
+Both aggregators are configured through the per-model `compat` block — either
+on a custom model under `models`, or on a built-in via `modelOverrides`. It is
+a **model-level** key: there is no provider-level `compat`. Routing is emitted
+**only** when that model's `baseUrl` contains `openrouter.ai` /
+`ai-gateway.vercel.sh` respectively, so a stray key elsewhere is inert, not an
+error.
+
+```jsonc
+{ "providers": { "openrouter": {
+  "modelOverrides": {
+    "moonshotai/kimi-k2.5": {
+      "compat": {
+        "openRouterRouting": {
+          "only":  ["moonshot"],            // exclusive allow-list
+          "order": ["moonshot", "together"] // try in this sequence
+        }
+      }
+    }
+  } } } }
+```
+
+- `only` — providers exclusively allowed. This is the reproducibility knob.
+- `order` — ordered preference; other providers may still serve as fallback.
+- Vercel AI Gateway uses the identical shape under `vercelGatewayRouting`
+  (same two fields); it is emitted as `providerOptions.gateway`.
+
+Discover valid provider slugs for a model with OpenRouter's endpoints API:
+
+```bash
+curl -s https://openrouter.ai/api/v1/models/moonshotai/kimi-k2.5/endpoints \
+  | jq -r '.data.endpoints[] | "\(.provider_name)\t\(.context_length)\t\(.quantization)"'
+```
+
+**Current limit:** fir's config loader exposes only `only` and `order`
+(`OpenRouterRoutingConfig`, `pkg/models/modelregistry.go`). The underlying
+`github.com/kfet/ai` struct carries the full OpenRouter surface —
+`allow_fallbacks`, `require_parameters`, `data_collection`, `zdr`, `ignore`,
+`quantizations`, `sort`, `max_price`, `preferred_min_throughput`,
+`preferred_max_latency` — but those are not yet settable from `models.json`.
+
 #### Drop-in fragments: `models.d/`
 
 Alongside `models.json`, fir reads every `*.json` file in a `models.d/`

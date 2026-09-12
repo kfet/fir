@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Documentation
+- **OpenRouter / Vercel AI Gateway provider routing is now documented.** fir has emitted `provider: {only, order}` on OpenRouter requests (and `providerOptions.gateway` on Vercel AI Gateway) since the routing config landed, but the feature appeared in no `.md` in the repo and had no test — an aggregator pins a request to whichever backend it likes, and those backends differ in vision support, reasoning-effort handling, quantization and context window, so an undiscoverable pinning knob is the same as no knob. The `self` skill gains a "Provider routing" section: the key is the **per-model** `compat` block (there is no provider-level `compat`), reachable on a built-in via `modelOverrides`; routing is emitted only when the model's `baseUrl` matches the aggregator's host, so a stray key is inert rather than an error; and it names the `/endpoints` API for discovering valid provider slugs. It also records the current limit — fir's loader exposes only `only` and `order`, while the underlying `github.com/kfet/ai` struct carries the full surface (`allow_fallbacks`, `require_parameters`, `data_collection`, `zdr`, `ignore`, `quantizations`, `sort`, `max_price`, `preferred_min_throughput`, `preferred_max_latency`). `TestModelRegistry_OpenRouterRoutingOverride` locks the JSON tag names, which are the user-facing contract.
+
 ## [1.9.1] - 2026-09-11
 
 ### Fixed
