@@ -1,5 +1,371 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-09-10T01:03:03Z",
-  "providers": {}
+  "generatedAt": "2026-09-12T08:40:12Z",
+  "providers": {
+    "amazon-bedrock": {
+      "models": [
+        {
+          "id": "google.gemma-4-26b-a4b",
+          "name": "Gemma 4 26B A4B IT",
+          "api": "bedrock-converse-stream",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 0.13,
+            "output": 0.4,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          },
+          "contextWindow": 262144,
+          "maxTokens": 32768
+        },
+        {
+          "id": "google.gemma-4-31b",
+          "name": "Gemma 4 31B IT",
+          "api": "bedrock-converse-stream",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 0.14,
+            "output": 0.4,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          },
+          "contextWindow": 262144,
+          "maxTokens": 32768
+        },
+        {
+          "id": "google.gemma-4-e2b",
+          "name": "Gemma 4 E2B IT",
+          "api": "bedrock-converse-stream",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 0.04,
+            "output": 0.08,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          },
+          "contextWindow": 131072,
+          "maxTokens": 8192
+        },
+        {
+          "id": "in.openai.gpt-5.6-luna",
+          "name": "GPT-5.6 Luna (India)",
+          "api": "bedrock-converse-stream",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 0.22,
+            "output": 1.32,
+            "cacheRead": 0.022,
+            "cacheWrite": 0.275
+          },
+          "contextWindow": 1050000,
+          "maxTokens": 128000
+        },
+        {
+          "id": "in.openai.gpt-5.6-terra",
+          "name": "GPT-5.6 Terra (India)",
+          "api": "bedrock-converse-stream",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 2.2,
+            "output": 13.2,
+            "cacheRead": 0.22,
+            "cacheWrite": 2.75
+          },
+          "contextWindow": 1050000,
+          "maxTokens": 128000
+        },
+        {
+          "id": "us-gov.openai.gpt-oss-120b-1:0",
+          "name": "gpt-oss-120b (GovCloud)",
+          "api": "bedrock-converse-stream",
+          "reasoning": true,
+          "input": [
+            "text"
+          ],
+          "cost": {
+            "input": 0.18,
+            "output": 0.72,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          },
+          "contextWindow": 128000,
+          "maxTokens": 16384
+        },
+        {
+          "id": "us-gov.openai.gpt-oss-20b-1:0",
+          "name": "gpt-oss-20b (GovCloud)",
+          "api": "bedrock-converse-stream",
+          "reasoning": true,
+          "input": [
+            "text"
+          ],
+          "cost": {
+            "input": 0.084,
+            "output": 0.36,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          },
+          "contextWindow": 128000,
+          "maxTokens": 16384
+        }
+      ]
+    },
+    "huggingface": {
+      "models": [
+        {
+          "id": "google/gemma-3-12b-it",
+          "name": "Gemma 3 12B IT",
+          "api": "openai-completions",
+          "reasoning": false,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 0.05,
+            "output": 0.15,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          },
+          "contextWindow": 131072,
+          "maxTokens": 131072,
+          "compat": {
+            "supportsDeveloperRole": false
+          }
+        },
+        {
+          "id": "google/gemma-3-27b-it",
+          "name": "Gemma 3 27B IT",
+          "api": "openai-completions",
+          "reasoning": false,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 0.08,
+            "output": 0.16,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          },
+          "contextWindow": 131072,
+          "maxTokens": 131072,
+          "compat": {
+            "supportsDeveloperRole": false
+          }
+        },
+        {
+          "id": "google/gemma-3-4b-it",
+          "name": "Gemma 3 4B IT",
+          "api": "openai-completions",
+          "reasoning": false,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 0.05,
+            "output": 0.1,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          },
+          "contextWindow": 131072,
+          "maxTokens": 131072,
+          "compat": {
+            "supportsDeveloperRole": false
+          }
+        }
+      ]
+    },
+    "openrouter": {
+      "models": [
+        {
+          "id": "inclusionai/ling-3.0-flash-vl",
+          "name": "inclusionAI: Ling 3.0 Flash VL",
+          "api": "openai-completions",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 0.06,
+            "output": 0.18,
+            "cacheRead": 0.012,
+            "cacheWrite": 0
+          },
+          "contextWindow": 131072,
+          "maxTokens": 32768
+        },
+        {
+          "id": "sakana/fugu-ultra-v2",
+          "name": "Sakana: Fugu Ultra v2",
+          "api": "openai-completions",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 5,
+            "output": 30,
+            "cacheRead": 0.5,
+            "cacheWrite": 0
+          },
+          "contextWindow": 1000000,
+          "maxTokens": 128000
+        },
+        {
+          "id": "~openai/gpt-astra-latest",
+          "name": "OpenAI GPT Astra Latest",
+          "api": "openai-completions",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 10,
+            "output": 50,
+            "cacheRead": 1,
+            "cacheWrite": 12.5
+          },
+          "contextWindow": 1050000,
+          "maxTokens": 128000
+        },
+        {
+          "id": "~openai/gpt-luna-latest",
+          "name": "OpenAI GPT Luna Latest",
+          "api": "openai-completions",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 0.19999999999999998,
+            "output": 1.2,
+            "cacheRead": 0.02,
+            "cacheWrite": 0.25
+          },
+          "contextWindow": 1050000,
+          "maxTokens": 128000
+        },
+        {
+          "id": "~openai/gpt-sol-latest",
+          "name": "OpenAI GPT Sol Latest",
+          "api": "openai-completions",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 2,
+            "output": 10,
+            "cacheRead": 0.19999999999999998,
+            "cacheWrite": 2.5
+          },
+          "contextWindow": 1050000,
+          "maxTokens": 128000
+        },
+        {
+          "id": "~openai/gpt-terra-latest",
+          "name": "OpenAI GPT Terra Latest",
+          "api": "openai-completions",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 2,
+            "output": 12,
+            "cacheRead": 0.19999999999999998,
+            "cacheWrite": 2.5
+          },
+          "contextWindow": 1050000,
+          "maxTokens": 128000
+        }
+      ]
+    },
+    "vercel-ai-gateway": {
+      "models": [
+        {
+          "id": "inclusionai/ling-3.0-flash-vl",
+          "name": "Ling 3.0 Flash VL",
+          "api": "anthropic-messages",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          },
+          "contextWindow": 256000,
+          "maxTokens": 32000
+        },
+        {
+          "id": "inclusionai/ling-3.0-flash-vl-free",
+          "name": "Ling 3.0 Flash VL (Free)",
+          "api": "anthropic-messages",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          },
+          "contextWindow": 256000,
+          "maxTokens": 32000
+        },
+        {
+          "id": "sakana/fugu-ultra-v2",
+          "name": "Fugu Ultra v2",
+          "api": "anthropic-messages",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 5,
+            "output": 30,
+            "cacheRead": 0.5,
+            "cacheWrite": 0
+          },
+          "contextWindow": 1000000,
+          "maxTokens": 1000000
+        }
+      ]
+    }
+  }
 }
