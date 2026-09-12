@@ -17,10 +17,70 @@ import (
 
 // --- OpenAI Compatibility schemas (for JSON validation) ---
 
+// OpenRouterMaxPriceConfig caps the price per million tokens (USD) that routing
+// will accept, per cost component. Values are numbers in the OpenRouter API but
+// are carried as any so a string spelling is forwarded verbatim rather than
+// rejected here.
+type OpenRouterMaxPriceConfig struct {
+	Prompt     any `json:"prompt,omitempty"`
+	Completion any `json:"completion,omitempty"`
+	Image      any `json:"image,omitempty"`
+	Audio      any `json:"audio,omitempty"`
+	Request    any `json:"request,omitempty"`
+}
+
 // OpenRouterRoutingConfig holds OpenRouter routing preferences from models.json.
+//
+// This mirrors ai.OpenRouterRouting field for field: OpenRouter serves one model
+// id from many backend providers running different stacks, and every field here
+// is a way to constrain which of them may answer. Fields whose OpenRouter schema
+// is a union (a bare number or an object) are typed any and forwarded verbatim —
+// fir does not validate them, the API does.
 type OpenRouterRoutingConfig struct {
-	Only  []string `json:"only,omitempty"`
-	Order []string `json:"order,omitempty"`
+	AllowFallbacks         *bool                     `json:"allowFallbacks,omitempty"`
+	RequireParameters      *bool                     `json:"requireParameters,omitempty"`
+	DataCollection         string                    `json:"dataCollection,omitempty"`
+	ZDR                    *bool                     `json:"zdr,omitempty"`
+	EnforceDistillableText *bool                     `json:"enforceDistillableText,omitempty"`
+	Order                  []string                  `json:"order,omitempty"`
+	Only                   []string                  `json:"only,omitempty"`
+	Ignore                 []string                  `json:"ignore,omitempty"`
+	Quantizations          []string                  `json:"quantizations,omitempty"`
+	Sort                   any                       `json:"sort,omitempty"`
+	MaxPrice               *OpenRouterMaxPriceConfig `json:"maxPrice,omitempty"`
+	PreferredMinThroughput any                       `json:"preferredMinThroughput,omitempty"`
+	PreferredMaxLatency    any                       `json:"preferredMaxLatency,omitempty"`
+}
+
+// toAI converts the config form to the wire form consumed by the provider.
+func (c *OpenRouterRoutingConfig) toAI() *ai.OpenRouterRouting {
+	if c == nil {
+		return nil
+	}
+	r := &ai.OpenRouterRouting{
+		AllowFallbacks:         c.AllowFallbacks,
+		RequireParameters:      c.RequireParameters,
+		DataCollection:         c.DataCollection,
+		ZDR:                    c.ZDR,
+		EnforceDistillableText: c.EnforceDistillableText,
+		Order:                  c.Order,
+		Only:                   c.Only,
+		Ignore:                 c.Ignore,
+		Quantizations:          c.Quantizations,
+		Sort:                   c.Sort,
+		PreferredMinThroughput: c.PreferredMinThroughput,
+		PreferredMaxLatency:    c.PreferredMaxLatency,
+	}
+	if c.MaxPrice != nil {
+		r.MaxPrice = &ai.OpenRouterMaxPrice{
+			Prompt:     c.MaxPrice.Prompt,
+			Completion: c.MaxPrice.Completion,
+			Image:      c.MaxPrice.Image,
+			Audio:      c.MaxPrice.Audio,
+			Request:    c.MaxPrice.Request,
+		}
+	}
+	return r
 }
 
 // VercelGatewayRoutingConfig holds Vercel AI Gateway routing preferences from models.json.
@@ -61,10 +121,7 @@ func (c *CompatConfig) toOpenAICompletionsCompat() *ai.OpenAICompletionsCompat {
 		ThinkingFormat:                   ai.ThinkingFormat(c.ThinkingFormat),
 	}
 	if c.OpenRouterRouting != nil {
-		compat.OpenRouterRouting = &ai.OpenRouterRouting{
-			Only:  c.OpenRouterRouting.Only,
-			Order: c.OpenRouterRouting.Order,
-		}
+		compat.OpenRouterRouting = c.OpenRouterRouting.toAI()
 	}
 	if c.VercelGatewayRouting != nil {
 		compat.VercelGatewayRouting = &ai.VercelGatewayRouting{
@@ -245,29 +302,70 @@ func mergeCompat(base any, override *CompatConfig) any {
 		merged.ThinkingFormat = overrideCompat.ThinkingFormat
 	}
 
-	// Merge routing preferences
-	if overrideCompat.OpenRouterRouting != nil {
+	// Merge routing preferences.
+	//
+	// merged was shallow-copied from base, so its routing pointers still alias
+	// the base model's structs — mutating them in place would edit the built-in
+	// catalog entry for every other model sharing it. Always clone first.
+	if or := overrideCompat.OpenRouterRouting; or != nil {
 		if merged.OpenRouterRouting == nil {
-			merged.OpenRouterRouting = overrideCompat.OpenRouterRouting
+			merged.OpenRouterRouting = or
 		} else {
-			if overrideCompat.OpenRouterRouting.Only != nil {
-				merged.OpenRouterRouting.Only = overrideCompat.OpenRouterRouting.Only
+			m := *merged.OpenRouterRouting // clone
+			if or.AllowFallbacks != nil {
+				m.AllowFallbacks = or.AllowFallbacks
 			}
-			if overrideCompat.OpenRouterRouting.Order != nil {
-				merged.OpenRouterRouting.Order = overrideCompat.OpenRouterRouting.Order
+			if or.RequireParameters != nil {
+				m.RequireParameters = or.RequireParameters
 			}
+			if or.DataCollection != "" {
+				m.DataCollection = or.DataCollection
+			}
+			if or.ZDR != nil {
+				m.ZDR = or.ZDR
+			}
+			if or.EnforceDistillableText != nil {
+				m.EnforceDistillableText = or.EnforceDistillableText
+			}
+			if or.Order != nil {
+				m.Order = or.Order
+			}
+			if or.Only != nil {
+				m.Only = or.Only
+			}
+			if or.Ignore != nil {
+				m.Ignore = or.Ignore
+			}
+			if or.Quantizations != nil {
+				m.Quantizations = or.Quantizations
+			}
+			if or.Sort != nil {
+				m.Sort = or.Sort
+			}
+			if or.MaxPrice != nil {
+				m.MaxPrice = or.MaxPrice
+			}
+			if or.PreferredMinThroughput != nil {
+				m.PreferredMinThroughput = or.PreferredMinThroughput
+			}
+			if or.PreferredMaxLatency != nil {
+				m.PreferredMaxLatency = or.PreferredMaxLatency
+			}
+			merged.OpenRouterRouting = &m
 		}
 	}
-	if overrideCompat.VercelGatewayRouting != nil {
+	if vg := overrideCompat.VercelGatewayRouting; vg != nil {
 		if merged.VercelGatewayRouting == nil {
-			merged.VercelGatewayRouting = overrideCompat.VercelGatewayRouting
+			merged.VercelGatewayRouting = vg
 		} else {
-			if overrideCompat.VercelGatewayRouting.Only != nil {
-				merged.VercelGatewayRouting.Only = overrideCompat.VercelGatewayRouting.Only
+			m := *merged.VercelGatewayRouting // clone — see above
+			if vg.Only != nil {
+				m.Only = vg.Only
 			}
-			if overrideCompat.VercelGatewayRouting.Order != nil {
-				merged.VercelGatewayRouting.Order = overrideCompat.VercelGatewayRouting.Order
+			if vg.Order != nil {
+				m.Order = vg.Order
 			}
+			merged.VercelGatewayRouting = &m
 		}
 	}
 

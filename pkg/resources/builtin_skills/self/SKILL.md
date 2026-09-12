@@ -282,8 +282,29 @@ error.
 
 - `only` — providers exclusively allowed. This is the reproducibility knob.
 - `order` — ordered preference; other providers may still serve as fallback.
-- Vercel AI Gateway uses the identical shape under `vercelGatewayRouting`
-  (same two fields); it is emitted as `providerOptions.gateway`.
+- `ignore` — providers to skip.
+- `allowFallbacks` (default true) — set `false` to fail rather than silently
+  route to a backend outside `only`/`order`.
+- `requireParameters` — only route to providers supporting every parameter in
+  the request (the vision / reasoning-effort mismatch guard).
+- `zdr` — restrict to Zero Data Retention endpoints. `dataCollection`
+  (`"allow"` | `"deny"`) and `enforceDistillableText` are the related
+  privacy filters.
+- `quantizations` — e.g. `["fp8"]`, to exclude aggressively quantized serves.
+- `sort` — `"price"` | `"throughput"` | `"latency"`, or an object with
+  `by`/`partition`.
+- `maxPrice` — `{prompt, completion, image, audio, request}` USD per MTok caps.
+- `preferredMinThroughput` / `preferredMaxLatency` — a number, or an object of
+  `p50`/`p75`/`p90`/`p99` cutoffs.
+
+Key names are **camelCase** in fir config and are translated to OpenRouter's
+snake_case on the wire (`allowFallbacks` → `allow_fallbacks`). Fields whose
+OpenRouter schema is a union of a scalar and an object (`sort`,
+`preferredMinThroughput`, `preferredMaxLatency`) are forwarded verbatim without
+local validation — a malformed value is rejected by the API, not by fir.
+
+Vercel AI Gateway uses `vercelGatewayRouting` with `only` / `order` only; it is
+emitted as `providerOptions.gateway`.
 
 Discover valid provider slugs for a model with OpenRouter's endpoints API:
 
@@ -292,12 +313,8 @@ curl -s https://openrouter.ai/api/v1/models/moonshotai/kimi-k2.5/endpoints \
   | jq -r '.data.endpoints[] | "\(.provider_name)\t\(.context_length)\t\(.quantization)"'
 ```
 
-**Current limit:** fir's config loader exposes only `only` and `order`
-(`OpenRouterRoutingConfig`, `pkg/models/modelregistry.go`). The underlying
-`github.com/kfet/ai` struct carries the full OpenRouter surface —
-`allow_fallbacks`, `require_parameters`, `data_collection`, `zdr`, `ignore`,
-`quantizations`, `sort`, `max_price`, `preferred_min_throughput`,
-`preferred_max_latency` — but those are not yet settable from `models.json`.
+**Current limit:** none of these are validated locally — an unknown provider
+slug simply routes to nothing and OpenRouter answers with an error.
 
 #### Drop-in fragments: `models.d/`
 

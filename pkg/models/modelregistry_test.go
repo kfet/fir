@@ -1089,3 +1089,120 @@ func TestModelRegistry_OpenRouterRoutingOverride(t *testing.T) {
 		t.Fatalf("unexpected vercelGatewayRouting: %#v", c.VercelGatewayRouting)
 	}
 }
+
+// The full OpenRouter routing surface must survive models.json -> ai.Model.
+// Fields typed any (sort, preferredMin/MaxLatency) are forwarded verbatim.
+func TestModelRegistry_OpenRouterRoutingFullSurface(t *testing.T) {
+	provider := "test-provider-openrouter-routing-full"
+	id := "vendor/routed-full"
+	ai.RegisterModel(&ai.Model{ID: id, Name: id, API: ai.ApiOpenAICompletions, Provider: provider, BaseURL: "https://openrouter.ai/api/v1", Input: []ai.InputModality{ai.InputText}, Cost: ai.ModelCost{}, ContextWindow: 128000, MaxTokens: 4096})
+
+	tmp := t.TempDir()
+	modelsPath := filepath.Join(tmp, "models.json")
+	content := `{
+  "providers": {
+    "` + provider + `": {
+      "modelOverrides": {
+        "` + id + `": {
+          "compat": {
+            "openRouterRouting": {
+              "allowFallbacks": false,
+              "requireParameters": true,
+              "dataCollection": "deny",
+              "zdr": true,
+              "enforceDistillableText": false,
+              "order": ["moonshot", "together"],
+              "only": ["moonshot"],
+              "ignore": ["novita"],
+              "quantizations": ["fp8"],
+              "sort": "throughput",
+              "maxPrice": { "prompt": 1.5, "completion": 6 },
+              "preferredMinThroughput": 40,
+              "preferredMaxLatency": { "p50": 2.5 }
+            }
+          }
+        }
+      }
+    }
+  }
+}`
+	if err := os.WriteFile(modelsPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	registry, _ := setupTestModelRegistry(t, modelsPath)
+	m := registry.Find(provider, id)
+	if m == nil {
+		t.Fatal("expected overridden model")
+	}
+	c := m.GetOpenAICompletionsCompat()
+	if c == nil || c.OpenRouterRouting == nil {
+		t.Fatal("expected openRouterRouting to be parsed")
+	}
+	r := c.OpenRouterRouting
+	if r.AllowFallbacks == nil || *r.AllowFallbacks {
+		t.Fatalf("expected allowFallbacks=false, got %v", r.AllowFallbacks)
+	}
+	if r.RequireParameters == nil || !*r.RequireParameters {
+		t.Fatalf("expected requireParameters=true, got %v", r.RequireParameters)
+	}
+	if r.DataCollection != "deny" {
+		t.Fatalf("expected dataCollection=deny, got %q", r.DataCollection)
+	}
+	if r.ZDR == nil || !*r.ZDR {
+		t.Fatalf("expected zdr=true, got %v", r.ZDR)
+	}
+	if r.EnforceDistillableText == nil || *r.EnforceDistillableText {
+		t.Fatalf("expected enforceDistillableText=false, got %v", r.EnforceDistillableText)
+	}
+	if len(r.Ignore) != 1 || r.Ignore[0] != "novita" {
+		t.Fatalf("unexpected ignore: %#v", r.Ignore)
+	}
+	if len(r.Quantizations) != 1 || r.Quantizations[0] != "fp8" {
+		t.Fatalf("unexpected quantizations: %#v", r.Quantizations)
+	}
+	if r.Sort != "throughput" {
+		t.Fatalf("unexpected sort: %#v", r.Sort)
+	}
+	if r.MaxPrice == nil || r.MaxPrice.Prompt != 1.5 || r.MaxPrice.Completion != float64(6) {
+		t.Fatalf("unexpected maxPrice: %#v", r.MaxPrice)
+	}
+	if r.PreferredMinThroughput != float64(40) {
+		t.Fatalf("unexpected preferredMinThroughput: %#v", r.PreferredMinThroughput)
+	}
+	lat, ok := r.PreferredMaxLatency.(map[string]any)
+	if !ok || lat["p50"] != 2.5 {
+		t.Fatalf("unexpected preferredMaxLatency: %#v", r.PreferredMaxLatency)
+	}
+}
+
+// Regression: mergeCompat shallow-copies the base compat struct, so its routing
+// pointer aliases the built-in catalog entry. Merging an override must clone
+// before writing, or one model's override silently rewrites the shared base.
+func TestMergeCompat_RoutingOverrideDoesNotMutateBase(t *testing.T) {
+	base := &ai.OpenAICompletionsCompat{
+		OpenRouterRouting:    &ai.OpenRouterRouting{Only: []string{"base-provider"}},
+		VercelGatewayRouting: &ai.VercelGatewayRouting{Only: []string{"base-gateway"}},
+	}
+
+	merged, ok := mergeCompat(base, &CompatConfig{
+		OpenRouterRouting:    &OpenRouterRoutingConfig{Only: []string{"override-provider"}},
+		VercelGatewayRouting: &VercelGatewayRoutingConfig{Only: []string{"override-gateway"}},
+	}).(*ai.OpenAICompletionsCompat)
+	if !ok {
+		t.Fatal("expected *ai.OpenAICompletionsCompat")
+	}
+
+	if got := merged.OpenRouterRouting.Only; len(got) != 1 || got[0] != "override-provider" {
+		t.Fatalf("merged openRouterRouting.only = %#v", got)
+	}
+	if got := base.OpenRouterRouting.Only; len(got) != 1 || got[0] != "base-provider" {
+		t.Fatalf("base openRouterRouting.only was mutated: %#v", got)
+	}
+	if got := merged.VercelGatewayRouting.Only; len(got) != 1 || got[0] != "override-gateway" {
+		t.Fatalf("merged vercelGatewayRouting.only = %#v", got)
+	}
+	if got := base.VercelGatewayRouting.Only; len(got) != 1 || got[0] != "base-gateway" {
+		t.Fatalf("base vercelGatewayRouting.only was mutated: %#v", got)
+	}
+}
