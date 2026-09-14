@@ -48,3 +48,12 @@ An answer prefixed `(reasoning off)` is degraded: the advisor produced it with r
 ## Delegating down (aside with delegate=true)
 
 The mirror of escalation. When you are running an expensive flagship model yourself, route context-heavy but low-judgement asides to the cheap delegate model with `delegate=true`: bulk file reads + synthesis, log summarisation, data extraction, mechanical reformatting. The principle is **judgement density, not size** — a huge log dump with a simple question is delegate work; a three-line diff with a subtle design question is not. Never set both `escalate` and `delegate` on one call. Configure with `/aside-delegate` (show / set / off).
+
+### Agentic delegation (`goal=`)
+
+`tools=[…]` requires you to know the whole chain of calls upfront, so it can't offload *exploration*. When the next call depends on what the last one found — *"find where the retry budget is configured and what reads it"* — pass `goal` instead (with `delegate=true`, and no `tools`): the delegate then drives its own **read-only** calls (`read`, `glob`, `grep`, `ls`) in a loop and returns a synthesised answer. Never available for `escalate` — the pattern stays **delegate gathers → escalate judges**.
+
+- `allow_tools: ["grep","read"]` narrows the set; anything outside the read-only four is rejected.
+- `max_iterations` defaults to 8 (clamped 1–20). The result header reports the model, tool-call count and iterations, and says `(hit iteration cap)` / `(hit tool-output cap)` / `(hit time cap)` when a budget ran out — treat such an answer as **partial** and either re-ask with a narrower goal or finish the investigation yourself.
+- If it comes back saying the delegate chain is exhausted, do the investigation inline with your own tools. It deliberately will not run the loop on your model.
+

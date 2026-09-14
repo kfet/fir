@@ -93,6 +93,20 @@ same way, under the ``"delegate"`` key in aside.json:
 The default delegate is fir's cheapest current Anthropic tier.  Setting
 both ``escalate`` and ``delegate`` on one call is a validation error.
 
+Agentic delegate mode
+---------------------
+
+The ordered ``tools`` list requires the CALLER to know the whole chain
+upfront, which defeats offloading *exploration*.  Passing ``goal`` instead
+(with ``delegate=true``; the two are mutually exclusive with ``tools``) runs
+an autonomous loop where the DELEGATE model chooses its own read-only tool
+calls — ``read``/``glob``/``grep``/``ls``, never anything mutating — until it
+can answer, bounded by ``max_iterations`` (default 8, clamped 1-20), a total
+tool-output cap and a wall clock.  It is delegate-only by design: escalation
+buys judgement on context already in hand, so the pattern stays "delegate
+gathers -> escalate judges".  See the block comment above
+``_READONLY_TOOL_NAMES`` for the mechanism and its upgrade path.
+
 Steering the executor
 ---------------------
 
@@ -1560,6 +1574,559 @@ def _run_side_query_chain(
 
 
 # ---------------------------------------------------------------------------
+# Agentic delegate mode — the side model drives its own tool calls
+# ---------------------------------------------------------------------------
+#
+# The ordered-``tools`` path requires the CALLER to know the whole chain
+# upfront, which defeats offloading exploration: "grep around until you find
+# where X is configured" is adaptive by nature. Agentic mode inverts it — the
+# caller states a ``goal`` and the DELEGATE model decides which read-only tool
+# to call next, iteration by iteration.
+#
+# MECHANISM (and its intended upgrade path). ``side_query`` / ``side_query_stream``
+# are TOOLLESS by construction on the host side (AgentSession.SideQueryStream →
+# Agent.SimplePromptStream, no tools anywhere in the wire protocol). So the loop
+# runs a TEXT PROTOCOL: the allowlisted tool schemas are rendered into the
+# question, the model replies with a fenced JSON block naming its next calls,
+# this extension executes them via ``ctx.call_tool`` and appends the outputs to
+# a scratchpad for the next iteration. The proper long-term fix is native tool
+# support on SimplePrompt (host + wire + SDK); the public surface here (``goal``,
+# ``allow_tools``, ``max_iterations``, the result shape) is deliberately
+# mechanism-free so a native path can drop in underneath without changing it.
+#
+# WHY DELEGATE ONLY. Escalation exists to buy judgement on context ALREADY in
+# hand; spending advisor-rate tokens on a grep loop is the opposite of that.
+# The pattern stays "delegate gathers → escalate judges", so ``goal`` requires
+# ``delegate=true`` and is a validation error otherwise.
+#
+# SCRATCHPAD GROWTH is append-only on purpose: ``SideQueryStream`` snapshots the
+# whole session transcript and appends the question, so the prefix stays
+# byte-identical across iterations and the prompt cache keeps hitting; only the
+# scratchpad tail is uncached. Rolling or compacting it would drop exactly the
+# evidence the model is reasoning over, so it is CAPPED rather than rolled —
+# see the three caps below.
+
+# Canonical read-only tools the delegate may drive. NEVER extend this with a
+# tool that can write, edit, patch, execute, or otherwise mutate anything: the
+# delegate is a cheap model running unattended in a loop with no human in the
+# path, and "read-only" is the entire safety story. Matching against
+# ctx.list_tools() is case-insensitive so provider-transformed names
+# ("Read" from Anthropic OAuth) resolve to the same entry.
+#
+# The match is BY NAME, which rests on one assumption worth stating because
+# list_tools() reports no origin field to check it against: a bare ``read`` /
+# ``glob`` / ``grep`` / ``ls`` is fir's builtin. MCP tools cannot collide (they
+# are ``mcp__<server>__<tool>``), but a project extension that registered a
+# tool literally named ``ls`` would be reachable here. If list_tools ever grows
+# an origin/source field, require builtin origin instead of trusting the name.
+#
+# INDIRECT PROMPT INJECTION is in scope and accepted: file contents steer the
+# delegate's next reads and its final answer, which the executor then reads. The
+# blast radius is bounded to read-only calls plus one returned answer — treat a
+# delegate answer as untrusted data, never as instructions.
+_READONLY_TOOL_NAMES = frozenset({"read", "glob", "grep", "ls"})
+
+# Iteration budget. The default is deliberately small — an exploration that
+# needs more than 8 read/grep rounds is usually a badly-scoped goal, and every
+# iteration re-sends the transcript prefix.
+_AGENTIC_DEFAULT_ITERATIONS = 8
+_AGENTIC_MIN_ITERATIONS = 1
+_AGENTIC_MAX_ITERATIONS = 20
+
+# Total tool output fed back into the loop, across all iterations. Bounds the
+# uncached tail so a delegate that greps the world cannot bill flagship-sized
+# prompts on a cheap model.
+_AGENTIC_MAX_TOTAL_TOOL_CHARS = 200_000
+
+# Per-call truncation, mirroring the ordered-tools path: one giant grep must
+# not consume the whole budget in a single iteration.
+_AGENTIC_MAX_TOOL_OUTPUT_CHARS = 50 * 1024
+
+# Wall-clock budget, checked BETWEEN iterations only — never interrupting an
+# in-flight call, which would waste tokens already paid for.
+_AGENTIC_WALL_CLOCK_SECONDS = 300.0
+
+# Fenced ```json blocks in a model reply. Non-greedy, DOTALL — we take the
+# LAST match so a model that shows an example before its real answer still
+# parses correctly.
+_JSON_FENCE_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
+
+
+def _clamp_iterations(value: Any) -> int:
+    """Clamp a caller-supplied max_iterations into the supported range.
+
+    Non-integers (including bools, which are ints in Python but never a
+    sensible iteration count) fall back to the default rather than erroring:
+    a malformed budget is not worth failing an otherwise valid goal over.
+    """
+    if isinstance(value, bool) or not isinstance(value, int):
+        return _AGENTIC_DEFAULT_ITERATIONS
+    return max(_AGENTIC_MIN_ITERATIONS, min(_AGENTIC_MAX_ITERATIONS, value))
+
+
+def _readonly_tool_index(ctx: fir_ext.Context) -> dict[str, Any]:
+    """Map lowercased canonical name → tool spec, for read-only tools only.
+
+    Built from the host's live tool list so an equivalent that happens to be
+    absent this session simply isn't offered, and anything outside
+    :data:`_READONLY_TOOL_NAMES` can never appear.
+    """
+    out: dict[str, Any] = {}
+    try:
+        available = ctx.list_tools()
+    except Exception:
+        return out
+    for spec in available or []:
+        name = (spec.get("name") or "").strip()
+        if name and name.lower() in _READONLY_TOOL_NAMES:
+            out[name.lower()] = spec
+    return out
+
+
+def _select_agentic_tools(
+    ctx: fir_ext.Context, allow_tools: list | None
+) -> tuple[list[Any], str | None]:
+    """Resolve the tool set the delegate may call.
+
+    Returns ``(specs, error)``. With no ``allow_tools`` the full read-only set
+    present this session is offered. With ``allow_tools`` the request is
+    validated against that set and ANY name outside it is an error — a typo
+    must not silently widen or narrow the delegate's reach, and a rejected
+    name is the only signal a caller gets that it asked for something
+    forbidden.
+    """
+    index = _readonly_tool_index(ctx)
+    if not index:
+        return [], (
+            "agentic mode needs at least one read-only tool "
+            f"({', '.join(sorted(_READONLY_TOOL_NAMES))}) but none are registered"
+        )
+    if allow_tools is None:
+        return [index[k] for k in sorted(index)], None
+    if not isinstance(allow_tools, list) or not allow_tools:
+        return [], "allow_tools must be a non-empty list of tool names"
+    chosen: list[Any] = []
+    seen: set[str] = set()
+    bad: list[str] = []
+    for name in allow_tools:
+        key = str(name).strip().lower()
+        if key not in index:
+            bad.append(str(name))
+            continue
+        if key in seen:
+            continue
+        seen.add(key)
+        chosen.append(index[key])
+    if bad:
+        return [], (
+            f"allow_tools rejected: {', '.join(bad)} — agentic mode is read-only. "
+            f"Allowed: {', '.join(sorted(index))}"
+        )
+    return chosen, None
+
+
+def _render_tool_schemas(specs: list[Any]) -> str:
+    """Render tool schemas as compact text for the delegate's prompt."""
+    lines = []
+    for spec in specs:
+        schema = spec.get("parameters") or {}
+        props = schema.get("properties") or {}
+        required = schema.get("required") or []
+        desc = " ".join((spec.get("description") or "").split())[:300]
+        lines.append(f"- {spec['name']}: {desc}")
+        for pname, pschema in props.items():
+            ptype = (pschema or {}).get("type", "any")
+            pdesc = " ".join(((pschema or {}).get("description") or "").split())[:120]
+            req = " (required)" if pname in required else ""
+            lines.append(f"    {pname}: {ptype}{req} — {pdesc}")
+    return "\n".join(lines)
+
+
+_AGENTIC_PROTOCOL = (
+    "Reply with EXACTLY ONE fenced json block and nothing else that matters:\n"
+    '  ```json\n  {"tool_calls": [{"name": "grep", "params": {"pattern": "foo"}}]}\n  ```\n'
+    "to call tools (they run and you see the output on the next turn), or\n"
+    '  ```json\n  {"answer": "your final answer"}\n  ```\n'
+    "when you can answer the goal. Prefer several tool calls per turn when they "
+    "are independent. Do not ask the user anything — you are running unattended."
+)
+
+
+def _build_agentic_prompt(
+    goal: str,
+    tool_specs: list[Any],
+    log: list[str],
+    *,
+    final: bool,
+    cap_note: str | None,
+) -> str:
+    """Compose the question for one iteration of the agentic loop.
+
+    ``final=True`` builds the closing, TOOLLESS synthesis turn used when a cap
+    is hit: the model is told the tools are gone and must answer from what it
+    already gathered. Everything before the scratchpad is byte-stable across
+    iterations so the prompt cache keeps hitting.
+    """
+    parts = [
+        "You are running an autonomous READ-ONLY investigation off to the side of "
+        "the main conversation. Work the goal below using the tools listed, then "
+        "answer.\n",
+        "--- Goal ---",
+        goal,
+        "",
+    ]
+    if not final:
+        parts += [
+            "--- Tools available to you ---",
+            _render_tool_schemas(tool_specs),
+            "",
+            "--- Protocol ---",
+            _AGENTIC_PROTOCOL,
+            "",
+        ]
+    if log:
+        parts += ["--- Work so far ---", *log, ""]
+    if final:
+        parts += [
+            "--- Stop ---",
+            f"You have hit a budget limit ({cap_note}). No further tool calls are "
+            "possible. Answer the goal now, in plain text, from what you gathered "
+            "above, and state plainly what remains unknown.",
+        ]
+    return "\n".join(parts)
+
+
+def _extract_json_object(text: str) -> dict | None:
+    """Pull the model's protocol object out of a reply, or None.
+
+    Tolerates prose around the block: the LAST fenced ```json object wins, and
+    failing that we scan for a bare top-level ``{…}`` with ``raw_decode``.
+    Only an object carrying ``tool_calls`` or ``answer`` counts — a stray dict
+    quoted in prose must not be mistaken for the protocol.
+    """
+    candidates: list[str] = _JSON_FENCE_RE.findall(text or "")
+    decoder = json.JSONDecoder()
+    if not candidates:
+        for i, ch in enumerate(text or ""):
+            if ch != "{":
+                continue
+            try:
+                obj, _ = decoder.raw_decode(text[i:])
+            except ValueError:
+                continue
+            if isinstance(obj, dict) and ("tool_calls" in obj or "answer" in obj):
+                return obj
+        return None
+    for raw in reversed(candidates):
+        try:
+            obj = json.loads(raw)
+        except ValueError:
+            continue
+        if isinstance(obj, dict) and ("tool_calls" in obj or "answer" in obj):
+            return obj
+    return None
+
+
+def _strip_json_blocks(text: str) -> str:
+    """Drop fenced json blocks from a reply, leaving only the model's prose."""
+    return _JSON_FENCE_RE.sub("", text or "").strip()
+
+
+def _parse_agentic_reply(text: str) -> tuple[str, Any]:
+    """Classify a delegate reply.
+
+    Returns ``("calls", [ {name, params}, … ])``, ``("answer", str)`` or
+    ``("malformed", reason)``. A reply with no protocol object at all is an
+    ANSWER, not an error: plain prose is the natural way a model signals it is
+    done, and punishing it would burn an iteration on a correct result.
+    """
+    obj = _extract_json_object(text)
+    if obj is None:
+        return "answer", (text or "").strip()
+    if "tool_calls" in obj:
+        calls = obj.get("tool_calls")
+        if not isinstance(calls, list) or not calls:
+            return "malformed", "'tool_calls' must be a non-empty list"
+        out = []
+        for call in calls:
+            if not isinstance(call, dict) or not str(call.get("name", "")).strip():
+                return "malformed", "each tool_call needs a 'name' and optional 'params' object"
+            params = call.get("params") or {}
+            if not isinstance(params, dict):
+                return "malformed", f"'params' for {call.get('name')!r} must be an object"
+            out.append({"name": str(call["name"]).strip(), "params": params})
+        return "calls", out
+    answer = obj.get("answer")
+    if isinstance(answer, str) and answer.strip():
+        return "answer", answer.strip()
+    return "malformed", "'answer' must be a non-empty string"
+
+
+def _agentic_exhausted_error(errs: list[str]) -> str:
+    """Terminal error when no delegate candidate could serve the loop.
+
+    Says explicitly what the caller should do instead, because the one thing
+    it must NOT do is assume the work happened.
+    """
+    detail = f" ({'; '.join(errs)})" if errs else ""
+    return (
+        "delegate chain exhausted — agentic mode deliberately does NOT fall back to "
+        "the executor model, because running an autonomous tool loop on it is exactly "
+        f"the cost you delegated away{detail}. Do this investigation inline instead: "
+        "call the read/glob/grep/ls tools yourself."
+    )
+
+
+def _agentic_probe(
+    ctx: fir_ext.Context,
+    question: str,
+    chain: list[dict[str, str]],
+) -> tuple[str | None, str | None, dict[str, str] | None, dict[str, int], list[dict[str, str]]]:
+    """One LLM call for the loop, walking *chain* with NO executor fallback.
+
+    The executor fallback that :func:`_run_side_query_chain` provides is wrong
+    here: running an autonomous tool loop on the executor's own model is the
+    very cost the caller delegated away, and it would do it silently. So an
+    exhausted chain is an ERROR the caller must handle (by doing the work
+    inline), not a quiet downgrade.
+
+    Classification mirrors the main walk — request-shaped errors surface
+    immediately (a cancellation must never earn another LLM call), empty
+    content retries once on the same candidate then advances without cooling
+    it off, unavailability cools off and advances, anything else stops.
+
+    Returns ``(text, err, used_cfg, usage, chain)``. The returned chain is
+    rotated so the candidate that answered is at the head — the loop sticks
+    with one model across iterations instead of re-walking every time.
+    """
+    spent: dict[str, int] = {}
+    errs: list[str] = []
+    for idx, cfg in enumerate(chain):
+        label = f"{cfg['provider']}/{cfg['model']}"
+        text: str | None = None
+        err: str | None = None
+        for attempt in range(2):
+            if attempt and _EMPTY_CONTENT_RETRY_BACKOFF > 0:
+                time.sleep(_EMPTY_CONTENT_RETRY_BACKOFF)
+            text, err, usage = _run_side_query_with_card(
+                ctx,
+                question,
+                model=cfg["model"],
+                provider=cfg["provider"],
+                effort=cfg.get("effort"),
+            )
+            spent = _merge_usage(spent, usage)
+            if err is None or _is_request_shaped_error(err) or not _is_empty_content_error(err):
+                break
+        if err is None:
+            _mark_model_available(cfg["provider"], cfg["model"])
+            return text, None, cfg, spent, [cfg, *chain[:idx], *chain[idx + 1 :]]
+        if _is_request_shaped_error(err):
+            return None, err, None, spent, chain
+        errs.append(f"{label}: {err}")
+        if _is_empty_content_error(err):
+            continue
+        if _is_model_unavailable_error(err):
+            _mark_model_unavailable(cfg["provider"], cfg["model"])
+            continue
+        break
+    return None, _agentic_exhausted_error(errs), None, spent, chain
+
+
+def _summarise_params(params: dict) -> str:
+    """One-line, bounded rendering of tool params for the log and the card."""
+    flat = " ".join(json.dumps(params, sort_keys=True, default=str).split())
+    return flat if len(flat) <= 120 else flat[:119] + "…"
+
+
+def _run_agentic_delegate(
+    goal: str,
+    ctx: fir_ext.Context,
+    *,
+    chain: list[dict[str, str]],
+    allow_tools: list | None,
+    max_iterations: int,
+) -> dict:
+    """Run the agentic delegate loop and return a structured tool result.
+
+    Iterates: ask the delegate → parse → execute allowlisted read-only tools →
+    append outputs → repeat, stopping on a text answer, a cap, or an abort. On
+    any cap it makes ONE final toolless synthesis call so the caller still gets
+    an answer built from real evidence, and the note says which cap was hit —
+    a truncated investigation presented as a complete one is worse than no
+    answer at all.
+    """
+    tool_specs, terr = _select_agentic_tools(ctx, allow_tools)
+    if terr is not None:
+        return _error(terr)
+    if not chain:
+        return _error(_agentic_exhausted_error([]))
+
+    index = {s["name"].lower(): s for s in tool_specs}
+    log: list[str] = []
+    tool_log: list[dict] = []
+    spent: dict[str, int] = {}
+    used_cfg: dict[str, str] | None = None
+    total_chars = 0
+    calls_made = 0
+    iterations = 0
+    cap_note: str | None = None
+    malformed_streak = 0
+    started = time.monotonic()
+    card = f"aside/agentic/{int(time.time() * 1000)}"
+    answer: str | None = None
+
+    def _publish(slug: str) -> None:
+        detail = "\n".join(
+            [f"goal: {goal}", "", *(f"{e['name']} {e['args']} → {e['size']}c" for e in tool_log)]
+        )
+        ctx.put_observable(card, slug=slug, detail=detail)
+
+    _publish(f"iter 0/{max_iterations}")
+
+    while iterations < max_iterations:
+        # Caps are checked BETWEEN iterations only — never mid-call, which
+        # would throw away tokens already paid for.
+        if time.monotonic() - started > _AGENTIC_WALL_CLOCK_SECONDS:
+            cap_note = "hit time cap"
+            break
+        if total_chars >= _AGENTIC_MAX_TOTAL_TOOL_CHARS:
+            cap_note = "hit tool-output cap"
+            break
+        iterations += 1
+        ctx.report_progress(f"delegate iter {iterations}/{max_iterations}")
+        question = _build_agentic_prompt(goal, tool_specs, log, final=False, cap_note=None)
+        text, err, cfg, usage, chain = _agentic_probe(ctx, question, chain)
+        spent = _merge_usage(spent, usage)
+        if cfg is not None:
+            used_cfg = cfg
+        if err is not None:
+            if _is_request_shaped_error(err):
+                # Cancellation or overflow: break the loop right here. Never
+                # fire another LLM call — not a retry, not the final synthesis.
+                _publish("aborted")
+                return _side_query_error(RuntimeError(err))
+            _publish("ERR")
+            return _error(err)
+
+        kind, payload = _parse_agentic_reply(text or "")
+        if kind == "answer":
+            answer = payload
+            break
+        if kind == "malformed":
+            malformed_streak += 1
+            if malformed_streak >= 2:
+                # Two corrective nudges in a row means the model cannot hold
+                # the protocol; stop rather than spend the whole budget
+                # teaching it JSON. Keep only its PROSE — echoing the broken
+                # JSON block back as the "answer" would hand the caller
+                # machine noise dressed up as a finding. With no prose at all
+                # we leave answer unset and let the closing toolless
+                # synthesis produce one from the evidence gathered so far.
+                answer = _strip_json_blocks(text or "") or None
+                cap_note = "malformed tool call — stopped"
+                break
+            log.append(
+                f"[protocol error] {payload}. Your previous reply was not usable. "
+                "Reply with a single fenced json block containing either "
+                '"tool_calls" or "answer".'
+            )
+            _publish(f"iter {iterations}/{max_iterations} · protocol error")
+            continue
+        malformed_streak = 0
+
+        for call in payload:
+            name = call["name"].lower()
+            spec = index.get(name)
+            if spec is None:
+                log.append(
+                    f"[tool {call['name']}] refused: not in the read-only allowlist "
+                    f"({', '.join(sorted(index))})"
+                )
+                continue
+            required = (spec.get("parameters") or {}).get("required") or []
+            missing = [r for r in required if r not in call["params"]]
+            if missing:
+                log.append(
+                    f"[tool {spec['name']}] refused: missing required params: " + ", ".join(missing)
+                )
+                continue
+            args = _summarise_params(call["params"])
+            ctx.report_progress(f"{spec['name']} {args}"[:80])
+            try:
+                result = ctx.call_tool(spec["name"], call["params"])
+                output = _result_text(result)
+                if result.get("is_error"):
+                    output = f"[ERROR] {output}"
+            except Exception as exc:
+                output = f"[ERROR] error calling tool: {exc}"
+            if len(output) > _AGENTIC_MAX_TOOL_OUTPUT_CHARS:
+                output = output[:_AGENTIC_MAX_TOOL_OUTPUT_CHARS] + "\n... (truncated)"
+            calls_made += 1
+            total_chars += len(output)
+            tool_log.append({"name": spec["name"], "args": args, "size": len(output)})
+            log.append(f"[tool {spec['name']} {args}]\n{output}")
+            _publish(
+                f"iter {iterations}/{max_iterations} · {spec['name']} · {_fmt_tokens(total_chars)}c"
+            )
+    else:
+        # Natural exhaustion. The output cap can land on the SAME iteration
+        # that exhausts the budget; report it in preference, since it is the
+        # cap that would still bite if the caller simply raised max_iterations.
+        cap_note = (
+            "hit tool-output cap"
+            if total_chars >= _AGENTIC_MAX_TOTAL_TOOL_CHARS
+            else "hit iteration cap"
+        )
+
+    if answer is None:
+        # A cap ended the loop with no answer in hand: one final TOOLLESS
+        # synthesis on the same delegate, so the caller gets the partial
+        # findings rather than a bare failure.
+        if cap_note is None:
+            cap_note = "hit iteration cap"
+        ctx.report_progress("delegate synthesising…")
+        question = _build_agentic_prompt(goal, tool_specs, log, final=True, cap_note=cap_note)
+        text, err, cfg, usage, chain = _agentic_probe(ctx, question, chain)
+        spent = _merge_usage(spent, usage)
+        if cfg is not None:
+            used_cfg = cfg
+        if err is not None:
+            _publish("ERR")
+            return (
+                _side_query_error(RuntimeError(err))
+                if _is_request_shaped_error(err)
+                else _error(err)
+            )
+        answer = (text or "").strip()
+
+    if not answer:
+        _publish("empty")
+        return _error("delegate returned no content")
+
+    _publish(cap_note or "done")
+    model = f"{_format_advisor_spec(used_cfg)}{_trace_notes(used_cfg)}" if used_cfg else "unknown"
+    header = f"[delegate: {model} · {calls_made} tool calls · {iterations} iterations]"
+    if cap_note:
+        header += f" ({cap_note})"
+    return {
+        "content": [{"type": "text", "text": _append_usage(f"{header}\n\n{answer}", spent)}],
+        "is_error": False,
+        "details": {
+            "tool_outputs": [
+                {
+                    "name": e["name"],
+                    "title": e["args"],
+                    "output": f"{e['size']} chars",
+                    "is_error": False,
+                }
+                for e in tool_log
+            ]
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
 # Core: run an aside — side query with optional tool calls
 # ---------------------------------------------------------------------------
 
@@ -1570,6 +2137,9 @@ def _run_aside(
     ctx: fir_ext.Context,
     escalate: bool = False,
     delegate: bool = False,
+    goal: str = "",
+    allow_tools: list | None = None,
+    max_iterations: Any = None,
 ) -> dict:
     """Execute *tools*, collect outputs, synthesise via side_query().
 
@@ -1590,16 +2160,59 @@ def _run_aside(
         When True (and a delegate model is configured), route the side query
         to the cheaper delegate model instead.  Ignored when no delegate is
         configured.  Mutually exclusive with *escalate*.
+    goal : str
+        Agentic mode. Mutually exclusive with *tools*, and REQUIRES
+        *delegate*: the delegate model drives its own read-only tool calls
+        until it can answer the goal.  See :func:`_run_agentic_delegate`.
+    allow_tools : list, optional
+        Narrow agentic mode's read-only tool set. Validated against it.
+    max_iterations : int, optional
+        Agentic iteration budget, clamped to 1..20 (default 8).
 
     Returns
     -------
     dict
         Structured tool result with ``content`` and ``is_error``.
     """
-    if not instructions:
-        return _error("instructions are required")
     if escalate and delegate:
         return _error("escalate and delegate are mutually exclusive — pick one")
+
+    goal = (goal or "").strip()
+    if goal:
+        # Agentic mode. The three constraints below are validation errors, not
+        # silent coercions: each one means the caller has a different mental
+        # model of what this call will do than what it would actually do.
+        if tools:
+            return _error(
+                "goal and tools are mutually exclusive — use 'goal' to let the "
+                "delegate choose its own tool calls, or 'tools' to run a chain "
+                "you specify upfront"
+            )
+        if escalate:
+            return _error(
+                "goal requires delegate=true — agentic mode is delegate-only. "
+                "Escalation buys judgement on context already in hand; the pattern "
+                "is 'delegate gathers -> escalate judges'"
+            )
+        if not delegate:
+            return _error("goal requires delegate=true — agentic mode is delegate-only")
+        if _delegate() is None:
+            return _error(
+                "goal requires a configured delegate model, but delegation is off "
+                "(see /aside-delegate)"
+            )
+        return _run_agentic_delegate(
+            goal,
+            ctx,
+            chain=_resolve_delegate_chain(ctx),
+            allow_tools=allow_tools,
+            max_iterations=_clamp_iterations(
+                _AGENTIC_DEFAULT_ITERATIONS if max_iterations is None else max_iterations
+            ),
+        )
+
+    if not instructions:
+        return _error("instructions are required")
 
     # Resolve advisor/delegate override if requested and configured. Layer A:
     # resolution produces an ORDERED candidate chain, each element passed
@@ -1871,6 +2484,14 @@ def _aside_tool_description() -> str:
             "asides — bulk file reads + synthesis, log summarisation, data "
             "extraction — where volume is high but the reasoning is mechanical. "
             "Route by judgement density, not just size."
+            "\n\nAgentic delegation: instead of 'tools' + 'instructions', set 'goal' "
+            "(with delegate=true) to let the delegate model drive its OWN read-only "
+            "tool calls (read/glob/grep/ls) in a loop until it can answer. Use 'goal' "
+            "when the chain of calls is adaptive and not knowable upfront ('find where "
+            "X is configured and how it's used'); use 'tools' when you already know "
+            "the exact calls. Agentic mode is delegate-only — escalation is for "
+            "judgement on context already in hand, so the pattern stays "
+            "'delegate gathers -> escalate judges'."
         )
     return base
 
@@ -1908,10 +2529,10 @@ def _aside_tool_parameters() -> dict[str, Any]:
             },
             "instructions": {
                 "type": "string",
-                "description": "Instructions for the LLM that synthesises collected outputs, or the side question to ask.",
+                "description": "Instructions for the LLM that synthesises collected outputs, or the side question to ask. Required unless 'goal' is set.",
             },
         },
-        "required": ["title", "instructions"],
+        "required": ["title"],
     }
     if _advisor() is not None:
         schema["properties"]["escalate"] = {
@@ -1932,6 +2553,29 @@ def _aside_tool_parameters() -> dict[str, Any]:
                 "description. Mutually exclusive with 'escalate'."
             ),
         }
+        schema["properties"]["goal"] = {
+            "type": "string",
+            "description": (
+                "AGENTIC mode: state what you want found out and let the delegate "
+                "drive its own read-only tool calls (read/glob/grep/ls) until it can "
+                "answer. Requires delegate=true. Mutually exclusive with 'tools' — "
+                "use 'goal' when the chain of calls is not knowable upfront, 'tools' "
+                "when it is."
+            ),
+        }
+        schema["properties"]["allow_tools"] = {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": (
+                "Agentic mode only: narrow the delegate's tool set. Must be a subset "
+                "of the read-only set (read, glob, grep, ls); anything else is "
+                "rejected."
+            ),
+        }
+        schema["properties"]["max_iterations"] = {
+            "type": "integer",
+            "description": ("Agentic mode only: max tool-calling rounds. Default 8, clamped 1-20."),
+        }
     return schema
 
 
@@ -1939,6 +2583,16 @@ def _aside_tool_parameters() -> dict[str, Any]:
     name="aside",
     description=_aside_tool_description(),
     parameters=_aside_tool_parameters(),
+    # Host-side deadline disabled: this body legitimately runs multi-minute LLM
+    # work — an advisor call on a large transcript, and in agentic mode up to
+    # 20 of them plus tool calls. The 30s default only survives today by
+    # accident (CallHook's deadline is activity-aware and this extension is
+    # chatty with cards and progress), which is not something to keep resting
+    # on, and it also violated the SDK's documented invariant that a body
+    # waiting on ctx.call_tool(timeout=60) must declare at least that much. The
+    # call stays bounded: turn cancel / ESC on the host side, and side_query's
+    # own 600s per-delta idle timeout on this side.
+    timeout=-1,
     display_hint={
         "title_args": [
             {"name": "title", "style": "accent"},
@@ -1952,7 +2606,16 @@ def aside(params: dict, ctx: fir_ext.Context):
     instructions = params.get("instructions", "")
     escalate = bool(params.get("escalate", False))
     delegate = bool(params.get("delegate", False))
-    return _run_aside(tools, instructions, ctx, escalate=escalate, delegate=delegate)
+    return _run_aside(
+        tools,
+        instructions,
+        ctx,
+        escalate=escalate,
+        delegate=delegate,
+        goal=params.get("goal", "") or "",
+        allow_tools=params.get("allow_tools"),
+        max_iterations=params.get("max_iterations"),
+    )
 
 
 # ---------------------------------------------------------------------------

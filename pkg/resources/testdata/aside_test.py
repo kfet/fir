@@ -9,6 +9,7 @@ Exercises:
   - cmd_aside command handler: argument handling (side questions + tool orchestration)
 """
 
+import json
 import os
 import sys
 import unittest
@@ -2452,10 +2453,6 @@ class TestAdviseCommand(unittest.TestCase):
         self.assertTrue(result.get("print_response"))
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 # ---------------------------------------------------------------------------
 # Streaming side_query + observable card publication
 # ---------------------------------------------------------------------------
@@ -3429,3 +3426,514 @@ class TestDynamicDefaultChain(unittest.TestCase):
             [c["model"] for c in mod._resolve_advisor_chain(self._ctx(available))],
             ["claude-opus-4-7", "claude-opus-4-8"],
         )
+
+
+# ---------------------------------------------------------------------------
+# Agentic delegate mode (goal=...)
+# ---------------------------------------------------------------------------
+
+
+_READONLY_TOOL_LIST = [
+    {
+        "name": "read",
+        "description": "Read a file",
+        "parameters": {
+            "type": "object",
+            "properties": {"path": {"type": "string", "description": "path"}},
+            "required": ["path"],
+        },
+    },
+    {
+        "name": "grep",
+        "description": "Search",
+        "parameters": {
+            "type": "object",
+            "properties": {"pattern": {"type": "string"}},
+            "required": ["pattern"],
+        },
+    },
+    {"name": "glob", "description": "Glob", "parameters": {"type": "object"}},
+    {"name": "ls", "description": "List", "parameters": {"type": "object"}},
+    # Must never be offered to the delegate, however it is spelled.
+    {"name": "edit", "description": "Edit a file", "parameters": {"type": "object"}},
+    {"name": "bash", "description": "Run a command", "parameters": {"type": "object"}},
+]
+
+
+def _tool_result(text, is_error=False):
+    return {"content": [{"type": "text", "text": text}], "is_error": is_error}
+
+
+def _calls_block(*calls):
+    payload = {"tool_calls": [{"name": n, "params": p} for n, p in calls]}
+    return "sure, looking now\n```json\n" + json.dumps(payload) + "\n```"
+
+
+def _answer_block(text):
+    return "```json\n" + json.dumps({"answer": text}) + "\n```"
+
+
+class _AgenticBase(unittest.TestCase):
+    """Shared harness: a delegate-configured module and a scripted ctx."""
+
+    def setUp(self):
+        self.mod = _load_aside()
+        self.mod._DELEGATE = {"provider": "anthropic", "model": "claude-haiku-4-5"}
+        self.mod._ADVISOR = None
+        # No wall-clock waiting anywhere in these tests.
+        self.mod._EMPTY_CONTENT_RETRY_BACKOFF = 0.0
+
+    def _ctx(self, replies, tool_output="TOOL OUTPUT", tools=None):
+        ctx = _blocking_ctx()
+        self.replies = list(replies)
+        ctx.side_query = mock.MagicMock(side_effect=self.replies)
+        ctx.list_tools = mock.MagicMock(
+            return_value=list(_READONLY_TOOL_LIST if tools is None else tools)
+        )
+        ctx.available_models = mock.MagicMock(return_value=[])
+        if callable(tool_output):
+            ctx.call_tool = mock.MagicMock(side_effect=tool_output)
+        else:
+            ctx.call_tool = mock.MagicMock(return_value=_tool_result(tool_output))
+        return ctx
+
+    def _run(self, ctx, **kw):
+        kw.setdefault("delegate", True)
+        return self.mod._run_aside([], "", ctx, goal=kw.pop("goal", "find X"), **kw)
+
+
+class TestAgenticValidation(_AgenticBase):
+    def test_goal_and_tools_are_mutually_exclusive(self):
+        ctx = self._ctx([])
+        result = self.mod._run_aside(
+            [{"name": "read", "params": {"path": "a"}}], "", ctx, delegate=True, goal="find X"
+        )
+        self.assertTrue(result["is_error"])
+        self.assertIn("mutually exclusive", result["content"][0]["text"])
+        ctx.side_query.assert_not_called()
+
+    def test_goal_requires_delegate(self):
+        ctx = self._ctx([])
+        result = self.mod._run_aside([], "", ctx, goal="find X")
+        self.assertTrue(result["is_error"])
+        self.assertIn("requires delegate=true", result["content"][0]["text"])
+        ctx.side_query.assert_not_called()
+
+    def test_goal_with_escalate_is_an_error(self):
+        self.mod._ADVISOR = {"provider": "anthropic", "model": "claude-opus-4-8"}
+        ctx = self._ctx([])
+        result = self.mod._run_aside([], "", ctx, escalate=True, goal="find X")
+        self.assertTrue(result["is_error"])
+        self.assertIn("delegate-only", result["content"][0]["text"])
+        ctx.side_query.assert_not_called()
+
+    def test_goal_with_delegation_disabled_is_an_error(self):
+        self.mod._DELEGATE = None
+        ctx = self._ctx([])
+        result = self.mod._run_aside([], "", ctx, delegate=True, goal="find X")
+        self.assertTrue(result["is_error"])
+        self.assertIn("delegation is off", result["content"][0]["text"])
+
+    def test_instructions_still_required_without_goal(self):
+        ctx = self._ctx([])
+        result = self.mod._run_aside([], "", ctx)
+        self.assertTrue(result["is_error"])
+        self.assertIn("instructions are required", result["content"][0]["text"])
+
+    def test_allow_tools_rejects_anything_outside_the_readonly_set(self):
+        ctx = self._ctx([])
+        result = self._run(ctx, allow_tools=["read", "edit"])
+        self.assertTrue(result["is_error"])
+        self.assertIn("edit", result["content"][0]["text"])
+        self.assertIn("read-only", result["content"][0]["text"])
+        ctx.side_query.assert_not_called()
+
+    def test_allow_tools_narrows_the_offered_set(self):
+        ctx = self._ctx([_answer_block("done")])
+        result = self._run(ctx, allow_tools=["grep"])
+        self.assertFalse(result["is_error"])
+        prompt = ctx.side_query.call_args_list[0].args[0]
+        self.assertIn("- grep:", prompt)
+        self.assertNotIn("- read:", prompt)
+
+    def test_mutating_tools_are_never_offered(self):
+        ctx = self._ctx([_answer_block("done")])
+        self._run(ctx)
+        prompt = ctx.side_query.call_args_list[0].args[0]
+        for forbidden in ("- edit:", "- bash:"):
+            self.assertNotIn(forbidden, prompt)
+        for offered in ("- read:", "- grep:", "- glob:", "- ls:"):
+            self.assertIn(offered, prompt)
+
+    def test_no_readonly_tools_registered_is_an_error(self):
+        ctx = self._ctx([], tools=[{"name": "edit", "parameters": {}}])
+        result = self._run(ctx)
+        self.assertTrue(result["is_error"])
+        self.assertIn("none are registered", result["content"][0]["text"])
+
+    def test_clamp_iterations(self):
+        self.assertEqual(self.mod._clamp_iterations(0), 1)
+        self.assertEqual(self.mod._clamp_iterations(99), 20)
+        self.assertEqual(self.mod._clamp_iterations(5), 5)
+        self.assertEqual(self.mod._clamp_iterations(None), 8)
+        self.assertEqual(self.mod._clamp_iterations("many"), 8)
+        self.assertEqual(self.mod._clamp_iterations(True), 8)
+
+
+class TestAgenticParsing(_AgenticBase):
+    def test_fenced_tool_calls(self):
+        kind, payload = self.mod._parse_agentic_reply(_calls_block(("read", {"path": "a.go"})))
+        self.assertEqual(kind, "calls")
+        self.assertEqual(payload, [{"name": "read", "params": {"path": "a.go"}}])
+
+    def test_last_fenced_block_wins(self):
+        text = _answer_block("example") + "\n" + _calls_block(("ls", {}))
+        kind, payload = self.mod._parse_agentic_reply(text)
+        self.assertEqual(kind, "calls")
+        self.assertEqual(payload[0]["name"], "ls")
+
+    def test_bare_json_object_without_a_fence(self):
+        kind, payload = self.mod._parse_agentic_reply('here you go {"answer": "42"} ok')
+        self.assertEqual((kind, payload), ("answer", "42"))
+
+    def test_plain_prose_is_a_final_answer(self):
+        kind, payload = self.mod._parse_agentic_reply("The config lives in cfg.go.")
+        self.assertEqual((kind, payload), ("answer", "The config lives in cfg.go."))
+
+    def test_unrelated_json_in_prose_is_not_the_protocol(self):
+        kind, _ = self.mod._parse_agentic_reply('config is {"a": 1} by default')
+        self.assertEqual(kind, "answer")
+
+    def test_malformed_shapes(self):
+        for bad in (
+            '```json\n{"tool_calls": []}\n```',
+            '```json\n{"tool_calls": [{"params": {}}]}\n```',
+            '```json\n{"tool_calls": [{"name": "read", "params": 3}]}\n```',
+            '```json\n{"answer": ""}\n```',
+        ):
+            kind, _ = self.mod._parse_agentic_reply(bad)
+            self.assertEqual(kind, "malformed", bad)
+
+
+class TestAgenticLoop(_AgenticBase):
+    def test_single_tool_round_then_answer(self):
+        ctx = self._ctx(
+            [_calls_block(("read", {"path": "a.go"})), _answer_block("X is in a.go")],
+            tool_output="package a",
+        )
+        result = self._run(ctx)
+        self.assertFalse(result["is_error"])
+        ctx.call_tool.assert_called_once_with("read", {"path": "a.go"})
+        text = result["content"][0]["text"]
+        self.assertTrue(
+            text.startswith("[delegate: anthropic/claude-haiku-4-5 · 1 tool calls · 2 iterations]"),
+            text,
+        )
+        self.assertIn("X is in a.go", text)
+        self.assertNotIn("hit iteration cap", text)
+        # Second prompt carries the first round's output — pure append.
+        second = ctx.side_query.call_args_list[1].args[0]
+        self.assertIn("package a", second)
+        self.assertIn("--- Work so far ---", second)
+
+    def test_all_calls_route_to_the_delegate_model(self):
+        ctx = self._ctx([_calls_block(("ls", {})), _answer_block("ok")])
+        self._run(ctx)
+        for call in ctx.side_query.call_args_list:
+            self.assertEqual(call.kwargs["model"], "claude-haiku-4-5")
+            self.assertEqual(call.kwargs["provider"], "anthropic")
+
+    def test_multiple_calls_in_one_iteration(self):
+        ctx = self._ctx(
+            [_calls_block(("ls", {}), ("grep", {"pattern": "X"})), _answer_block("done")]
+        )
+        result = self._run(ctx)
+        self.assertEqual(ctx.call_tool.call_count, 2)
+        self.assertIn("2 tool calls", result["content"][0]["text"])
+
+    def test_immediate_answer_makes_no_tool_calls(self):
+        ctx = self._ctx([_answer_block("already know it")])
+        result = self._run(ctx)
+        ctx.call_tool.assert_not_called()
+        self.assertIn("0 tool calls · 1 iterations", result["content"][0]["text"])
+
+    def test_iteration_cap_triggers_final_toolless_synthesis(self):
+        ctx = self._ctx([_calls_block(("ls", {}))] * 2 + [_answer_block("partial finding")])
+        result = self._run(ctx, max_iterations=2)
+        self.assertFalse(result["is_error"])
+        self.assertEqual(ctx.side_query.call_count, 3)
+        text = result["content"][0]["text"]
+        self.assertIn("(hit iteration cap)", text)
+        self.assertIn("partial finding", text)
+        # The closing turn offers no tools and says why it stopped.
+        final = ctx.side_query.call_args_list[-1].args[0]
+        self.assertNotIn("--- Tools available to you ---", final)
+        self.assertIn("hit iteration cap", final)
+
+    def test_output_cap_wins_when_both_caps_land_together(self):
+        self.mod._AGENTIC_MAX_TOTAL_TOOL_CHARS = 10
+        ctx = self._ctx([_calls_block(("ls", {})), _answer_block("partial")], tool_output="x" * 50)
+        result = self._run(ctx, max_iterations=1)
+        self.assertIn("(hit tool-output cap)", result["content"][0]["text"])
+
+    def test_total_output_cap_stops_the_loop(self):
+        self.mod._AGENTIC_MAX_TOTAL_TOOL_CHARS = 10
+        ctx = self._ctx(
+            [_calls_block(("ls", {})), _answer_block("stopped early")],
+            tool_output="x" * 50,
+        )
+        result = self._run(ctx, max_iterations=20)
+        text = result["content"][0]["text"]
+        self.assertIn("(hit tool-output cap)", text)
+        self.assertEqual(ctx.call_tool.call_count, 1)
+
+    def test_per_call_output_is_truncated(self):
+        self.mod._AGENTIC_MAX_TOOL_OUTPUT_CHARS = 20
+        ctx = self._ctx([_calls_block(("ls", {})), _answer_block("ok")], tool_output="y" * 500)
+        self._run(ctx)
+        second = ctx.side_query.call_args_list[1].args[0]
+        self.assertIn("... (truncated)", second)
+        self.assertNotIn("y" * 100, second)
+
+    def test_wall_clock_cap_stops_the_loop(self):
+        self.mod._AGENTIC_WALL_CLOCK_SECONDS = -1.0
+        ctx = self._ctx([_answer_block("from nothing")])
+        result = self._run(ctx)
+        # The clock is checked before the first iteration, so the only LLM
+        # call is the closing toolless synthesis.
+        self.assertEqual(ctx.side_query.call_count, 1)
+        self.assertIn("(hit time cap)", result["content"][0]["text"])
+
+    def test_unknown_tool_is_refused_not_executed(self):
+        ctx = self._ctx([_calls_block(("bash", {"cmd": "rm -rf /"})), _answer_block("ok")])
+        result = self._run(ctx)
+        ctx.call_tool.assert_not_called()
+        self.assertFalse(result["is_error"])
+        second = ctx.side_query.call_args_list[1].args[0]
+        self.assertIn("refused: not in the read-only allowlist", second)
+
+    def test_missing_required_params_are_refused(self):
+        ctx = self._ctx([_calls_block(("read", {})), _answer_block("ok")])
+        self._run(ctx)
+        ctx.call_tool.assert_not_called()
+        self.assertIn("missing required params: path", ctx.side_query.call_args_list[1].args[0])
+
+    def test_tool_error_is_fed_back_not_fatal(self):
+        ctx = self._ctx(
+            [_calls_block(("read", {"path": "nope"})), _answer_block("file missing")],
+            tool_output=lambda *a, **k: _tool_result("no such file", is_error=True),
+        )
+        result = self._run(ctx)
+        self.assertFalse(result["is_error"])
+        self.assertIn("[ERROR] no such file", ctx.side_query.call_args_list[1].args[0])
+
+    def test_tool_exception_is_fed_back_not_fatal(self):
+        def boom(*_a, **_k):
+            raise RuntimeError("bridge down")
+
+        ctx = self._ctx(
+            [_calls_block(("ls", {})), _answer_block("gave up on ls")], tool_output=boom
+        )
+        result = self._run(ctx)
+        self.assertFalse(result["is_error"])
+        self.assertIn("bridge down", ctx.side_query.call_args_list[1].args[0])
+
+    def test_one_malformed_reply_earns_a_corrective_nudge(self):
+        ctx = self._ctx(['```json\n{"tool_calls": []}\n```', _answer_block("recovered")])
+        result = self._run(ctx)
+        self.assertFalse(result["is_error"])
+        self.assertIn("[protocol error]", ctx.side_query.call_args_list[1].args[0])
+        self.assertIn("recovered", result["content"][0]["text"])
+
+    def test_two_consecutive_malformed_replies_stop_the_loop(self):
+        bad = 'here is my finding\n```json\n{"tool_calls": []}\n```'
+        ctx = self._ctx([bad, bad])
+        result = self._run(ctx)
+        self.assertFalse(result["is_error"])
+        self.assertEqual(ctx.side_query.call_count, 2)
+        text = result["content"][0]["text"]
+        self.assertIn("malformed tool call — stopped", text)
+        # Only the prose survives — the broken JSON is not echoed back as an
+        # answer.
+        self.assertIn("here is my finding", text)
+        self.assertNotIn("tool_calls", text)
+
+    def test_malformed_with_no_prose_falls_through_to_synthesis(self):
+        bad = '```json\n{"tool_calls": []}\n```'
+        ctx = self._ctx([bad, bad, _answer_block("synthesised anyway")])
+        result = self._run(ctx)
+        self.assertFalse(result["is_error"])
+        self.assertEqual(ctx.side_query.call_count, 3)
+        self.assertIn("synthesised anyway", result["content"][0]["text"])
+        final = ctx.side_query.call_args_list[-1].args[0]
+        self.assertNotIn("--- Tools available to you ---", final)
+
+    def test_header_surfaces_a_degraded_route(self):
+        ctx = self._ctx([_answer_block("ok")])
+        with mock.patch.object(
+            self.mod,
+            "_resolve_delegate_chain",
+            return_value=[
+                {"provider": "anthropic", "model": "live-haiku", "_fallback": "dead-haiku"}
+            ],
+        ):
+            result = self._run(ctx)
+        self.assertIn(
+            "[delegate: anthropic/live-haiku (fallback: dead-haiku unavailable) · ",
+            result["content"][0]["text"],
+        )
+
+    def test_usage_is_summed_across_the_whole_loop(self):
+        mod = self.mod
+        seen = []
+
+        def fake(ctx, question, *, model, provider, effort):
+            seen.append(question)
+            reply = _calls_block(("ls", {})) if len(seen) == 1 else _answer_block("done")
+            return (
+                reply,
+                None,
+                {"tokens_in": 10, "tokens_out": 5, "cache_read": 0, "cache_write": 0},
+            )
+
+        with mock.patch.object(mod, "_run_side_query_with_card", side_effect=fake):
+            ctx = self._ctx([])
+            result = self._run(ctx)
+        self.assertIn("in 20 · read 0 · write 0 · out 10", result["content"][0]["text"])
+
+    def test_observable_card_is_updated_per_iteration(self):
+        ctx = self._ctx([_calls_block(("ls", {})), _answer_block("done")])
+        self._run(ctx)
+        keys = {c.args[0] for c in ctx.put_observable.call_args_list if c.args}
+        agentic = [k for k in keys if k.startswith("aside/agentic/")]
+        self.assertEqual(len(agentic), 1, keys)
+        slugs = [c.kwargs.get("slug") for c in ctx.put_observable.call_args_list]
+        self.assertIn("done", slugs)
+        self.assertTrue(any(s and s.startswith("iter 1/") for s in slugs), slugs)
+        detail = ctx.put_observable.call_args_list[-1].kwargs["detail"]
+        self.assertIn("goal: find X", detail)
+        self.assertIn("ls", detail)
+
+
+class TestAgenticFailureRouting(_AgenticBase):
+    def test_abort_breaks_the_loop_without_another_llm_call(self):
+        ctx = self._ctx(
+            [
+                _calls_block(("ls", {})),
+                RuntimeError("side-query: context canceled"),
+            ]
+        )
+        result = self._run(ctx)
+        self.assertTrue(result["is_error"])
+        self.assertIn("context canceled", result["content"][0]["text"])
+        # Two calls only: the aborted one is the last — no synthesis after it.
+        self.assertEqual(ctx.side_query.call_count, 2)
+
+    def test_overflow_surfaces_with_its_hint(self):
+        ctx = self._ctx([RuntimeError("side-query: prompt exceeds maximum context length")])
+        result = self._run(ctx)
+        self.assertTrue(result["is_error"])
+        self.assertIn("context window full", result["content"][0]["text"])
+        self.assertEqual(ctx.side_query.call_count, 1)
+
+    def test_empty_delegate_chain_errors_instead_of_using_the_executor(self):
+        ctx = self._ctx([])
+        with mock.patch.object(self.mod, "_resolve_delegate_chain", return_value=[]):
+            result = self._run(ctx)
+        self.assertTrue(result["is_error"])
+        self.assertIn("chain exhausted", result["content"][0]["text"])
+        self.assertIn("inline", result["content"][0]["text"])
+        ctx.side_query.assert_not_called()
+
+    def test_exhausted_chain_never_runs_the_loop_on_the_executor(self):
+        ctx = self._ctx(
+            [RuntimeError("side-query: model not found"), RuntimeError("side-query: 404")]
+        )
+        with mock.patch.object(
+            self.mod,
+            "_resolve_delegate_chain",
+            return_value=[
+                {"provider": "anthropic", "model": "a"},
+                {"provider": "anthropic", "model": "b"},
+            ],
+        ):
+            result = self._run(ctx)
+        self.assertTrue(result["is_error"])
+        self.assertIn("does NOT fall back to the executor", result["content"][0]["text"])
+        # Exactly the two candidates — never a third, model=None call.
+        self.assertEqual(ctx.side_query.call_count, 2)
+        self.assertNotIn(None, [c.kwargs["model"] for c in ctx.side_query.call_args_list])
+
+    def test_chain_advances_past_a_dead_candidate_and_sticks_to_the_survivor(self):
+        ctx = self._ctx(
+            [
+                RuntimeError("side-query: model not found"),
+                _calls_block(("ls", {})),
+                _answer_block("found it"),
+            ]
+        )
+        with mock.patch.object(
+            self.mod,
+            "_resolve_delegate_chain",
+            return_value=[
+                {"provider": "anthropic", "model": "dead"},
+                {"provider": "anthropic", "model": "alive"},
+            ],
+        ):
+            result = self._run(ctx)
+        self.assertFalse(result["is_error"])
+        self.assertIn("[delegate: anthropic/alive ·", result["content"][0]["text"])
+        # Iteration 2 goes straight to the survivor — the dead head is not re-probed.
+        self.assertEqual(
+            [c.kwargs["model"] for c in ctx.side_query.call_args_list],
+            ["dead", "alive", "alive"],
+        )
+
+
+class TestAgenticToolSurface(unittest.TestCase):
+    """The declared schema and description must advertise agentic mode."""
+
+    def _schema(self, delegate_cfg):
+        mod = _load_aside()
+        mod._DELEGATE = delegate_cfg
+        mod._ADVISOR = None
+        return mod
+
+    def test_goal_params_present_when_delegation_is_configured(self):
+        mod = self._schema({"provider": "anthropic", "model": "claude-haiku-4-5"})
+        props = mod._aside_tool_parameters()["properties"]
+        for key in ("goal", "allow_tools", "max_iterations"):
+            self.assertIn(key, props)
+        self.assertIn("goal", mod._aside_tool_description())
+
+    def test_goal_params_absent_when_delegation_is_off(self):
+        mod = self._schema(None)
+        props = mod._aside_tool_parameters()["properties"]
+        for key in ("goal", "allow_tools", "max_iterations", "delegate"):
+            self.assertNotIn(key, props)
+
+    def test_host_side_tool_deadline_is_disabled(self):
+        # The body runs multi-minute LLM work and waits on ctx.call_tool with a
+        # 60s timeout; the 30s host default would clip both.
+        self._schema({"provider": "anthropic", "model": "claude-haiku-4-5"})
+        spec = next(t for t in fir_ext._tools if t["name"] == "aside")
+        self.assertEqual(spec["timeout"], -1)
+
+    def test_instructions_is_no_longer_unconditionally_required(self):
+        mod = self._schema({"provider": "anthropic", "model": "claude-haiku-4-5"})
+        self.assertEqual(mod._aside_tool_parameters()["required"], ["title"])
+
+    def test_tool_handler_forwards_goal_params(self):
+        mod = self._schema({"provider": "anthropic", "model": "claude-haiku-4-5"})
+        handler = fir_ext._tool_handlers["aside"]
+        with mock.patch.object(mod, "_run_agentic_delegate", return_value={"ok": True}) as run:
+            handler(
+                {"title": "t", "goal": "find X", "delegate": True, "max_iterations": 3},
+                _blocking_ctx(),
+            )
+        self.assertEqual(run.call_args.args[0], "find X")
+        self.assertEqual(run.call_args.kwargs["max_iterations"], 3)
+
+
+if __name__ == "__main__":
+    unittest.main()
