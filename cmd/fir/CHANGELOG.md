@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Fixed
+- **`tmuxspinner` could still bake the session name into the window title it was supposed to restore.** The previous fix for this (v0.92.1) guarded the ticker's user-rename detector by re-checking `_last_set` under the lock, which closes the window where another thread's paint has *fully completed* — but `_rename_to_current_title` wrote to tmux **outside** the lock and only then re-acquired it to record `_last_set`. Between those two steps the window showed a title we had written but not yet recorded, so the detector could take the lock, see an unchanged `_last_set` beside an unrecognised name, and adopt our own title as a user rename: `fir` → `fir mysess`, rendering `fir mysess mysess` from then on and "restoring" the window to a name the user never chose. The tmux write and the record are now indivisible, and `set_session_name`'s check-then-write is closed the same way (a concurrent `start()` could slip into that gap). Regression test asserts the invariant directly — every `_rename_window` call must be issued with the lock held. The lifecycle tests that caught this intermittently also stopped sleeping on `TICK_INTERVAL` multiples and now wait on a paint event, which is both deterministic under parallel load and ~6x faster.
+
+### Changed
+- **`modelcontextprotocol/go-sdk` bumped v1.7.0 → v1.8.0, and the workaround scaffolding it forced is gone.** v1.7.0 deadlocked in `ServerSession.Close` while a SEP-2575 `subscriptions/listen` stream was in flight (upstream #1160) — and fir opens one on *every* connect, so the `pkg/mcp` suite could never shut a test server down cleanly. Two real costs are now paid back. `TestManager_OnServerDisconnected_BenignOnServerShutdown` was a deliberate coverage substitution that called `handleSessionEnd` directly, bypassing the wire, because a nil `waitErr` was unreachable over a real connection; it is now a genuine wire test driven by an orderly `ServerSession.Close`. `waitForServerTeardown` tolerated a server that never released its sessions — logging instead of failing — and now fails hard with the live-session count, so a teardown hang is caught rather than absorbed. The `breakableTransport` harness stays: severing a connection mid-flight is the *abrupt* peer-death stimulus, distinct from an orderly close, and the two drive different halves of `handleSessionEnd`. v1.8.0 also bounds every buffered decode path — stdio JSON-RPC frames and SSE events cap at 16 MiB by default — which fir accepts as-is; that is a deliberate resource-exhaustion guard well above any real tool result, and fir truncates results far below it anyway.
+
 ## [1.10.1] - 2026-09-15
 
 ### Fixed
@@ -581,6 +587,7 @@
 ### Changed
 
 - **aside advisor/delegate now memoizes unavailable models per session.** Anthropic still lists `claude-fable-5` in `/v1/models` but it 404s on use, so Layer A cannot pre-empt it. Previously every escalation re-probed the dead model and fell back to the executor. Now the first model-unavailability error is recorded for the session; `_degrade_role` treats memoized models as unavailable, so subsequent escalations degrade straight to the next live Anthropic flagship/Haiku (e.g. opus-4-8) instead of repeating the failed call.
+
 ## [0.74.0] - 2026-06-19
 
 ### Added

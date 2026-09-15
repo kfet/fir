@@ -12,36 +12,20 @@ import (
 	"go.uber.org/goleak"
 )
 
-// TestManager_Close_AfterSeveredTransport_NoLeak is the production-impact
-// probe for upstream go-sdk issue #1160:
+// TestManager_Close_AfterSeveredTransport_NoLeak verifies that fir's shutdown
+// path cannot be wedged by a peer that vanished.
 //
-//	https://github.com/modelcontextprotocol/go-sdk/issues/1160
-//
-// #1160 is that sdk.ServerSession.Close deadlocks while a SEP-2575
-// "subscriptions/listen" stream is in flight: Server.subscriptionsListen is a
-// long-lived handler that parks on <-ctx.Done() while running as an ordinary
-// in-flight incoming request, and jsonrpc2's Connection.Close waits for
-// in-flight requests to drain.
-//
-// fir opens such a stream on EVERY connect: Manager installs both a
-// ToolListChangedHandler and a PromptListChangedHandler (client.go), and
-// go-sdk's Client.Connect issues one subscriptions/listen when any
-// list-changed handler is set. So the question this test answers is whether
-// the deadlock reaches fir's own shutdown path.
+// Under protocol 2026-07-28 fir opens a SEP-2575 "subscriptions/listen" stream
+// on EVERY connect: Manager installs both a ToolListChangedHandler and a
+// PromptListChangedHandler (client.go), and go-sdk's Client.Connect issues one
+// subscriptions/listen when any list-changed handler is set. That stream is a
+// long-lived in-flight request, and a connection teardown that waits for
+// in-flight requests to drain is exactly the shape that can deadlock.
 //
 // It exercises the worst case for a fir CLIENT: sever the transport mid-flight
 // (a vanished peer — not a clean close, which would give the SDK a chance to
 // unwind tidily) and then call Manager.Close under a deadline, verifying with
 // goleak that no client goroutine is left parked.
-//
-// RESULT (v1.7.0): Close returns promptly and no client goroutine leaks.
-// fir is NOT bitten by #1160 in production, because fir is only ever an MCP
-// client. ClientSession.Close cancels its listenCtx BEFORE closing the
-// connection (go-sdk mcp/client.go), so the client half of the listen stream
-// always unwinds. The deadlock lives exclusively in ServerSession.Close, and
-// fir's only server constructor (NewToolServer) has no production caller — it
-// is used by tests alone. See the package tests' breakableTransport for the
-// test-side workaround.
 func TestManager_Close_AfterSeveredTransport_NoLeak(t *testing.T) {
 	// Snapshot pre-existing goroutines (testing/other packages' background
 	// workers) so we only assert on what THIS test creates.
@@ -57,7 +41,7 @@ func TestManager_Close_AfterSeveredTransport_NoLeak(t *testing.T) {
 	// silently degrade into a no-op if fir ever stops opening one.
 	// subscriptionsListen blocks for the life of the stream, so a request that
 	// has entered the handler but not returned is one that is genuinely in
-	// flight — exactly the state #1160 deadlocks on.
+	// flight — exactly the state this test needs to set up.
 	var listenEntered, listenReturned atomic.Int32
 	server.AddReceivingMiddleware(func(next sdk.MethodHandler) sdk.MethodHandler {
 		return func(ctx context.Context, method string, req sdk.Request) (sdk.Result, error) {
@@ -70,9 +54,8 @@ func TestManager_Close_AfterSeveredTransport_NoLeak(t *testing.T) {
 		}
 	})
 
-	// Run the server under a cancellable context so the test can tear down the
-	// SERVER side without calling ServerSession.Close (which is what #1160
-	// deadlocks). Cancelling Run's context is the supported escape hatch.
+	// Run the server under a cancellable context so the test controls server
+	// teardown independently of the (severed) client connection.
 	serverCtx, cancelServer := context.WithCancel(context.Background())
 
 	conns := &breakableConns{}
@@ -86,7 +69,9 @@ func TestManager_Close_AfterSeveredTransport_NoLeak(t *testing.T) {
 	startAndWait(t, mgr, context.Background())
 
 	// The client must genuinely have an open subscriptions/listen stream,
-	// otherwise this probe proves nothing about #1160.
+	// otherwise this test proves nothing: go-sdk only issues one when the
+	// server advertises the capability, so a silent upstream change here would
+	// turn the whole test into a no-op.
 	require.Eventually(t, func() bool {
 		return listenEntered.Load() > 0
 	}, 15*time.Second, 10*time.Millisecond,
@@ -97,8 +82,8 @@ func TestManager_Close_AfterSeveredTransport_NoLeak(t *testing.T) {
 	// Sever the transport: the peer vanishes without a protocol-level goodbye.
 	conns.breakAll()
 
-	// Now close the manager under a hard deadline. If #1160 reached the client
-	// this is where it would hang forever.
+	// Now close the manager under a hard deadline. A teardown that waits on the
+	// still-parked listen stream would hang here forever.
 	done := make(chan error, 1)
 	go func() { done <- mgr.Close() }()
 
@@ -108,17 +93,13 @@ func TestManager_Close_AfterSeveredTransport_NoLeak(t *testing.T) {
 		// under test is that Close RETURNS, not that it returns nil.
 		t.Logf("Manager.Close() returned after severed transport: err=%v", err)
 	case <-time.After(20 * time.Second):
-		t.Fatal("Manager.Close() HUNG for 20s after a severed transport — " +
-			"go-sdk #1160 bites fir in production")
+		t.Fatal("Manager.Close() HUNG for 20s after a severed transport")
 	}
 
-	// Tear the server down the only way that cannot deadlock under #1160.
 	cancelServer()
 
 	// Give the server's own goroutines a moment to unwind before goleak runs;
 	// their teardown is asynchronous and is not what this test asserts on.
-	// A failure here that names only mcp.(*Server) frames is #1160's
-	// server-side half and does not implicate fir.
 	waitForServerTeardown(t, server)
 }
 
@@ -274,29 +255,28 @@ func TestManager_ReconnectCycles_DoNotLeakListenGoroutines(t *testing.T) {
 // sessions, so goleak does not race the server's asynchronous unwind.
 //
 // This is the sanctioned poll-external-state exception: the SDK exposes no
-// signal to subscribe to, only a Sessions() iterator. The deadline is
-// deliberately generous, and expiry logs rather than fails — a server that
-// never lets go is go-sdk #1160's server-side half, which is not what any
-// caller of this helper asserts on.
+// signal to subscribe to, only a Sessions() iterator. Session removal is
+// asynchronous with respect to the close/cancel that triggered it, hence the
+// poll; the deadline is deliberately generous. Expiry is a hard failure — a
+// server that never lets go of a session is a teardown hang, and this helper
+// is the only place fir would notice one.
 func waitForServerTeardown(t *testing.T, server *sdk.Server) {
 	t.Helper()
 	tick := time.NewTicker(10 * time.Millisecond)
 	defer tick.Stop()
 	deadline := time.After(15 * time.Second)
 	for {
-		live := false
+		live := 0
 		for range server.Sessions() {
-			live = true
-			break
+			live++
 		}
-		if !live {
+		if live == 0 {
 			return
 		}
 		select {
 		case <-tick.C:
 		case <-deadline:
-			t.Log("server still reports a live session after 15s (go-sdk #1160 server-side half)")
-			return
+			t.Fatalf("server still reports %d live session(s) after 15s: teardown hang", live)
 		}
 	}
 }

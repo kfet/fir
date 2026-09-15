@@ -16,12 +16,11 @@ var errTransportBroken = errors.New("transport broken by test")
 // breakableTransport wraps a transport so a test can sever the connection at
 // an arbitrary point, as if the peer had gone away.
 //
-// This exists because sdk.ServerSession.Close deadlocks while a
-// subscriptions/listen request is in flight (go-sdk v1.7.0), and every fir
-// client opens one during connect — see
-// https://github.com/modelcontextprotocol/go-sdk/issues/1160. Severing the
-// client-side connection is an equivalent stimulus for the reconnect paths
-// under test and does not depend on the server shutting down cleanly.
+// This is the abrupt-disconnect stimulus: the connection dies mid-flight with
+// no protocol-level goodbye, which is what fir sees when an MCP server crashes,
+// is killed, or loses its network. It is deliberately distinct from an orderly
+// sdk.ServerSession.Close — the two drive different halves of handleSessionEnd
+// (a non-benign waitErr versus a nil one), so both stimuli are exercised.
 type breakableTransport struct {
 	inner sdk.Transport
 	conns *breakableConns

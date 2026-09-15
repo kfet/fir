@@ -870,13 +870,11 @@ func TestManager_ServerEvents_BufferedUntilConsumerAttaches(t *testing.T) {
 // TestManager_OnServerDisconnected fires the disconnected callback when
 // the connection to the server dies unexpectedly.
 //
-// The stimulus is a severed transport (breakableTransport) rather than
-// ss.Close(): under go-sdk v1.7.0, sdk.ServerSession.Close deadlocks while a
-// SEP-2575 subscriptions/listen stream is in flight, and fir opens one on
-// every connect. See https://github.com/modelcontextprotocol/go-sdk/issues/1160
-// — once that is fixed upstream this can go back to ss.Close(). Severing the
-// connection is an equivalent stimulus for the path under test: fir sees a
-// peer that vanished either way.
+// The stimulus is a severed transport (breakableTransport): the peer vanishes
+// without a protocol-level goodbye, which is what a crashed or killed MCP
+// server looks like from fir's side. That is the FAULT half of
+// handleSessionEnd; the orderly half is covered by
+// TestManager_OnServerDisconnected_BenignOnServerShutdown.
 func TestManager_OnServerDisconnected(t *testing.T) {
 	server := sdk.NewServer(&sdk.Implementation{Name: "test", Version: "0"}, nil)
 	server.AddTool(&sdk.Tool{Name: "ping", InputSchema: emptySchema},
@@ -911,7 +909,7 @@ func TestManager_OnServerDisconnected(t *testing.T) {
 		if ev.err != nil {
 			assert.Contains(t, ev.err.Error(), "disconnected")
 		}
-	case <-time.After(3 * time.Second):
+	case <-time.After(15 * time.Second):
 		t.Fatal("timeout waiting for ServerDisconnected event")
 	}
 }
@@ -922,16 +920,20 @@ func TestManager_OnServerDisconnected(t *testing.T) {
 // the disconnect event with no error attached — the server simply went away,
 // the user did not lose anything to a fault.
 //
-// handleSessionEnd is invoked directly rather than over the wire. Under go-sdk
-// v1.7.0 there is NO way to shut a server down cleanly while fir's SEP-2575
-// subscriptions/listen stream is in flight — both ServerSession.Close() and
-// cancelling Server.Run's context block forever
-// (https://github.com/modelcontextprotocol/go-sdk/issues/1160), and the only
-// available stimulus, severing the transport, always yields a NON-benign
-// waitErr. So the benign branch is unreachable over the wire on this protocol
-// version. This is a deliberate, narrow coverage substitution: restore a wire
-// test here once #1160 is fixed upstream.
+// The stimulus is a real, orderly ServerSession.Close over the wire, which is
+// what an MCP server shutting itself down cleanly does. Every server session is
+// closed, not just the first: a client can hold more than one (the main session
+// plus the SEP-2575 subscriptions/listen stream fir opens at connect), and
+// leaving one open would leave the client happily connected.
+//
+// The reconnect loop is deliberately allowed to SUCCEED afterwards. It has to
+// exist at all — it is the thing parked in session.Wait() that calls
+// handleSessionEnd — and letting its redial succeed keeps the entry's recorded
+// error deterministically nil. A redial rigged to fail would race a
+// "reconnect: ..." error into e.err against the assertion below.
 func TestManager_OnServerDisconnected_BenignOnServerShutdown(t *testing.T) {
+	shortenReconnectDelays(t)
+
 	server := sdk.NewServer(&sdk.Implementation{Name: "test", Version: "0"}, nil)
 	server.AddTool(&sdk.Tool{Name: "ping", InputSchema: emptySchema},
 		func(_ context.Context, _ *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
@@ -943,24 +945,25 @@ func TestManager_OnServerDisconnected_BenignOnServerShutdown(t *testing.T) {
 
 	_, _, discCh := drainServerEvents(mgr)
 
-	// Connect and install WITHOUT calling Start, so no reconnect loop exists.
-	// A live loop would be parked in session.Wait() on this same session and
-	// would race its own handleSessionEnd (with a real error) against the
-	// deterministic one below.
-	ctx := context.Background()
-	session, tools, caps, err := mgr.dialAndInitialize(ctx, "srv", ServerConfig{})
-	require.NoError(t, err)
-	mgr.installReconnectedSession(context.Background(), "srv", session, tools, caps)
+	startAndWait(t, mgr, context.Background())
 	defer mgr.Close()
 
-	// A nil waitErr is what a clean, fault-free session end looks like.
-	mgr.handleSessionEnd("srv", session, nil)
+	// Shut the server side down the orderly way: a clean close of every live
+	// session, which makes the client's session.Wait() return nil.
+	var sessions []*sdk.ServerSession
+	for s := range server.Sessions() {
+		sessions = append(sessions, s)
+	}
+	require.NotEmpty(t, sessions, "server must have at least one active session")
+	for _, s := range sessions {
+		require.NoError(t, s.Close(), "an orderly ServerSession.Close must not fail")
+	}
 
 	select {
 	case ev := <-discCh:
 		assert.Equal(t, "srv", ev.name)
 		assert.NoError(t, ev.err, "a fault-free session end must not surface an error")
-	case <-time.After(3 * time.Second):
+	case <-time.After(15 * time.Second):
 		t.Fatal("timeout waiting for ServerDisconnected event")
 	}
 
@@ -1079,10 +1082,8 @@ func TestManager_Status_AfterServerDisconnect(t *testing.T) {
 	assert.True(t, statuses[0].Connected)
 	assert.NoError(t, statuses[0].Error)
 
-	// Sever the connection to simulate a server-initiated disconnect. Not
-	// ss.Close(): that deadlocks under go-sdk v1.7.0 while the SEP-2575
-	// subscriptions/listen stream fir opens at connect is in flight —
-	// https://github.com/modelcontextprotocol/go-sdk/issues/1160
+	// Sever the connection: the peer vanishes without a protocol-level
+	// goodbye, as a crashed MCP server would.
 	severServerConnections(t, server)
 
 	// Auto-reconnect's dialFn is rigged to fail, so the session stays down.

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Tests for the tmuxspinner builtin extension."""
 
+import itertools
 import os
 import sys
 import threading
-import time
 import unittest
 from unittest import mock
 
@@ -40,6 +40,25 @@ tmuxspinner.TICK_INTERVAL = 0.01
 
 # Restore env.
 os.environ.update(_orig_env)
+
+
+def _paint_gate(after=2):
+    """Return (side_effect, event) for a _rename_window mock; the event fires
+    once `after` renames have been issued.
+
+    start() paints once from the caller's thread, so waiting for the second
+    rename is exactly "the ticker has completed one iteration" — deterministic,
+    unlike sleeping for a multiple of TICK_INTERVAL, which is the single most
+    common source of flakes when the suite runs under parallel load.
+    """
+    gate = threading.Event()
+    count = itertools.count(1)
+
+    def _side_effect(_target, _name):
+        if next(count) >= after:
+            gate.set()
+
+    return _side_effect, gate
 
 
 def _echo_last_set(rename_mock):
@@ -242,16 +261,17 @@ class TestSpinnerStartStop(unittest.TestCase):
         s._pane_id = "%1"
         s._original_name = "fir"
 
+        paint, painted = _paint_gate()
         with (
-            mock.patch.object(tmuxspinner, "_rename_window") as mock_rn,
+            mock.patch.object(tmuxspinner, "_rename_window", side_effect=paint) as mock_rn,
             mock.patch.object(
                 tmuxspinner, "_read_window_name", side_effect=_echo_last_set(mock_rn)
             ),
         ):
             s.start()
             self.assertTrue(s._running)
-            # Let spinner loop iterate at least once.
-            time.sleep(tmuxspinner.TICK_INTERVAL * 2)
+            # Wait for the spinner loop to complete an iteration.
+            self.assertTrue(painted.wait(timeout=20), "ticker never painted")
             s.stop()
             self.assertFalse(s._running)
             # Last rename should restore the display name (original + session).
@@ -264,18 +284,56 @@ class TestSpinnerStartStop(unittest.TestCase):
         s._original_name = "fir"
         s._session_name = "mysess"
 
+        paint, painted = _paint_gate()
         with (
-            mock.patch.object(tmuxspinner, "_rename_window") as mock_rn,
+            mock.patch.object(tmuxspinner, "_rename_window", side_effect=paint) as mock_rn,
             mock.patch.object(
                 tmuxspinner, "_read_window_name", side_effect=_echo_last_set(mock_rn)
             ),
         ):
             s.start()
-            time.sleep(tmuxspinner.TICK_INTERVAL * 2)
+            self.assertTrue(painted.wait(timeout=20), "ticker never painted")
             s.stop()
             last_call = mock_rn.call_args
             # stop() keeps session name in display
             self.assertEqual(last_call[0], ("%1", "fir mysess"))
+
+    def test_tmux_rename_happens_under_the_lock(self):
+        """The tmux write and the record of what we wrote must be indivisible.
+
+        _rename_to_current_title used to release the lock, call tmux, then
+        re-acquire to record _last_set. In that gap the window already showed a
+        title we had written but not yet recorded, so _loop's rename detector
+        could take the lock, see an unchanged _last_set alongside a name it did
+        not recognise, and adopt our own title as a user rename — baking the
+        session suffix into _original_name ("fir" -> "fir mysess", rendering
+        "fir mysess mysess" thereafter).
+        """
+        s = tmuxspinner.Spinner()
+        s._pane_id = "%1"
+        s._original_name = "fir"
+        s._session_name = "mysess"
+
+        held = []
+
+        def _record_lock_state(_target, _name):
+            # A non-reentrant lock we can still acquire is a lock nobody holds.
+            acquired = s._lock.acquire(blocking=False)
+            if acquired:
+                s._lock.release()
+            held.append(not acquired)
+
+        with mock.patch.object(tmuxspinner, "_rename_window", side_effect=_record_lock_state):
+            s._rename_to_current_title()
+            # set_session_name paints from the caller's thread too.
+            s.set_session_name("other")
+
+        self.assertTrue(held, "expected at least one tmux rename")
+        self.assertTrue(
+            all(held),
+            "every tmux rename must be issued with the spinner lock held, so the "
+            "window can never show a title that _last_set does not yet describe",
+        )
 
     def test_start_noop_without_pane(self):
         s = tmuxspinner.Spinner()
@@ -307,14 +365,17 @@ class TestSpinnerDetectsUserRename(unittest.TestCase):
         s._original_name = "fir"
 
         rename_calls = []
-        renamed_event = threading.Event()
+        user_renamed_seen = threading.Event()
+        applied = threading.Event()
 
         def fake_rename(target, name):
             rename_calls.append(name)
-            renamed_event.set()
+            # _loop applies a detected user rename, then paints. A paint seen
+            # after the observation therefore proves the update has landed.
+            if user_renamed_seen.is_set():
+                applied.set()
 
         read_count = [0]
-        user_renamed_seen = threading.Event()
 
         def fake_read(target):
             read_count[0] += 1
@@ -327,9 +388,12 @@ class TestSpinnerDetectsUserRename(unittest.TestCase):
             with mock.patch.object(tmuxspinner, "_read_window_name", side_effect=fake_read):
                 s.start()
                 # Wait deterministically for the loop to observe the user rename.
-                self.assertTrue(user_renamed_seen.wait(timeout=2.0))
-                # Give the loop one more iteration to apply the update.
-                time.sleep(tmuxspinner.TICK_INTERVAL * 3)
+                self.assertTrue(user_renamed_seen.wait(timeout=20))
+                # The loop applies the update and then paints, so the first
+                # paint after the observation proves the update has landed.
+                self.assertTrue(
+                    applied.wait(timeout=20), "loop never repainted after the user rename"
+                )
                 s.stop()
                 self.assertEqual(s._original_name, "user-renamed")
 
@@ -417,15 +481,16 @@ class TestSpinnerShutdown(unittest.TestCase):
         s._original_name = "zsh"
         s._session_name = "mysess"
 
+        paint, painted = _paint_gate()
         with (
-            mock.patch.object(tmuxspinner, "_rename_window") as mock_rn,
+            mock.patch.object(tmuxspinner, "_rename_window", side_effect=paint) as mock_rn,
             mock.patch.object(tmuxspinner, "_unset_window_option") as mock_unset,
             mock.patch.object(
                 tmuxspinner, "_read_window_name", side_effect=_echo_last_set(mock_rn)
             ),
         ):
             s.start()
-            time.sleep(tmuxspinner.TICK_INTERVAL * 2)
+            self.assertTrue(painted.wait(timeout=20), "ticker never painted")
             s.shutdown()
             self.assertFalse(s._running)
             # Should restore original name WITHOUT session suffix.

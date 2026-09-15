@@ -186,9 +186,13 @@ class Spinner:
             if not target:
                 return ""
             name = self._title_locked(advance_frame=advance_frame)
-
-        _rename_window(target, name)
-        with self._lock:
+            # The tmux write and the record of what we wrote must be
+            # indivisible. Releasing the lock around the write would let the
+            # window show a title _last_set does not yet describe, and _loop's
+            # detector — which decides under this same lock — would see an
+            # unchanged _last_set next to an unrecognised name and adopt our own
+            # title as a user rename.
+            _rename_window(target, name)
             self._last_set = name
         return name
 
@@ -208,11 +212,14 @@ class Spinner:
                     self._original_name = self._original_name[: -(len(suffix) + 1)]
 
             pane = self._pane_id
-            should_rename = pane and not self._running
-            display_name = self._display_name()
-
-        if should_rename:
-            _rename_window(pane, display_name)
+            # Same indivisibility requirement as _rename_to_current_title: the
+            # "not running" check and the write must not be split, or a
+            # concurrent start() can spawn the ticker in the gap and leave the
+            # detector staring at a title we wrote but never recorded.
+            if pane and not self._running:
+                display_name = self._display_name()
+                _rename_window(pane, display_name)
+                self._last_set = display_name
 
     def start(self):
         with self._lock:

@@ -33,14 +33,14 @@ func shortenReconnectDelays(t *testing.T) {
 	})
 }
 
-// severServerConnections severs the client's connection to server, which makes
-// the client's session.Wait() return and triggers the auto-reconnect path.
+// severServerConnections severs the client-side connections dialed against
+// server, which makes the client's session.Wait() return and triggers the
+// auto-reconnect path.
 //
-// It severs rather than calling ServerSession.Close() because under go-sdk
-// v1.7.0 the latter deadlocks while a SEP-2575 subscriptions/listen stream is
-// in flight, and fir opens one on every connect:
-// https://github.com/modelcontextprotocol/go-sdk/issues/1160
-// When that is fixed upstream, this can go back to a clean ss.Close().
+// The stimulus is a peer that vanished — an abrupt death with no protocol-level
+// goodbye — not an orderly shutdown. For the orderly case, close the server's
+// sessions directly (see TestManager_StreamableTransport_AutoReconnect and
+// TestManager_OnServerDisconnected_BenignOnServerShutdown).
 //
 // Connections dialed AFTER this call are unaffected, so reconnect tests can
 // re-dial normally.
@@ -479,11 +479,6 @@ func TestManager_StreamableTransport_AutoReconnect(t *testing.T) {
 	// one plus the SEP-2575 subscriptions/listen stream fir opens at connect).
 	// Closing only one leaves the client happily connected on the other and no
 	// reconnect ever happens.
-	//
-	// ServerSession.Close is safe here — unlike the in-memory tests, the
-	// listen stream is a separate HTTP request and so is not an in-flight
-	// request on the session being closed. See
-	// https://github.com/modelcontextprotocol/go-sdk/issues/1160
 	var sessions []*sdk.ServerSession
 	for s := range server.Sessions() {
 		sessions = append(sessions, s)
