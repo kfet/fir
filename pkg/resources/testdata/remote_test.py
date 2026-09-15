@@ -5,11 +5,13 @@ Everything here is a pure-function test except the final class, which does a
 real ssh round trip to localhost and skips cleanly when that is unavailable.
 """
 
+import io
 import json
 import math
 import os
 import subprocess
 import sys
+import tempfile
 import time
 import unittest
 from unittest import mock
@@ -1316,9 +1318,40 @@ class TestBinaryOutput(unittest.TestCase):
     "set FIR_REMOTE_INTEGRATION=1 and enable passwordless ssh to localhost",
 )
 class TestLocalhostIntegration(unittest.TestCase):
-    """Real ssh round trips against localhost."""
+    """Real ssh round trips against localhost.
+
+    ``localhost`` is now a self-host, so every one of these would otherwise
+    silently stop exercising the ssh *transport*. FIR_REMOTE_FORCE_SSH pins
+    them back onto the wire, and ``test_transport_switch`` asserts the switch
+    itself rather than trusting it.
+    """
 
     ctx = None
+
+    def setUp(self):
+        patcher = mock.patch.dict(os.environ, {"FIR_REMOTE_FORCE_SSH": "1"})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_transport_switch(self):
+        """The same call, both ways: ssh has no `local` key, local does."""
+        over_ssh = _payload(remote.rexec({"host": "localhost", "command": "true"}, self.ctx))
+        self.assertEqual("ok", over_ssh["outcome"])
+        self.assertNotIn("local", over_ssh)
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("FIR_REMOTE_FORCE_SSH")
+            locally = _payload(remote.rexec({"host": "localhost", "command": "true"}, self.ctx))
+        self.assertEqual("ok", locally["outcome"])
+        self.assertTrue(locally["local"])
+
+    def test_via_ssh_param_also_forces_the_wire(self):
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("FIR_REMOTE_FORCE_SSH")
+            env = _payload(
+                remote.rexec({"host": "localhost", "command": "true", "via_ssh": True}, self.ctx)
+            )
+        self.assertEqual("ok", env["outcome"])
+        self.assertNotIn("local", env)
 
     def test_rexec_roundtrip_with_hostile_quoting(self):
         cmd = "echo \"it's fine\"; printf '%s\\n' 'a b'  # 'unbalanced\n"
@@ -1355,6 +1388,518 @@ class TestLocalhostIntegration(unittest.TestCase):
                 break
             _time.sleep(0.25)
         self.assertEqual("done", status["state"])
+        self.assertEqual(4, status["job_exit_code"])
+        self.assertIn("started", status["stdout"])
+
+
+def _self_host_available() -> bool:
+    """Whether the identity test recognises `localhost` as this machine.
+
+    It should always — but it needs an `ssh` binary to ask `ssh -G`, and a
+    container with no ssh client installed would otherwise fail rather than
+    skip.
+    """
+    try:
+        return remote._is_self("localhost")[0]
+    except OSError:
+        return False
+
+
+class TestSelfHostIdentity(unittest.TestCase):
+    """The bind-based identity test, with `ssh -G` output stubbed."""
+
+    def setUp(self):
+        remote._self_cache.clear()
+        remote._self_negative_until.clear()
+        remote._ssh_cfg_cache.clear()
+        self.addCleanup(remote._self_cache.clear)
+        self.addCleanup(remote._self_negative_until.clear)
+        self.addCleanup(remote._ssh_cfg_cache.clear)
+
+    def _verdict(self, cfg, *, bound="10.0.0.1"):
+        with mock.patch.object(remote, "_ssh_resolved_config", return_value=cfg):
+            with mock.patch.object(remote, "_local_address_of", return_value=bound):
+                with mock.patch.object(remote, "_local_user", return_value="kfet"):
+                    return remote._is_self("box")
+
+    def test_bindable_address_wins(self):
+        is_self, reason = self._verdict({"hostname": "box.ts.net", "user": "kfet", "port": "22"})
+        self.assertTrue(is_self)
+        self.assertIn("10.0.0.1", reason)
+
+    def test_unbindable_address_falls_through_to_ssh(self):
+        is_self, reason = self._verdict(
+            {"hostname": "box.ts.net", "user": "kfet", "port": "22"}, bound=None
+        )
+        self.assertFalse(is_self)
+        self.assertIn("local interface", reason)
+
+    def test_proxyjump_bails(self):
+        is_self, reason = self._verdict(
+            {"hostname": "box.ts.net", "user": "kfet", "port": "22", "proxyjump": "bastion"}
+        )
+        self.assertFalse(is_self)
+        self.assertIn("proxyjump", reason)
+
+    def test_proxycommand_bails(self):
+        is_self, reason = self._verdict(
+            {"hostname": "box.ts.net", "user": "kfet", "port": "22", "proxycommand": "nc %h %p"}
+        )
+        self.assertFalse(is_self)
+        self.assertIn("proxycommand", reason)
+
+    def test_proxycommand_none_is_not_a_proxy(self):
+        is_self, _ = self._verdict(
+            {"hostname": "box.ts.net", "user": "kfet", "port": "22", "proxycommand": "none"}
+        )
+        self.assertTrue(is_self)
+
+    def test_non_standard_port_bails(self):
+        is_self, reason = self._verdict({"hostname": "box.ts.net", "user": "kfet", "port": "2222"})
+        self.assertFalse(is_self)
+        self.assertIn("2222", reason)
+
+    def test_other_user_bails(self):
+        is_self, reason = self._verdict({"hostname": "box.ts.net", "user": "maggief", "port": "22"})
+        self.assertFalse(is_self)
+        self.assertIn("maggief", reason)
+
+    def test_unresolvable_host_is_not_self(self):
+        with mock.patch.object(remote, "_ssh_resolved_config", return_value={}):
+            is_self, _ = remote._is_self("box")
+        self.assertFalse(is_self)
+
+    def test_loopback_really_binds(self):
+        self.assertEqual("127.0.0.1", remote._local_address_of("127.0.0.1"))
+
+    def test_a_documentation_address_does_not_bind(self):
+        # TEST-NET-3 (RFC 5737) is never configured on a real interface.
+        self.assertIsNone(remote._local_address_of("203.0.113.7"))
+
+    def test_unresolvable_name_yields_no_address(self):
+        self.assertIsNone(remote._local_address_of("no-such-host.invalid"))
+
+    def test_nonlocal_bind_makes_the_whole_test_untrustworthy(self):
+        with mock.patch.object(remote, "_nonlocal_bind_enabled", return_value=True):
+            is_self, reason = self._verdict(
+                {"hostname": "box.ts.net", "user": "kfet", "port": "22"}
+            )
+        self.assertFalse(is_self)
+        self.assertIn("ip_nonlocal_bind", reason)
+
+    def test_nonlocal_bind_reads_the_sysctls(self):
+        real_open = open
+
+        def fake_open(path, *a, **kw):
+            if str(path).endswith("ip_nonlocal_bind"):
+                return io.StringIO("1\n" if "ipv6" in str(path) else "0\n")
+            return real_open(path, *a, **kw)
+
+        with mock.patch("builtins.open", fake_open):
+            self.assertTrue(remote._nonlocal_bind_enabled())
+
+    def test_absent_sysctls_mean_not_enabled(self):
+        with mock.patch("builtins.open", side_effect=OSError("no such file")):
+            self.assertFalse(remote._nonlocal_bind_enabled())
+
+    def test_negative_verdicts_expire_but_positive_ones_do_not(self):
+        calls = []
+
+        def fake(host):
+            calls.append(host)
+            return (False, "nope") if len(calls) < 3 else (True, "yes")
+
+        with mock.patch.object(remote, "_is_self", fake):
+            self.assertFalse(remote._self_verdict("box")[0])
+            # Still inside the TTL: no second probe.
+            self.assertFalse(remote._self_verdict("box")[0])
+            self.assertEqual(1, len(calls))
+            remote._self_negative_until["box"] = 0.0
+            self.assertFalse(remote._self_verdict("box")[0])
+            remote._self_negative_until["box"] = 0.0
+            self.assertTrue(remote._self_verdict("box")[0])
+            # A positive is permanent — no further probing.
+            self.assertTrue(remote._self_verdict("box")[0])
+            self.assertEqual(3, len(calls))
+        remote._self_negative_until.clear()
+
+    def test_via_ssh_overrides_a_self_verdict(self):
+        with mock.patch.object(remote, "_self_verdict", return_value=(True, "")):
+            self.assertTrue(remote._use_local("box"))
+            self.assertFalse(remote._use_local("box", via_ssh=True))
+            with mock.patch.dict(os.environ, {"FIR_REMOTE_FORCE_SSH": "1"}):
+                self.assertFalse(remote._use_local("box"))
+            # A falsy value must not read as "forced".
+            for falsy in ("", "0", "false", "no"):
+                with mock.patch.dict(os.environ, {"FIR_REMOTE_FORCE_SSH": falsy}):
+                    self.assertTrue(remote._use_local("box"), falsy)
+
+    def test_resemblance_is_name_based_and_never_decides_execution(self):
+        with mock.patch.object(remote, "_ssh_resolved_config", return_value={"hostname": "box"}):
+            with mock.patch.object(remote, "_my_labels", return_value={"box"}):
+                self.assertTrue(remote._resembles_self("alias"))
+            with mock.patch.object(remote, "_my_labels", return_value={"other"}):
+                self.assertFalse(remote._resembles_self("alias"))
+
+    def test_my_labels_are_resolved_once(self):
+        remote._fqdn_cache.clear()
+        self.addCleanup(remote._fqdn_cache.clear)
+        with mock.patch.object(remote.socket, "getfqdn", return_value="me.example.com") as fqdn:
+            with mock.patch.object(remote.socket, "gethostname", return_value="me"):
+                self.assertEqual({"me"}, remote._my_labels())
+                self.assertEqual({"me"}, remote._my_labels())
+        # getfqdn can be a slow reverse lookup; once is the budget.
+        fqdn.assert_called_once()
+
+
+class TestLocalTransport(unittest.TestCase):
+    """The local path must be `_ssh_argv` minus ssh — and nothing else."""
+
+    def test_local_argv_is_the_login_shell_running_the_same_supervisor(self):
+        supervisor = remote._supervisor_argv(30, 5)
+        argv = remote._local_argv(supervisor)
+        self.assertEqual(3, len(argv))
+        self.assertEqual("-c", argv[1])
+        # sshd hands the command to the login shell as one joined string,
+        # exactly as ssh does on the wire.
+        self.assertEqual(" ".join(supervisor), argv[2])
+        self.assertNotIn("ssh", argv[0])
+
+    def test_sshd_env_is_scrubbed(self):
+        dirty = {
+            "TMUX": "/tmp/tmux-1000/default,1,0",
+            "FIR_SESSION_ID": "abc",
+            "SSH_AUTH_SOCK": "/tmp/agent",
+            "DISPLAY": ":0",
+            "PATH": "/opt/poison",
+        }
+        with mock.patch.dict(os.environ, dirty):
+            env = remote._sshd_env()
+        for leaked in ("TMUX", "FIR_SESSION_ID", "SSH_AUTH_SOCK", "DISPLAY"):
+            self.assertNotIn(leaked, env)
+        self.assertNotIn("/opt/poison", env["PATH"])
+        self.assertTrue(env["HOME"])
+        self.assertEqual(env["HOME"], env["PWD"])
+
+    def test_sshd_env_does_not_fabricate_a_connection(self):
+        env = remote._sshd_env()
+        self.assertNotIn("SSH_CONNECTION", env)
+        self.assertNotIn("SSH_CLIENT", env)
+
+    def test_runtime_dir_is_provided_so_systemd_run_user_still_works(self):
+        expected = f"/run/user/{os.getuid()}"
+        env = remote._sshd_env()
+        if os.path.isdir(expected):
+            self.assertEqual(expected, env["XDG_RUNTIME_DIR"])
+            if os.path.exists(os.path.join(expected, "bus")):
+                self.assertEqual(f"unix:path={expected}/bus", env["DBUS_SESSION_BUS_ADDRESS"])
+        else:
+            self.assertNotIn("XDG_RUNTIME_DIR", env)
+
+    def test_no_runtime_dir_means_neither_key(self):
+        with mock.patch.object(remote.os.path, "isdir", return_value=False):
+            env = remote._sshd_env()
+        self.assertNotIn("XDG_RUNTIME_DIR", env)
+        self.assertNotIn("DBUS_SESSION_BUS_ADDRESS", env)
+
+    def _exec_argv(self, host, **kw):
+        seen = {}
+
+        def fake_run(argv, script, timeout, **run_kwargs):
+            seen["argv"] = argv
+            seen["kwargs"] = run_kwargs
+            return 0, "", "", False
+
+        with mock.patch.object(remote, "_run_local", fake_run):
+            env = remote._exec(host, "echo hi\n", 30, **kw)
+        return seen, env
+
+    def test_self_host_drops_ssh_and_flags_the_envelope(self):
+        with mock.patch.object(remote, "_use_local", return_value=True):
+            seen, env = self._exec_argv("box")
+        self.assertNotEqual("ssh", seen["argv"][0])
+        self.assertTrue(env["local"])
+        self.assertFalse(env["connect_reused"])
+        # sshd starts the session in $HOME with a scrubbed environment.
+        self.assertEqual(remote._home(), seen["kwargs"]["cwd"])
+        self.assertIn("HOME", seen["kwargs"]["env"])
+
+    def test_remote_host_still_uses_ssh_and_omits_the_flag(self):
+        with mock.patch.object(remote, "_use_local", return_value=False):
+            with mock.patch.object(remote, "_connection_reused", return_value=False):
+                seen, env = self._exec_argv("box")
+        self.assertEqual("ssh", seen["argv"][0])
+        self.assertEqual({}, seen["kwargs"])
+        self.assertNotIn("local", env)
+
+    def test_local_255_is_the_commands_own_exit_code_not_a_transport_failure(self):
+        with mock.patch.object(remote, "_use_local", return_value=True):
+            with mock.patch.object(remote, "_run_local", return_value=(255, "", "", False)):
+                env = remote._exec("box", "exit 255\n", 30)
+        self.assertEqual("nonzero_exit", env["outcome"])
+        self.assertEqual(255, env["exit_code"])
+
+    def test_auth_failure_against_a_lookalike_host_gets_a_hint(self):
+        err = "kfet@box: Permission denied (publickey).\n"
+        with mock.patch.object(remote, "_use_local", return_value=False):
+            with mock.patch.object(remote, "_connection_reused", return_value=False):
+                with mock.patch.object(remote, "_resembles_self", return_value=True):
+                    with mock.patch.object(
+                        remote, "_run_local", return_value=(255, "", err, False)
+                    ):
+                        env = remote._exec("box", "true\n", 30)
+        self.assertEqual("auth_failed", env["outcome"])
+        self.assertIn("you may be on the target already", env["hint"])
+
+    def test_no_hint_when_the_name_does_not_resemble_this_machine(self):
+        err = "kfet@box: Permission denied (publickey).\n"
+        with mock.patch.object(remote, "_use_local", return_value=False):
+            with mock.patch.object(remote, "_connection_reused", return_value=False):
+                with mock.patch.object(remote, "_resembles_self", return_value=False):
+                    with mock.patch.object(
+                        remote, "_run_local", return_value=(255, "", err, False)
+                    ):
+                        env = remote._exec("box", "true\n", 30)
+        self.assertEqual("auth_failed", env["outcome"])
+        self.assertNotIn("hint", env)
+
+    def test_rtmux_refuses_this_host(self):
+        with mock.patch.object(remote, "_use_local", return_value=True):
+            with mock.patch.object(remote, "_run_local", side_effect=AssertionError("no ssh")):
+                with self.assertRaises(fir_ext.ToolError) as caught:
+                    remote.rtmux({"host": "box", "action": "ls"}, None)
+        self.assertIn("tmux-driver", str(caught.exception))
+
+    def test_rtmux_never_takes_the_local_path(self):
+        """Even forced, the tmux helper must build an ssh argv."""
+        seen = {}
+
+        def fake_run(argv, script, timeout, **kw):
+            seen["argv"] = argv
+            return 0, "", "", False
+
+        with mock.patch.object(remote, "_use_local", return_value=False):
+            with mock.patch.object(remote, "_connection_reused", return_value=False):
+                with mock.patch.object(remote, "_run_local", fake_run):
+                    remote._tmux_exec("box", "tmux ls")
+        self.assertEqual("ssh", seen["argv"][0])
+
+
+class TestLocalCopy(unittest.TestCase):
+    """rput/rget on the self-host path — shutil standing in for scp -p -r."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = self.tmp.name
+
+    def _file(self, name, text="payload"):
+        path = os.path.join(self.root, name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as fh:
+            fh.write(text)
+        return path
+
+    def test_remote_relative_path_resolves_against_home_not_cwd(self):
+        self.assertEqual(
+            os.path.join(remote._home(), "notes/brief.md"),
+            remote._remote_path_local("notes/brief.md"),
+        )
+
+    def test_remote_tilde_expands(self):
+        self.assertEqual(os.path.join(remote._home(), "x"), remote._remote_path_local("~/x"))
+
+    def test_absolute_remote_path_untouched(self):
+        self.assertEqual("/etc/hosts", remote._remote_path_local("/etc/hosts"))
+
+    def test_file_into_existing_directory_keeps_its_basename(self):
+        src = self._file("a.txt")
+        dest = os.path.join(self.root, "dst")
+        os.makedirs(dest)
+        env = remote._copy_local("box", [src], dest, "put")
+        self.assertEqual("ok", env["outcome"])
+        self.assertTrue(env["local"])
+        with open(os.path.join(dest, "a.txt")) as fh:
+            self.assertEqual("payload", fh.read())
+
+    def test_file_to_a_new_path(self):
+        src = self._file("a.txt")
+        dest = os.path.join(self.root, "renamed.txt")
+        env = remote._copy_local("box", [src], dest, "put")
+        self.assertEqual("ok", env["outcome"])
+        self.assertTrue(os.path.exists(dest))
+
+    def test_directory_copies_recursively(self):
+        self._file("tree/one/deep.txt", "deep")
+        src = os.path.join(self.root, "tree")
+        dest = os.path.join(self.root, "copy")
+        env = remote._copy_local("box", [src], dest, "put")
+        self.assertEqual("ok", env["outcome"])
+        with open(os.path.join(dest, "one", "deep.txt")) as fh:
+            self.assertEqual("deep", fh.read())
+
+    def test_mode_and_mtime_are_preserved_like_scp_p(self):
+        src = self._file("a.txt")
+        os.chmod(src, 0o741)
+        os.utime(src, (1000000, 1000000))
+        dest = os.path.join(self.root, "b.txt")
+        remote._copy_local("box", [src], dest, "put")
+        self.assertEqual(0o741, os.stat(dest).st_mode & 0o777)
+        self.assertEqual(1000000, int(os.stat(dest).st_mtime))
+
+    def test_symlinks_are_dereferenced_like_scp(self):
+        target = self._file("real.txt", "bytes")
+        link = os.path.join(self.root, "link.txt")
+        os.symlink(target, link)
+        dest = os.path.join(self.root, "copied.txt")
+        env = remote._copy_local("box", [link], dest, "put")
+        self.assertEqual("ok", env["outcome"])
+        self.assertFalse(os.path.islink(dest))
+        with open(dest) as fh:
+            self.assertEqual("bytes", fh.read())
+
+    def test_missing_parent_is_an_error_not_a_silent_mkdir(self):
+        src = self._file("a.txt")
+        dest = os.path.join(self.root, "nope", "a.txt")
+        env = remote._copy_local("box", [src], dest, "put")
+        self.assertEqual("nonzero_exit", env["outcome"])
+        self.assertIn("a.txt", env["stderr"])
+        self.assertFalse(os.path.exists(dest))
+
+    def test_rput_takes_the_local_path_and_discloses_it(self):
+        src = self._file("a.txt")
+        dest = os.path.join(self.root, "out.txt")
+        with mock.patch.object(remote, "_use_local", return_value=True):
+            with mock.patch.object(remote, "_run_local", side_effect=AssertionError("no scp")):
+                env = _payload(remote.rput({"host": "box", "local": src, "remote": dest}, None))
+        self.assertEqual("ok", env["outcome"])
+        self.assertTrue(env["local"])
+        self.assertEqual(7, env["local_bytes"])
+
+    def test_rget_takes_the_local_path(self):
+        src = self._file("a.txt")
+        dest = os.path.join(self.root, "pulled.txt")
+        with mock.patch.object(remote, "_use_local", return_value=True):
+            with mock.patch.object(remote, "_run_local", side_effect=AssertionError("no scp")):
+                env = _payload(remote.rget({"host": "box", "remote": src, "local": dest}, None))
+        self.assertEqual("ok", env["outcome"])
+        self.assertTrue(env["local"])
+        self.assertTrue(os.path.exists(dest))
+
+    def test_rget_of_a_missing_source_is_a_clear_tool_error(self):
+        with mock.patch.object(remote, "_use_local", return_value=True):
+            with self.assertRaises(fir_ext.ToolError) as caught:
+                remote.rget({"host": "box", "remote": "/no/such/file", "local": self.root}, None)
+        self.assertIn("/no/such/file", str(caught.exception))
+
+
+class TestRhostsSelfMarking(unittest.TestCase):
+    def test_self_entry_is_flagged_and_patterns_are_not_tested(self):
+        asked = []
+
+        def fake(host, via_ssh=False):
+            asked.append(host)
+            return host == "me"
+
+        hosts = [
+            {"host": "me", "hostname": "me.ts.net"},
+            {"host": "them", "hostname": "them.ts.net"},
+            {"host": "*", "pattern": True},
+        ]
+        with mock.patch.object(remote, "_use_local", fake):
+            remote._mark_self_hosts(hosts)
+        self.assertEqual({"me", "them"}, set(asked))
+        self.assertTrue(hosts[0]["self"])
+        self.assertNotIn("self", hosts[1])
+        self.assertNotIn("self", hosts[2])
+
+
+@unittest.skipUnless(_self_host_available(), "ssh -G unavailable; cannot resolve localhost")
+class TestSelfHostIntegration(unittest.TestCase):
+    """The real local transport, end to end. Needs no sshd at all."""
+
+    ctx = None
+
+    def setUp(self):
+        # The identity verdict is memoised; a sibling test may have poisoned
+        # it with a mock, and FIR_REMOTE_FORCE_SSH must not be inherited.
+        remote._self_cache.clear()
+        remote._self_negative_until.clear()
+        patcher = mock.patch.dict(os.environ, {}, clear=False)
+        patcher.start()
+        os.environ.pop("FIR_REMOTE_FORCE_SSH", None)
+        self.addCleanup(patcher.stop)
+        self.addCleanup(remote._self_cache.clear)
+
+    def test_runs_locally_without_ssh(self):
+        env = _payload(remote.rexec({"host": "localhost", "command": "echo hi"}, self.ctx))
+        self.assertEqual("ok", env["outcome"])
+        self.assertTrue(env["local"])
+        self.assertEqual("hi\n", env["stdout"])
+
+    def test_hostile_quoting_survives_the_local_path_too(self):
+        cmd = "echo \"it's fine\"; printf '%s\\n' 'a b'  # 'unbalanced\n"
+        env = _payload(remote.rexec({"host": "localhost", "command": cmd}, self.ctx))
+        self.assertEqual("ok", env["outcome"])
+        self.assertIn("it's fine", env["stdout"])
+        self.assertIn("a b", env["stdout"])
+
+    def test_login_shell_semantics_hold_locally(self):
+        env = _payload(
+            remote.rexec(
+                {"host": "localhost", "command": "shopt -q login_shell && echo login"},
+                self.ctx,
+            )
+        )
+        self.assertIn("login", env["stdout"])
+
+    def test_agent_environment_does_not_leak_in(self):
+        with mock.patch.dict(os.environ, {"FIR_LEAK_CANARY": "leaked"}):
+            env = _payload(
+                remote.rexec(
+                    {"host": "localhost", "command": "echo [${FIR_LEAK_CANARY:-clean}]"},
+                    self.ctx,
+                )
+            )
+        self.assertEqual("[clean]", env["stdout"].strip())
+
+    def test_cwd_is_honoured(self):
+        env = _payload(
+            remote.rexec({"host": "localhost", "command": "pwd", "cwd": "/tmp"}, self.ctx)
+        )
+        self.assertEqual("ok", env["outcome"])
+        self.assertTrue(env["stdout"].strip().endswith("/tmp"))
+
+    def test_nonzero(self):
+        env = _payload(remote.rexec({"host": "localhost", "command": "exit 7"}, self.ctx))
+        self.assertEqual("nonzero_exit", env["outcome"])
+        self.assertEqual(7, env["exit_code"])
+
+    def test_timeout_bound_still_applies(self):
+        env = _payload(
+            remote.rexec({"host": "localhost", "command": "sleep 30", "timeout_s": 2}, self.ctx)
+        )
+        self.assertEqual("timeout", env["outcome"])
+        self.assertTrue(env["local"])
+
+    def test_detach_and_rjob_agree_on_the_transport(self):
+        env = _payload(
+            remote.rexec(
+                {"host": "localhost", "command": "echo started; exit 4", "detach": True},
+                self.ctx,
+            )
+        )
+        self.assertEqual("ok", env["outcome"])
+        self.assertTrue(env["local"])
+        job_id = env["job_id"]
+        status = {}
+        for _ in range(80):
+            status = _payload(remote.rjob({"host": "localhost", "id": job_id}, self.ctx))
+            if status.get("state") == "done":
+                break
+            time.sleep(0.25)
+        self.assertEqual("done", status["state"])
+        self.assertTrue(status["local"])
         self.assertEqual(4, status["job_exit_code"])
         self.assertIn("started", status["stdout"])
 

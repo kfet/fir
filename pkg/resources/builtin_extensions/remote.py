@@ -40,6 +40,11 @@ Transport rules (the whole point — see docs in each builder):
    not optional: with a tty that read takes SIGTTIN and nothing runs.
 4. Host configuration lives in ``~/.ssh/config``. There is no fir-side host
    registry; the tools accept whatever ``ssh`` accepts.
+5. A target that *is* this machine runs **locally**, without ssh — see
+   ``_is_self``. A fleet agent asking for its own box by alias would
+   otherwise hit ``Permission denied (publickey)``, because a host's key is
+   not in its own ``authorized_keys``. The envelope always carries
+   ``local: true`` when that happened, and ``via_ssh=True`` forces the wire.
 
 Every tool returns the same discriminated envelope (see ``_envelope``), never
 a bare string and never empty-on-failure: an empty tool result serialises to
@@ -49,6 +54,7 @@ a bare string and never empty-on-failure: an empty tool result serialises to
 from __future__ import annotations
 
 import concurrent.futures
+import getpass
 import glob
 import hashlib
 import json
@@ -56,6 +62,8 @@ import os
 import re
 import secrets
 import shlex
+import shutil
+import socket
 import subprocess
 import threading
 import time
@@ -98,6 +106,15 @@ _RC_TIMEOUT = 124
 
 #: ControlMaster socket template. ``%C`` is ssh's hash of the connection.
 _CONTROL_PATH = "~/.ssh/fir-cm-%C"
+
+#: Test-facing escape hatch forcing every tool onto the ssh transport even
+#: when the target is this very machine. The agent-facing one is ``via_ssh``.
+_FORCE_SSH_ENV = "FIR_REMOTE_FORCE_SSH"
+
+#: The PATH sshd hands a session before the login shell's profile runs. Kept
+#: deliberately bare: ``bash -l`` is what is supposed to grow it, on both
+#: transports, and inheriting the agent's PATH would hide a broken profile.
+_SSHD_DEFAULT_PATH = "/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin"
 
 _OUTCOME_OK = "ok"
 _OUTCOME_NONZERO = "nonzero_exit"
@@ -277,23 +294,30 @@ def _supervisor_argv(seconds: int, grace: int) -> list[str]:
     ]
 
 
-# Cache of host -> resolved ControlPath, so reuse detection costs one cheap
-# local `ssh -G` per host per extension process instead of one per call.
-_ctl_path_cache: dict[str, str] = {}
+# Cache of host -> resolved `ssh -G` fields, so both ControlPath reuse
+# detection and the self-host identity test cost one cheap local `ssh -G` per
+# host per extension process instead of one per call.
+_ssh_cfg_cache: dict[str, dict[str, str]] = {}
 _ctl_lock = threading.Lock()
 
+#: The `ssh -G` keywords this module reads back. ControlPath drives mux reuse
+#: detection; the rest decide whether local execution would be equivalent.
+_SSH_G_KEYS = frozenset({"controlpath", "hostname", "user", "port", "proxycommand", "proxyjump"})
 
-def _resolved_control_path(host: str) -> str:
-    """Ask ssh to expand the ControlPath tokens (``%C``) for *host*.
 
-    ``ssh -G`` performs full config + token expansion without touching the
-    network, so this is a purely local resolution.
+def _ssh_resolved_config(host: str) -> dict[str, str]:
+    """Resolve *host* through ssh's own config parser.
+
+    ``ssh -G`` performs full config + token expansion (including ``%C`` in
+    ControlPath) without touching the network, so this is a purely local
+    resolution — and it is the *only* honest way to learn what ssh would
+    actually dial, short of reimplementing ``Match``/``Host`` semantics here.
     """
     with _ctl_lock:
-        cached = _ctl_path_cache.get(host)
+        cached = _ssh_cfg_cache.get(host)
     if cached is not None:
         return cached
-    path = ""
+    cfg: dict[str, str] = {}
     try:
         proc = subprocess.run(
             ["ssh", "-o", f"ControlPath={_CONTROL_PATH}", "-G", host],
@@ -302,20 +326,310 @@ def _resolved_control_path(host: str) -> str:
             timeout=10,
         )
         for line in proc.stdout.splitlines():
-            if line.lower().startswith("controlpath "):
-                path = line.split(None, 1)[1].strip()
-                break
+            key, _, value = line.partition(" ")
+            key = key.strip().lower()
+            # First occurrence wins, matching ssh's own precedence.
+            if key in _SSH_G_KEYS and key not in cfg:
+                cfg[key] = value.strip()
     except (OSError, subprocess.SubprocessError):
-        path = ""
+        cfg = {}
     with _ctl_lock:
-        _ctl_path_cache[host] = path
-    return path
+        _ssh_cfg_cache[host] = cfg
+    return cfg
+
+
+def _resolved_control_path(host: str) -> str:
+    """The expanded ControlPath ssh would use for *host* ("" if unknown)."""
+    return _ssh_resolved_config(host).get("controlpath", "")
 
 
 def _connection_reused(host: str) -> bool:
     """True when a live mux socket for *host* existed before this call."""
     path = _resolved_control_path(host)
     return bool(path) and os.path.exists(os.path.expanduser(path))
+
+
+# ---------------------------------------------------------------------------
+# Host identity — "is this target actually the machine I am running on?"
+# ---------------------------------------------------------------------------
+
+
+def _local_user() -> str:
+    try:
+        return getpass.getuser()
+    except (KeyError, OSError):
+        return os.environ.get("USER") or os.environ.get("LOGNAME") or ""
+
+
+def _home() -> str:
+    return os.path.expanduser("~")
+
+
+def _login_shell() -> str:
+    """The shell sshd would exec for this user — from passwd, not $SHELL.
+
+    Using the passwd entry is not pedantry: it is what keeps the documented
+    remote-zsh gotcha reproducing on the local path instead of being silently
+    fixed in one transport only.
+    """
+    try:
+        import pwd  # Unix-only; this extension is Unix-only anyway.
+
+        shell = pwd.getpwuid(os.getuid()).pw_shell
+        if shell:
+            return shell
+    except (ImportError, KeyError, OSError):
+        pass
+    return os.environ.get("SHELL") or "/bin/sh"
+
+
+#: Linux sysctls that let a process bind an address the machine does not own.
+#: Routinely enabled on keepalived/HAProxy/anycast boxes — and when they are,
+#: ``bind()`` succeeds for *every* address and the identity test degenerates
+#: from a strong signal to no signal at all. Absent on macOS.
+_NONLOCAL_BIND_SYSCTLS = (
+    "/proc/sys/net/ipv4/ip_nonlocal_bind",
+    "/proc/sys/net/ipv6/ip_nonlocal_bind",
+)
+
+
+def _nonlocal_bind_enabled() -> bool:
+    """True when this kernel lets anything bind a foreign address."""
+    for path in _NONLOCAL_BIND_SYSCTLS:
+        try:
+            with open(path) as handle:
+                value = handle.read().strip()
+        except OSError:
+            continue  # Not Linux, or the sysctl is not exposed.
+        if value not in ("", "0"):
+            return True
+    return False
+
+
+def _local_address_of(hostname: str) -> str | None:
+    """The first address of *hostname* that is bound on a local interface.
+
+    The test is ``bind()``, not a name comparison: a socket can only be bound
+    to an address that is configured on some local interface — otherwise the
+    kernel answers ``EADDRNOTAVAIL``. That answers the question that actually
+    matters ("would a connection to this address land on *this* kernel?")
+    using nothing but the kernel's own routing state, so it cannot go stale
+    when Tailscale bounces and it needs no ``ip``/``ifconfig`` parsing.
+    """
+    try:
+        infos = socket.getaddrinfo(hostname, None, type=socket.SOCK_STREAM)
+    except OSError:
+        return None
+    for family, _stype, _proto, _canon, sockaddr in infos:
+        if family not in (socket.AF_INET, socket.AF_INET6):
+            continue
+        # Keep flowinfo/scope_id for IPv6, but always bind an ephemeral port.
+        bind_addr = (sockaddr[0], 0, *sockaddr[2:])
+        try:
+            with socket.socket(family, socket.SOCK_STREAM) as sock:
+                sock.bind(bind_addr)
+        except OSError:
+            continue
+        return str(sockaddr[0])
+    return None
+
+
+def _is_self(host: str) -> tuple[bool, str]:
+    """Would running *host*'s command locally be equivalent to ssh'ing to it?
+
+    Returns ``(is_self, reason)``; the reason is diagnostic only.
+
+    Hostname comparison is deliberately **not** used — it is the weakest
+    signal available. ``--net=host`` containers inherit the host's name,
+    cloned VMs ship the image's name, ``getfqdn()`` does a reverse lookup that
+    is routinely stale, and a MagicDNS FQDN equals the system FQDN only by
+    accident. So we ask ssh what it would dial and then ask the kernel
+    whether that address is ours:
+
+    1. ``ssh -G`` resolves hostname/user/port/proxy for *host*.
+    2. Bail to ssh — never to local — if a ``ProxyCommand``/``ProxyJump`` is
+       set (the resolved hostname is meaningless behind a jump), if the port
+       is not 22 (the classic signature of a container or a port-forwarded VM
+       sharing "my" IP), or if the target user is not the local user
+       (different ``$HOME``, different shell: this is what stops
+       ``ssh other@self`` running in the wrong home).
+    3. Otherwise bind-test every resolved address (see ``_local_address_of``).
+       Loopback binds succeed, which is correct. A NAT'd target resolving to
+       a public IP will not match a private interface address and correctly
+       falls through to ssh.
+
+    Known limitations, stated rather than papered over:
+
+    * a floating VIP (keepalived / anycast / a k8s service IP) that is bound
+      here but routed elsewhere is a genuine false positive. Rare, accepted.
+    * an agent running inside a ``--net=host`` container on the target
+      matches every address of its host and would then execute in the
+      container's filesystem rather than the host's. This is undetectable
+      from in here; no ``/.dockerenv`` heuristic is attempted because it only
+      half-works, and a half-working guard is worse than a documented one.
+
+    One case is *not* accepted but detected: ``ip_nonlocal_bind`` makes every
+    bind succeed, which would classify the whole fleet as self. That bails to
+    ssh (see ``_nonlocal_bind_enabled``).
+
+    Either way the escape hatch is the same: ``via_ssh=True``.
+    """
+    cfg = _ssh_resolved_config(host)
+    if not cfg:
+        return False, "ssh -G did not resolve this host"
+    for key in ("proxycommand", "proxyjump"):
+        value = cfg.get(key, "")
+        if value and value.lower() != "none":
+            return False, f"{key} is set, so the resolved hostname is not the endpoint"
+    port = cfg.get("port", "22")
+    if port != "22":
+        return False, f"port {port} is not 22, so this is not plain sshd on that address"
+    user = cfg.get("user", "")
+    local_user = _local_user()
+    if user and local_user and user != local_user:
+        return False, f"target user {user!r} is not the local user {local_user!r}"
+    if _nonlocal_bind_enabled():
+        return False, "ip_nonlocal_bind is enabled, so the bind test proves nothing"
+    hostname = cfg.get("hostname") or host
+    addr = _local_address_of(hostname)
+    if addr is None:
+        return False, f"no address of {hostname} is bound on a local interface"
+    return True, f"{hostname} resolves to {addr}, which is bound on a local interface"
+
+
+_self_cache: dict[str, tuple[bool, str]] = {}
+_self_negative_until: dict[str, float] = {}
+_self_lock = threading.Lock()
+
+#: How long a *negative* verdict is trusted. Positives are permanent — a
+#: machine does not stop being itself — but "not local" is often just a
+#: network that has not come up yet: Tailscale starting after the agent means
+#: the box's own MagicDNS name resolves nowhere for a few seconds, and a
+#: permanent cache would leave it auth-failing against itself forever.
+_SELF_NEGATIVE_TTL = 60.0
+
+
+def _self_verdict(host: str) -> tuple[bool, str]:
+    """``_is_self`` memoised per host, with negatives expiring."""
+    now = time.monotonic()
+    with _self_lock:
+        cached = _self_cache.get(host)
+        if cached is not None and (cached[0] or now < _self_negative_until.get(host, 0.0)):
+            return cached
+    verdict = _is_self(host)
+    with _self_lock:
+        _self_cache[host] = verdict
+        if not verdict[0]:
+            _self_negative_until[host] = now + _SELF_NEGATIVE_TTL
+    return verdict
+
+
+def _env_flag(name: str) -> bool:
+    """Whether an env var is set to something meaning "yes"."""
+    return (os.environ.get(name) or "").strip().lower() not in ("", "0", "false", "no")
+
+
+def _use_local(host: str, via_ssh: bool = False) -> bool:
+    """Whether this call should skip ssh entirely.
+
+    Two escape hatches, deliberately both: ``via_ssh`` is agent-facing (a
+    reachability or auth probe genuinely wants the wire), and
+    ``FIR_REMOTE_FORCE_SSH`` is test-facing, so the integration suite can keep
+    exercising the ssh transport against ``localhost``.
+    """
+    if via_ssh or _env_flag(_FORCE_SSH_ENV):
+        return False
+    return _self_verdict(host)[0]
+
+
+def _first_label(name: str) -> str:
+    return (name or "").split(".")[0].strip().lower()
+
+
+_fqdn_cache: list[str] = []
+
+
+def _my_labels() -> set[str]:
+    """This machine's short names. ``getfqdn`` can be a slow reverse lookup,
+    and this runs on an already-failed call, so it is resolved once."""
+    if not _fqdn_cache:
+        _fqdn_cache.extend((socket.gethostname(), socket.getfqdn()))
+    return {label for label in map(_first_label, _fqdn_cache) if label}
+
+
+def _resembles_self(host: str) -> bool:
+    """Weak signal: does *host* merely *look* like this machine?
+
+    Never sufficient to run anything locally — it only decorates an
+    already-failed ssh with a hint, so the agent stops guessing.
+    """
+    cfg = _ssh_resolved_config(host)
+    target = _first_label(cfg.get("hostname") or host)
+    return bool(target) and target in _my_labels()
+
+
+_SELF_AUTH_HINT = (
+    "target resolves to a name matching this machine; you may be on the target "
+    "already — if so, run the command directly instead of over ssh"
+)
+
+
+def _sshd_env() -> dict[str, str]:
+    """The environment an ssh session would arrive with.
+
+    This is the one real equivalence gap between the two transports. A naive
+    local run inherits the *agent's* environment — ``TMUX``, ``FIR_*``,
+    ``DISPLAY``, ``SSH_AUTH_SOCK``, PATH additions — and any script that
+    branches on those then behaves differently depending on a transport
+    decision it never asked about. So we scrub, keeping only what sshd + PAM
+    would set for a non-interactive, tty-less session.
+
+    ``SSH_CONNECTION``/``SSH_CLIENT`` are deliberately **absent** rather than
+    fabricated: there is no connection, and inventing a peer quad would be a
+    lie in exactly the place the ``local: true`` flag exists to prevent. Same
+    for ``TERM``, which sshd does not set under ``-T`` either.
+
+    ``XDG_RUNTIME_DIR`` is the one addition rather than a survival: sshd does
+    not set it, ``pam_systemd`` does, and without it ``systemd-run --user``
+    fails — so ``rexec detach=True`` would silently drop from a transient unit
+    to a forked process group on the local path alone. That is precisely the
+    transport-dependent behaviour change this function exists to prevent.
+    """
+    home = _home()
+    user = _local_user()
+    env = {
+        "HOME": home,
+        "USER": user,
+        "LOGNAME": user,
+        "SHELL": _login_shell(),
+        "PATH": _SSHD_DEFAULT_PATH,
+        "PWD": home,
+    }
+    runtime_dir = f"/run/user/{os.getuid()}"
+    if os.path.isdir(runtime_dir):
+        env["XDG_RUNTIME_DIR"] = runtime_dir
+        bus = os.path.join(runtime_dir, "bus")
+        if os.path.exists(bus):
+            env["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path={bus}"
+    # ssh forwards LANG/LC_* by default on most distro configs; keeping it
+    # matches the remote path's locale behaviour more often than dropping it.
+    for key in ("LANG",):
+        value = os.environ.get(key)
+        if value:
+            env[key] = value
+    return env
+
+
+def _local_argv(remote_argv: list[str]) -> list[str]:
+    """``_ssh_argv`` minus the ssh prefix — and nothing else.
+
+    sshd hands the command to the user's login shell as a single string
+    (``$SHELL -c '<argv joined by spaces>'``), which is exactly what ssh does
+    to *remote_argv* on the wire. Reproducing that join here — rather than
+    exec'ing the argv directly — is what keeps the two paths equivalent down
+    to the shell's own re-parsing.
+    """
+    return [_login_shell(), "-c", " ".join(remote_argv)]
 
 
 # ---------------------------------------------------------------------------
@@ -602,11 +916,22 @@ def _set_stdout(env: dict[str, Any], text: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _run_local(argv: list[str], stdin_data: str | None, timeout_s: float):
+def _run_local(
+    argv: list[str],
+    stdin_data: str | None,
+    timeout_s: float,
+    *,
+    env: dict[str, str] | None = None,
+    cwd: str | None = None,
+):
     """Run *argv* locally, feeding *stdin_data*. Returns (rc, out, err, timed_out).
 
     On timeout we still recover whatever partial output arrived, because a
     hung remote command's first 200 lines are usually the diagnosis.
+
+    *env*/*cwd* are set only by the self-host path, which must reproduce
+    sshd's scrubbed environment and ``$HOME`` start directory rather than
+    inherit the agent's.
     """
     # argv is always built here from a list — never a shell string.
     proc = subprocess.Popen(
@@ -621,6 +946,8 @@ def _run_local(argv: list[str], stdin_data: str | None, timeout_s: float):
         # avoid. Replace instead; stdout_bytes is counted the same way.
         errors="replace",
         start_new_session=True,
+        env=env,
+        cwd=cwd,
     )
     try:
         out, err = proc.communicate(input=stdin_data, timeout=timeout_s)
@@ -634,14 +961,15 @@ def _run_local(argv: list[str], stdin_data: str | None, timeout_s: float):
         return _RC_TIMEOUT, out or "", err or "", True
 
 
-def _ssh_exec(
+def _exec(
     host: str,
     script: str,
     timeout_s: float,
     *,
     job_id: str | None = None,
+    via_ssh: bool = False,
 ) -> dict[str, Any]:
-    """Ship *script* to *host* over ssh stdin and return a full envelope.
+    """Ship *script* to *host* and return a full envelope.
 
     The script goes on stdin **verbatim** — no framing, no encoding — and is
     read there by the ``bash -l -s`` that ``_REMOTE_SUPERVISOR`` backgrounds.
@@ -649,17 +977,33 @@ def _ssh_exec(
     so a timed-out command leaves no orphans and no GNU ``timeout`` binary has
     to exist over there. The local timeout is deliberately looser so the
     remote bound normally wins and we can report the clean 124.
+
+    When *host* is this very machine (see ``_is_self``) the ssh prefix is
+    dropped and the identical supervisor argv runs under an sshd-shaped
+    environment instead — same script, same bound, same login shell — and the
+    envelope carries ``local: true``. ``via_ssh`` forces the wire for the one
+    case where transparency would lie: a reachability or auth probe.
     """
-    reused = _connection_reused(host)
+    local = _use_local(host, via_ssh)
     # A sub-second timeout_s must still bound the command: floor it to one
     # second rather than degrade to "no limit".
     remote_seconds = max(1, int(timeout_s))
-    argv = _ssh_argv(host, _supervisor_argv(remote_seconds, _TIMEOUT_KILL_GRACE))
+    supervisor = _supervisor_argv(remote_seconds, _TIMEOUT_KILL_GRACE)
+    run_kwargs: dict[str, Any] = {}
+    if local:
+        reused = False
+        argv = _local_argv(supervisor)
+        run_kwargs = {"env": _sshd_env(), "cwd": _home()}
+    else:
+        reused = _connection_reused(host)
+        argv = _ssh_argv(host, supervisor)
     started = time.time()
-    rc, out, err, local_timed_out = _run_local(argv, script, timeout_s + _LOCAL_TIMEOUT_SLACK)
+    rc, out, err, local_timed_out = _run_local(
+        argv, script, timeout_s + _LOCAL_TIMEOUT_SLACK, **run_kwargs
+    )
     duration_ms = int((time.time() - started) * 1000)
 
-    extra: dict[str, Any] = {}
+    extra: dict[str, Any] = {"local": True} if local else {}
     if local_timed_out or rc == _RC_TIMEOUT:
         outcome, rc = _OUTCOME_TIMEOUT, _RC_TIMEOUT
         # Sampled before the synthetic message below fills `err` in.
@@ -683,8 +1027,17 @@ def _ssh_exec(
                 "remote login shell's startup, so a very small timeout_s can expire "
                 "before the command runs — raise timeout_s if output was expected"
             )
+    elif local:
+        # No transport to fail: 255 here is the command's own exit code, and
+        # ssh's stderr patterns cannot appear.
+        outcome = _OUTCOME_OK if rc == 0 else _OUTCOME_NONZERO
     else:
         outcome = _classify(rc, err)
+        if outcome == _OUTCOME_AUTH_FAILED and _resembles_self(host):
+            # Defence in depth on the *weak* signal: never enough to redirect
+            # an execution, but enough to stop the agent burning turns on a
+            # loopback key it should not be adding.
+            extra["hint"] = _SELF_AUTH_HINT
     return _envelope(
         outcome,
         host,
@@ -922,8 +1275,23 @@ _REXEC_DESCRIPTION = (
     "transient systemd unit (or a detached, double-forked process group) on "
     "the remote box, with output and exit code landing in files there. Poll "
     "it with `rjob`. Use detach for anything longer than a couple of "
-    "minutes.\n\n" + _BOUNDARY_NOTE
+    "minutes.\n\n"
+    "If the target IS the machine you are already running on, the command "
+    "runs locally under an sshd-shaped environment instead of over ssh (no "
+    "process isolation, no network hop) and the envelope carries "
+    "`local: true`. Pass via_ssh=True when you specifically want the wire — "
+    "e.g. to probe reachability or authentication.\n\n" + _BOUNDARY_NOTE
 )
+
+_VIA_SSH_PARAM: dict[str, Any] = {
+    "type": "boolean",
+    "description": (
+        "Force the ssh transport even when the target is this very machine. "
+        "Default false. Set it when the ssh hop itself is the thing you are "
+        "testing (reachability, auth, key setup) — otherwise a self-targeted "
+        "call would report `ok` without any connection having been made."
+    ),
+}
 
 _REXEC_PARAMETERS: dict[str, Any] = {
     "type": "object",
@@ -961,6 +1329,7 @@ _REXEC_PARAMETERS: dict[str, Any] = {
                 "job_id immediately. Poll with `rjob`."
             ),
         },
+        "via_ssh": _VIA_SSH_PARAM,
     },
     "required": ["host", "command"],
 }
@@ -990,6 +1359,7 @@ def rexec(params: dict, ctx: fir_ext.Context) -> dict[str, Any]:
     if not command.strip():
         raise fir_ext.ToolError("rexec: 'command' is required")
     cwd = params.get("cwd") or None
+    via_ssh = bool(params.get("via_ssh"))
     timeout_s = _num(params, "timeout_s", 120, "rexec")
     if timeout_s <= 0:
         timeout_s = 120.0
@@ -997,14 +1367,14 @@ def rexec(params: dict, ctx: fir_ext.Context) -> dict[str, Any]:
     if params.get("detach"):
         job_id = _new_job_id()
         script = _build_script(_detach_script(job_id, command, cwd, host))
-        env = _ssh_exec(host, script, min(timeout_s, 60), job_id=job_id)
+        env = _exec(host, script, min(timeout_s, 60), job_id=job_id, via_ssh=via_ssh)
         if env["outcome"] == _OUTCOME_OK:
             env["launcher"] = (env["stdout"]).strip()
             env["log_path"] = f"{_RJOBS_DISPLAY}/{job_id}.log"
             env["hint"] = f"poll with rjob(host={host!r}, id={job_id!r})"
         return _result(env)
 
-    env = _ssh_exec(host, _build_script(command, cwd), timeout_s)
+    env = _exec(host, _build_script(command, cwd), timeout_s, via_ssh=via_ssh)
     return _result(env)
 
 
@@ -1094,7 +1464,10 @@ _RJOB_DESCRIPTION = (
     "(~/.cache/fir/rjobs/<id>.{log,rc,pid}) — there is no local registry to "
     "drift, so this works across fir sessions and even after a restart.\n\n"
     "actions: status (state + exit code + last 20 log lines), log (whole "
-    "log), tail (last `lines`), kill (stop the job's process group)."
+    "log), tail (last `lines`), kill (stop the job's process group).\n\n"
+    "Transport follows `rexec`: if the host IS this machine the job state is "
+    "read locally (`local: true`), which is exactly where `rexec detach=True` "
+    "put it."
 )
 
 _RJOB_PARAMETERS: dict[str, Any] = {
@@ -1111,6 +1484,7 @@ _RJOB_PARAMETERS: dict[str, Any] = {
             "type": "integer",
             "description": "Lines for tail (default 40).",
         },
+        "via_ssh": _VIA_SSH_PARAM,
     },
     "required": ["host", "id"],
 }
@@ -1133,6 +1507,7 @@ def rjob(params: dict, ctx: fir_ext.Context) -> dict[str, Any]:
     host = (params.get("host") or "").strip()
     job_id = (params.get("id") or "").strip()
     action = (params.get("action") or "status").strip()
+    via_ssh = bool(params.get("via_ssh"))
     lines = int(_num(params, "lines", 40, "rjob"))
     if not host:
         raise fir_ext.ToolError("rjob: 'host' is required")
@@ -1143,7 +1518,7 @@ def rjob(params: dict, ctx: fir_ext.Context) -> dict[str, Any]:
         raise fir_ext.ToolError(f"rjob: unknown action {action!r}")
 
     script = _build_script(_rjob_script(job_id, action, max(1, lines)))
-    env = _ssh_exec(host, script, 60, job_id=job_id)
+    env = _exec(host, script, 60, job_id=job_id, via_ssh=via_ssh)
     if env["outcome"] == _OUTCOME_NONZERO and env["exit_code"] == _RC_NO_JOB:
         env["outcome"] = _OUTCOME_NO_TARGET
         env["hint"] = "no such job on this host — check the id and the host"
@@ -1167,6 +1542,73 @@ def rjob(params: dict, ctx: fir_ext.Context) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Tools: rput / rget
 # ---------------------------------------------------------------------------
+
+
+def _remote_path_local(path: str) -> str:
+    """Resolve a *remote* path expression against this machine.
+
+    scp expands ``~`` and resolves relative paths through the remote login
+    shell, whose cwd is the target user's home. Reproduce both, so
+    ``rput(remote='notes/brief.md')`` lands in the same place on either
+    transport instead of following the agent's cwd.
+    """
+    expanded = os.path.expanduser(path)
+    if not os.path.isabs(expanded):
+        expanded = os.path.join(_home(), expanded)
+    return expanded
+
+
+def _copy_one(src: str, dst: str) -> None:
+    """One source -> one destination, matching ``scp -p -r``.
+
+    Symlinks are **dereferenced**, because that is what scp does: the bytes
+    arrive at the far end, not a link that may dangle there. A dangling
+    symlink therefore errors on both transports rather than on neither.
+
+    Parent directories are deliberately **not** created: scp errors when the
+    destination's parent is missing, and silently succeeding on one transport
+    only would be the worst of both.
+    """
+    if os.path.isdir(src):
+        shutil.copytree(src, dst, symlinks=False, dirs_exist_ok=True)
+    else:
+        shutil.copy2(src, dst)
+
+
+def _copy_local(host: str, sources: list[str], dest: str, direction: str) -> dict[str, Any]:
+    """The self-host counterpart of ``_copy`` — ``shutil`` instead of scp.
+
+    Note the one capability genuinely lost here: scp's timeout is enforced by
+    killing a subprocess, and a ``shutil`` copy in-process cannot be
+    interrupted the same way. ``timeout_s`` therefore does not bound a
+    self-host copy; it is a local filesystem copy, which fails fast or
+    proceeds at disk speed rather than hanging on a network.
+    """
+    started = time.time()
+    errors: list[str] = []
+    dest_is_dir = os.path.isdir(dest)
+    for src in sources:
+        # scp names the destination after the source's basename when the
+        # destination is an existing directory.
+        target = os.path.join(dest, os.path.basename(src.rstrip("/"))) if dest_is_dir else dest
+        try:
+            _copy_one(src, target)
+        except OSError as exc:
+            errors.append(f"{src}: {exc.strerror or exc}")
+        except shutil.Error as exc:
+            errors.append(f"{src}: {exc}")
+    return _envelope(
+        _OUTCOME_NONZERO if errors else _OUTCOME_OK,
+        host,
+        exit_code=1 if errors else 0,
+        stderr="\n".join(errors),
+        duration_ms=int((time.time() - started) * 1000),
+        connect_reused=False,
+        direction=direction,
+        sources=sources,
+        dest=dest,
+        local=True,
+    )
 
 
 def _copy(
@@ -1229,6 +1671,7 @@ _RPUT_PARAMETERS: dict[str, Any] = {
             "description": "Remote destination path. ~ is expanded remotely.",
         },
         "timeout_s": {"type": "number", "description": "Default 300."},
+        "via_ssh": _VIA_SSH_PARAM,
     },
     "required": ["host", "local", "remote"],
 }
@@ -1240,6 +1683,7 @@ _RGET_PARAMETERS: dict[str, Any] = {
         "remote": {"type": "string", "description": "Remote path (file or dir)."},
         "local": {"type": "string", "description": "Local destination path."},
         "timeout_s": {"type": "number", "description": "Default 300."},
+        "via_ssh": _VIA_SSH_PARAM,
     },
     "required": ["host", "remote", "local"],
 }
@@ -1269,7 +1713,10 @@ def rput(params: dict, ctx: fir_ext.Context) -> dict[str, Any]:
     local_path = os.path.expanduser(local)
     if not os.path.exists(local_path):
         raise fir_ext.ToolError(f"rput: local path does not exist: {local_path}")
-    env = _copy(host, [local_path], f"{host}:{remote}", "put", timeout_s)
+    if _use_local(host, bool(params.get("via_ssh"))):
+        env = _copy_local(host, [local_path], _remote_path_local(remote), "put")
+    else:
+        env = _copy(host, [local_path], f"{host}:{remote}", "put", timeout_s)
     if env["outcome"] == _OUTCOME_OK:
         env["local_bytes"] = _path_size(local_path)
     return _result(env)
@@ -1297,7 +1744,13 @@ def rget(params: dict, ctx: fir_ext.Context) -> dict[str, Any]:
     _check_host(host)
     timeout_s = _num(params, "timeout_s", 300, "rget")
     local_path = os.path.expanduser(local)
-    env = _copy(host, [f"{host}:{remote}"], local_path, "get", timeout_s)
+    if _use_local(host, bool(params.get("via_ssh"))):
+        source = _remote_path_local(remote)
+        if not os.path.exists(source):
+            raise fir_ext.ToolError(f"rget: path does not exist on {host}: {source}")
+        env = _copy_local(host, [source], local_path, "get")
+    else:
+        env = _copy(host, [f"{host}:{remote}"], local_path, "get", timeout_s)
     if env["outcome"] == _OUTCOME_OK:
         env["local_bytes"] = _path_size(local_path)
         env["local_path"] = os.path.abspath(local_path)
@@ -1492,7 +1945,8 @@ def _tmux_kill_script(target: str) -> str:
 
 def _tmux_exec(host: str, script: str, timeout_s: float = 45) -> dict[str, Any]:
     """Ship a tmux script and reclassify its failure as no_tmux / no_target."""
-    return _tmux_outcome(_ssh_exec(host, _build_script(script), timeout_s))
+    # rtmux is deliberately ssh-only; see the self-host guard in `rtmux`.
+    return _tmux_outcome(_exec(host, _build_script(script), timeout_s, via_ssh=True))
 
 
 def _split_marker(stdout: str, marker: str) -> tuple[str, str]:
@@ -1526,6 +1980,17 @@ def rtmux(params: dict, ctx: fir_ext.Context) -> dict[str, Any]:
     _check_host(host)
     if action not in ("ls", "new", "send", "cap", "kill"):
         raise fir_ext.ToolError(f"rtmux: unknown action {action!r}")
+    if _use_local(host):
+        # rtmux stays on ssh by design — but against *this* box there is no
+        # ssh to stay on, and driving the local tmux server from an agent that
+        # is itself living in tmux is a footgun: a `send-keys` to the wrong
+        # pane is the agent typing into its own window. Fail fast rather than
+        # silently redirect.
+        raise fir_ext.ToolError(
+            f"rtmux: {host!r} is this very host — driving the local tmux server from "
+            "here can send keys into the agent's own pane. Use the tmux-driver skill "
+            "directly, or pass a genuinely remote host."
+        )
     target = (params.get("target") or "").strip()
     lines = max(1, int(_num(params, "lines", 120, "rtmux")))
 
@@ -1607,7 +2072,9 @@ _RHOSTS_DESCRIPTION = (
     "including hosts not listed here.\n\n"
     "probe=True additionally runs a parallel `ssh <host> true` sweep and "
     "classifies each as reachable / unreachable / auth_failed. Wildcard "
-    "stanzas (Host *) are listed but never probed."
+    "stanzas (Host *) are listed but never probed.\n\n"
+    "An entry marked `self: true` IS the machine you are running on: rexec / "
+    "rjob / rput / rget will execute there without ssh, and rtmux refuses it."
 )
 
 _RHOSTS_PARAMETERS: dict[str, Any] = {
@@ -1646,6 +2113,26 @@ def _probe_host(host: str, timeout_s: float) -> dict[str, Any]:
     return entry
 
 
+def _mark_self_hosts(hosts: list[dict[str, Any]]) -> None:
+    """Flag the entries that are this machine, in place.
+
+    Disclosure at the reconnaissance step: the mistake this whole feature
+    exists to prevent — "ssh to myself and wonder why the key is refused" —
+    dies here, before any call is made. The identity test is purely local
+    (``ssh -G`` + ``bind``) and memoised, so this costs nothing on the wire;
+    it is still parallelised because ``getaddrinfo`` can block on a name that
+    resolves nowhere.
+    """
+    targets = [h for h in hosts if not h.get("pattern") and not h["host"].startswith("-")]
+    if not targets:
+        return
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(targets))) as pool:
+        verdicts = list(pool.map(lambda h: _use_local(h["host"]), targets))
+    for entry, is_self in zip(targets, verdicts):
+        if is_self:
+            entry["self"] = True
+
+
 @fir_ext.tool(
     name="rhosts",
     description=_RHOSTS_DESCRIPTION,
@@ -1657,6 +2144,7 @@ def rhosts(params: dict, ctx: fir_ext.Context) -> dict[str, Any]:
     path = _ssh_config_path()
     text = _read_ssh_config(path)
     hosts = _parse_ssh_config(text)
+    _mark_self_hosts(hosts)
     env = _envelope(
         _OUTCOME_OK,
         "",
