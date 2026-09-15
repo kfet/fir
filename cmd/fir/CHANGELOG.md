@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.10.2] - 2026-09-15
+
 ### Fixed
 - **`tmuxspinner` could still bake the session name into the window title it was supposed to restore.** The previous fix for this (v0.92.1) guarded the ticker's user-rename detector by re-checking `_last_set` under the lock, which closes the window where another thread's paint has *fully completed* — but `_rename_to_current_title` wrote to tmux **outside** the lock and only then re-acquired it to record `_last_set`. Between those two steps the window showed a title we had written but not yet recorded, so the detector could take the lock, see an unchanged `_last_set` beside an unrecognised name, and adopt our own title as a user rename: `fir` → `fir mysess`, rendering `fir mysess mysess` from then on and "restoring" the window to a name the user never chose. The tmux write and the record are now indivisible, and `set_session_name`'s check-then-write is closed the same way (a concurrent `start()` could slip into that gap). Regression test asserts the invariant directly — every `_rename_window` call must be issued with the lock held. The lifecycle tests that caught this intermittently also stopped sleeping on `TICK_INTERVAL` multiples and now wait on a paint event, which is both deterministic under parallel load and ~6x faster.
 
