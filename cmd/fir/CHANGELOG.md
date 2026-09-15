@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Added
+- **The system prompt now states the machine the agent is running on** (`Current host:`, beside date and cwd), from `os.Hostname()`; omitted entirely if the lookup fails, and overridable via `BuildSystemPromptOptions.Host` for deterministic tests. Without it, an agent on a fleet box would `rexec` into an ssh alias for its own machine and reason about isolation that does not exist.
+
 ## [1.10.3] - 2026-09-15
 
 ### Fixed

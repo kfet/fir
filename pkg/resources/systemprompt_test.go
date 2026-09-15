@@ -1,6 +1,7 @@
 package resources
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -163,5 +164,54 @@ func TestBuildSystemPrompt_MCPTimeoutBlock(t *testing.T) {
 	prompt = BuildSystemPrompt(BuildSystemPromptOptions{Cwd: "/test"})
 	if strings.Contains(prompt, "mcp__") {
 		t.Errorf("MCP timeout guideline should be omitted when timeout is 0, got:\n%s", prompt)
+	}
+}
+
+func TestBuildSystemPrompt_Host(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		opts BuildSystemPromptOptions
+	}{
+		{"default", BuildSystemPromptOptions{Cwd: "/test/dir", Host: "zboxserver"}},
+		{"custom", BuildSystemPromptOptions{CustomPrompt: "You are a custom agent.", Cwd: "/test/dir", Host: "zboxserver"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			prompt := BuildSystemPrompt(tc.opts)
+			if !strings.Contains(prompt, "Current host: zboxserver") {
+				t.Errorf("should contain overridden host line, got:\n%s", prompt)
+			}
+		})
+	}
+}
+
+func TestBuildSystemPrompt_HostFromLookup(t *testing.T) {
+	orig := hostnameFunc
+	t.Cleanup(func() { hostnameFunc = orig })
+	hostnameFunc = func() (string, error) { return "testbox", nil }
+
+	for _, opts := range []BuildSystemPromptOptions{
+		{Cwd: "/test/dir"},
+		{CustomPrompt: "You are a custom agent.", Cwd: "/test/dir"},
+	} {
+		prompt := BuildSystemPrompt(opts)
+		if !strings.Contains(prompt, "Current host: testbox") {
+			t.Errorf("should contain host line, got:\n%s", prompt)
+		}
+	}
+}
+
+func TestBuildSystemPrompt_HostOmittedOnError(t *testing.T) {
+	orig := hostnameFunc
+	t.Cleanup(func() { hostnameFunc = orig })
+	hostnameFunc = func() (string, error) { return "", errors.New("no hostname") }
+
+	for _, opts := range []BuildSystemPromptOptions{
+		{Cwd: "/test/dir"},
+		{CustomPrompt: "You are a custom agent.", Cwd: "/test/dir"},
+	} {
+		prompt := BuildSystemPrompt(opts)
+		if strings.Contains(prompt, "Current host") {
+			t.Errorf("should omit host line entirely, got:\n%s", prompt)
+		}
 	}
 }

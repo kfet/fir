@@ -4,11 +4,16 @@ package resources
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"time"
 )
+
+// hostnameFunc resolves the current machine's short kernel hostname.
+// Indirected for tests.
+var hostnameFunc = os.Hostname
 
 // ContextFile is a pre-loaded context file for the system prompt.
 type ContextFile struct {
@@ -28,6 +33,10 @@ type BuildSystemPromptOptions struct {
 	// If empty, defaults to time.Now() formatted as YYYY-MM-DD.
 	// Set this once per session to avoid cache-breaking date changes at midnight.
 	Date string
+	// Host overrides the "Current host" line in the system prompt.
+	// If empty, defaults to the short kernel hostname from os.Hostname().
+	// If the lookup fails, the line is omitted entirely.
+	Host string
 	// MCPToolTimeout, when > 0, advertises the default per-call timeout applied
 	// to MCP tools. Set only when MCP tools are present so the block is omitted
 	// otherwise. Zero means "no MCP tools / bound disabled" — emit nothing.
@@ -51,19 +60,26 @@ func BuildSystemPrompt(opts BuildSystemPromptOptions) string {
 		date = time.Now().Format("2006-01-02")
 	}
 
+	host := opts.Host
+	if host == "" {
+		if h, err := hostnameFunc(); err == nil {
+			host = h
+		}
+	}
+
 	appendSection := ""
 	if opts.AppendSystemPrompt != "" {
 		appendSection = "\n\n" + opts.AppendSystemPrompt
 	}
 
 	if opts.CustomPrompt != "" {
-		return buildCustomPrompt(opts, promptCwd, date, appendSection)
+		return buildCustomPrompt(opts, promptCwd, date, host, appendSection)
 	}
 
-	return buildDefaultPrompt(opts, promptCwd, date, appendSection)
+	return buildDefaultPrompt(opts, promptCwd, date, host, appendSection)
 }
 
-func buildCustomPrompt(opts BuildSystemPromptOptions, promptCwd, date, appendSection string) string {
+func buildCustomPrompt(opts BuildSystemPromptOptions, promptCwd, date, host, appendSection string) string {
 	prompt := opts.CustomPrompt + appendSection
 
 	if len(opts.ContextFiles) > 0 {
@@ -80,10 +96,13 @@ func buildCustomPrompt(opts BuildSystemPromptOptions, promptCwd, date, appendSec
 
 	prompt += fmt.Sprintf("\nCurrent date: %s", date)
 	prompt += fmt.Sprintf("\nCurrent working directory: %s", promptCwd)
+	if host != "" {
+		prompt += fmt.Sprintf("\nCurrent host: %s", host)
+	}
 	return prompt
 }
 
-func buildDefaultPrompt(opts BuildSystemPromptOptions, promptCwd, date, appendSection string) string {
+func buildDefaultPrompt(opts BuildSystemPromptOptions, promptCwd, date, host, appendSection string) string {
 	toolSet := make(map[string]bool)
 	for _, t := range opts.SelectedTools {
 		toolSet[t] = true
@@ -133,5 +152,8 @@ Guidelines:
 
 	prompt += fmt.Sprintf("\nCurrent date: %s", date)
 	prompt += fmt.Sprintf("\nCurrent working directory: %s", promptCwd)
+	if host != "" {
+		prompt += fmt.Sprintf("\nCurrent host: %s", host)
+	}
 	return prompt
 }
