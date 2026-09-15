@@ -2,8 +2,13 @@
 
 ## [Unreleased]
 
+## [1.10.3] - 2026-09-15
+
 ### Fixed
 - **The remote tools now detect that the target IS this host and run locally.** An agent on a fleet box asking for its own machine by ssh alias got `Permission denied (publickey)` — a host's key is not in its own `authorized_keys` — and then burned turns, or "fixed" it by installing a loopback key. `rexec`, `rjob`, `rput` and `rget` now drop the ssh prefix and run the identical supervisor argv locally under an sshd-shaped scrubbed environment ($HOME cwd, bare PATH, no `TMUX`/`FIR_*`/`SSH_AUTH_SOCK`, the passwd login shell), disclosing it as `local: true` in the envelope; `rhosts` marks the entry `self: true`. The identity test never compares hostnames — `--net=host` containers, cloned VMs and stale reverse lookups all make that signal worthless. Instead `ssh -G` resolves the target, a `ProxyCommand`/`ProxyJump`, a non-22 port or a non-local target user bail straight back to ssh, and otherwise each resolved address is `bind()`-tested, which succeeds only for an address configured on a local interface. `via_ssh=True` (or `FIR_REMOTE_FORCE_SSH=1`) forces the wire for the one case transparency would lie about — probing reachability or auth; an ssh call that *does* fail with `auth_failed` against a lookalike name now carries a hint instead of a dead end. `ip_nonlocal_bind` (routinely on for keepalived/anycast) makes every bind succeed and so bails to ssh rather than classifying the whole fleet as self, and the local environment supplies `XDG_RUNTIME_DIR`/`DBUS_SESSION_BUS_ADDRESS` — which `pam_systemd` provides over ssh — so `detach=True` still gets a transient `systemd-run --user` unit rather than silently degrading to a forked process group. `rtmux` stays on ssh and refuses a self-host outright, since `send-keys` into the local tmux server can land in the agent's own pane.
+
+### Changed
+- **Model catalog regenerated**: removed 4 aggregator model(s); 16 model(s) with changed pricing/limits.
 
 ## [1.10.2] - 2026-09-15
 
