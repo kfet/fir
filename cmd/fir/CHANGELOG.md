@@ -2,8 +2,13 @@
 
 ## [Unreleased]
 
+## [1.11.0] - 2026-09-16
+
 ### Added
 - **The system prompt now states the machine the agent is running on** (`Current host:`, beside date and cwd), from `os.Hostname()`; omitted entirely if the lookup fails, and overridable via `BuildSystemPromptOptions.Host` for deterministic tests. Without it, an agent on a fleet box would `rexec` into an ssh alias for its own machine and reason about isolation that does not exist.
+
+### Changed
+- **Model catalog regenerated**: added `amazon-bedrock/apac.anthropic.claude-sonnet-4-20250514-v1:0`, `amazon-bedrock/eu.anthropic.claude-sonnet-4-20250514-v1:0`, `amazon-bedrock/global.anthropic.claude-sonnet-4-20250514-v1:0`, `amazon-bedrock/us.anthropic.claude-sonnet-4-20250514-v1:0`; removed 4 aggregator model(s); 29 model(s) with changed pricing/limits.
 
 ## [1.10.3] - 2026-09-15
 
