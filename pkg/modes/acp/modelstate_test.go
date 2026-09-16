@@ -4,7 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	acpsdk "github.com/coder/acp-go-sdk"
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/ai/envkeys"
 	"github.com/kfet/fir/pkg/auth"
@@ -98,7 +97,7 @@ func TestBuildModelState(t *testing.T) {
 		if state == nil {
 			t.Fatal("expected non-nil state")
 		}
-		wantCurrentID := acpsdk.ModelId("anthropic/claude-3-7-sonnet-20250219")
+		wantCurrentID := ModelId("anthropic/claude-3-7-sonnet-20250219")
 		if state.CurrentModelId != wantCurrentID {
 			t.Errorf("CurrentModelId = %q, want %q", state.CurrentModelId, wantCurrentID)
 		}

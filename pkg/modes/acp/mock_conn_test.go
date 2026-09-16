@@ -36,8 +36,8 @@ func (m *mockConn) CreateTerminal(_ context.Context, _ acpsdk.CreateTerminalRequ
 	return acpsdk.CreateTerminalResponse{TerminalId: m.nextTerminalID}, nil
 }
 
-func (m *mockConn) KillTerminalCommand(_ context.Context, _ acpsdk.KillTerminalCommandRequest) (acpsdk.KillTerminalCommandResponse, error) {
-	return acpsdk.KillTerminalCommandResponse{}, nil
+func (m *mockConn) KillTerminal(_ context.Context, _ acpsdk.KillTerminalRequest) (acpsdk.KillTerminalResponse, error) {
+	return acpsdk.KillTerminalResponse{}, nil
 }
 
 func (m *mockConn) ReleaseTerminal(_ context.Context, _ acpsdk.ReleaseTerminalRequest) (acpsdk.ReleaseTerminalResponse, error) {

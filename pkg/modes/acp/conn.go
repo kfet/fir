@@ -19,7 +19,7 @@ import (
 type acpConn interface {
 	SessionUpdate(ctx context.Context, params acpsdk.SessionNotification) error
 	CreateTerminal(ctx context.Context, params acpsdk.CreateTerminalRequest) (acpsdk.CreateTerminalResponse, error)
-	KillTerminalCommand(ctx context.Context, params acpsdk.KillTerminalCommandRequest) (acpsdk.KillTerminalCommandResponse, error)
+	KillTerminal(ctx context.Context, params acpsdk.KillTerminalRequest) (acpsdk.KillTerminalResponse, error)
 	ReleaseTerminal(ctx context.Context, params acpsdk.ReleaseTerminalRequest) (acpsdk.ReleaseTerminalResponse, error)
 	TerminalOutput(ctx context.Context, params acpsdk.TerminalOutputRequest) (acpsdk.TerminalOutputResponse, error)
 	WaitForTerminalExit(ctx context.Context, params acpsdk.WaitForTerminalExitRequest) (acpsdk.WaitForTerminalExitResponse, error)
@@ -124,7 +124,9 @@ func rawMethodHandler(pa *firAgent, wn *writeNotifier) acpsdk.MethodHandler {
 				firlog.Error("acp dispatch: session/new failed", "err", err, "cwd", p.Cwd)
 				return nil, toReqErr(err)
 			}
-			// Inject configOptions (not in SDK v0.6.3, present in upstream schema).
+			// Re-attach fields fir sends that the SDK's typed response does
+			// not carry: configOptions, and the legacy "models" object the
+			// SDK dropped in v0.13 (see legacymodels.go).
 			rawResp, merr := json.Marshal(resp)
 			if merr != nil {
 				return resp, nil
@@ -138,6 +140,9 @@ func rawMethodHandler(pa *firAgent, wn *writeNotifier) acpsdk.MethodHandler {
 			pa.mu.Unlock()
 			if ok {
 				respMap["configOptions"] = buildConfigOptions(entry)
+				if m := entry.session.Model(); m != nil {
+					respMap["models"] = BuildModelState(entry.modelRegistry, m)
+				}
 			}
 			// Send available commands AFTER the response is written to stdout.
 			// Without this, the notification races the response and arrives first,
@@ -188,7 +193,7 @@ func rawMethodHandler(pa *firAgent, wn *writeNotifier) acpsdk.MethodHandler {
 			return resp, nil
 
 		case "session/set_model":
-			var p acpsdk.SetSessionModelRequest
+			var p SetSessionModelRequest
 			if err := json.Unmarshal(params, &p); err != nil {
 				return nil, acpsdk.NewInvalidParams(map[string]any{"error": err.Error()})
 			}
@@ -203,7 +208,7 @@ func rawMethodHandler(pa *firAgent, wn *writeNotifier) acpsdk.MethodHandler {
 			if err := json.Unmarshal(params, &p); err != nil {
 				return nil, acpsdk.NewInvalidParams(map[string]any{"error": err.Error()})
 			}
-			resp, err := pa.SetSessionConfigOption(ctx, p)
+			resp, err := pa.setSessionConfigOptionLocal(ctx, p)
 			if err != nil {
 				return nil, toReqErr(err)
 			}
@@ -227,7 +232,7 @@ func rawMethodHandler(pa *firAgent, wn *writeNotifier) acpsdk.MethodHandler {
 			if err := json.Unmarshal(params, &p); err != nil {
 				return nil, acpsdk.NewInvalidParams(map[string]any{"error": err.Error()})
 			}
-			resp, err := pa.ListSessions(ctx, p)
+			resp, err := pa.listSessionsLocal(ctx, p)
 			if err != nil {
 				return nil, toReqErr(err)
 			}
@@ -244,7 +249,7 @@ func rawMethodHandler(pa *firAgent, wn *writeNotifier) acpsdk.MethodHandler {
 				return nil, acpsdk.NewInvalidParams(map[string]any{"error": err.Error()})
 			}
 			firlog.Info("acp dispatch: "+method+" params", "sessionId", p.SessionId, "cwd", p.Cwd)
-			resp, err := pa.ResumeSession(ctx, p)
+			resp, err := pa.resumeSessionLocal(ctx, p)
 			if err != nil {
 				firlog.Error("acp dispatch: "+method+" failed", "err", err, "sessionId", p.SessionId, "cwd", p.Cwd)
 				return nil, toReqErr(err)
@@ -262,6 +267,9 @@ func rawMethodHandler(pa *firAgent, wn *writeNotifier) acpsdk.MethodHandler {
 			pa.mu.Unlock()
 			if ok {
 				respMap["configOptions"] = buildConfigOptions(entry)
+				if m := entry.session.Model(); m != nil {
+					respMap["models"] = BuildModelState(entry.modelRegistry, m)
+				}
 			}
 			afterWrite := wn.AfterWrite()
 			go func() {
@@ -297,8 +305,8 @@ func (r *rawConn) CreateTerminal(ctx context.Context, params acpsdk.CreateTermin
 	return acpsdk.SendRequest[acpsdk.CreateTerminalResponse](r.conn, ctx, acpsdk.ClientMethodTerminalCreate, params)
 }
 
-func (r *rawConn) KillTerminalCommand(ctx context.Context, params acpsdk.KillTerminalCommandRequest) (acpsdk.KillTerminalCommandResponse, error) {
-	return acpsdk.SendRequest[acpsdk.KillTerminalCommandResponse](r.conn, ctx, acpsdk.ClientMethodTerminalKill, params)
+func (r *rawConn) KillTerminal(ctx context.Context, params acpsdk.KillTerminalRequest) (acpsdk.KillTerminalResponse, error) {
+	return acpsdk.SendRequest[acpsdk.KillTerminalResponse](r.conn, ctx, acpsdk.ClientMethodTerminalKill, params)
 }
 
 func (r *rawConn) ReleaseTerminal(ctx context.Context, params acpsdk.ReleaseTerminalRequest) (acpsdk.ReleaseTerminalResponse, error) {

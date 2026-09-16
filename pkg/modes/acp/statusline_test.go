@@ -143,9 +143,10 @@ func TestFirSession_NotificationWithMeta(t *testing.T) {
 	}
 
 	// Verify the meta is set correctly.
-	metaMap, ok := n.Meta.(map[string]any)
-	if !ok {
-		t.Fatalf("Meta type = %T, want map[string]any", n.Meta)
+	// v0.13 types Meta as map[string]any directly.
+	metaMap := n.Meta
+	if metaMap == nil {
+		t.Fatal("Meta is nil, want a populated map[string]any")
 	}
 	ext, ok := metaMap[statusLineExtKey]
 	if !ok {

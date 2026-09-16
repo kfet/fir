@@ -68,8 +68,8 @@ func (c *e2eClient) RequestPermission(_ context.Context, p acpsdk.RequestPermiss
 func (c *e2eClient) CreateTerminal(_ context.Context, _ acpsdk.CreateTerminalRequest) (acpsdk.CreateTerminalResponse, error) {
 	return acpsdk.CreateTerminalResponse{TerminalId: "t-e2e-1"}, nil
 }
-func (c *e2eClient) KillTerminalCommand(_ context.Context, _ acpsdk.KillTerminalCommandRequest) (acpsdk.KillTerminalCommandResponse, error) {
-	return acpsdk.KillTerminalCommandResponse{}, nil
+func (c *e2eClient) KillTerminal(_ context.Context, _ acpsdk.KillTerminalRequest) (acpsdk.KillTerminalResponse, error) {
+	return acpsdk.KillTerminalResponse{}, nil
 }
 func (c *e2eClient) ReleaseTerminal(_ context.Context, _ acpsdk.ReleaseTerminalRequest) (acpsdk.ReleaseTerminalResponse, error) {
 	return acpsdk.ReleaseTerminalResponse{}, nil
@@ -443,9 +443,16 @@ func TestACP_E2E_SetSessionModelNotFound(t *testing.T) {
 		t.Fatalf("initialize: %v", err)
 	}
 
-	_, err := conn.SetSessionModel(ctx, acpsdk.SetSessionModelRequest{
-		SessionId: "no-such-session",
-		ModelId:   "openai/gpt-4o",
+	// v0.13 dropped session/set_model from the SDK, so the over-the-wire
+	// check now goes through session/set_config_option — the spec path fir
+	// exposes for model selection. The legacy session/set_model handler is
+	// still covered by TestPiAgent_SetSessionModel_NotFound.
+	_, err := conn.SetSessionConfigOption(ctx, acpsdk.SetSessionConfigOptionRequest{
+		ValueId: &acpsdk.SetSessionConfigOptionValueId{
+			SessionId: "no-such-session",
+			ConfigId:  "model",
+			Value:     "openai/gpt-4o",
+		},
 	})
 	if err == nil {
 		t.Error("expected error for nonexistent session")

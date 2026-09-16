@@ -160,7 +160,7 @@ func TestPiAgent_SetSessionModel_NotFound(t *testing.T) {
 		sessions: make(map[string]*firSession),
 	}
 
-	_, err := pa.SetSessionModel(context.Background(), acpsdk.SetSessionModelRequest{
+	_, err := pa.SetSessionModel(context.Background(), SetSessionModelRequest{
 		SessionId: "nonexistent",
 		ModelId:   "openai/gpt-4o",
 	})
@@ -561,7 +561,7 @@ func TestBuiltInCommands_IncludesLoginChangelog(t *testing.T) {
 
 func TestListSessions_EmptyCwd(t *testing.T) {
 	pa := &firAgent{sessions: make(map[string]*firSession)}
-	resp, err := pa.ListSessions(context.Background(), ListSessionsRequest{})
+	resp, err := pa.listSessionsLocal(context.Background(), ListSessionsRequest{})
 	// Should not panic; may return empty or error depending on env.
 	_ = resp
 	_ = err
@@ -588,7 +588,7 @@ func TestListSessions_AllDirs(t *testing.T) {
 	}
 
 	pa := &firAgent{sessions: make(map[string]*firSession)}
-	resp, err := pa.ListSessions(context.Background(), ListSessionsRequest{})
+	resp, err := pa.listSessionsLocal(context.Background(), ListSessionsRequest{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -617,7 +617,7 @@ func TestListSessions_SkipsEmptySessions(t *testing.T) {
 		t.Fatal(err)
 	}
 	pa := &firAgent{sessions: make(map[string]*firSession)}
-	resp, err := pa.ListSessions(context.Background(), ListSessionsRequest{})
+	resp, err := pa.listSessionsLocal(context.Background(), ListSessionsRequest{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -631,7 +631,7 @@ func TestListSessions_SkipsEmptySessions(t *testing.T) {
 
 func TestResumeSession_InvalidPath(t *testing.T) {
 	pa := &firAgent{sessions: make(map[string]*firSession)}
-	_, err := pa.ResumeSession(context.Background(), ResumeSessionRequest{
+	_, err := pa.resumeSessionLocal(context.Background(), ResumeSessionRequest{
 		SessionId: "/tmp/../../../etc/passwd",
 	})
 	if err == nil {
@@ -697,7 +697,7 @@ func TestResumeSession_DuplicateIDCleansUpOldSession(t *testing.T) {
 	// ResumeSession with the same ID should clean up oldSession before
 	// attempting to create a new one. createSession will fail (no real LLM),
 	// but cleanup must still have happened.
-	_, _ = pa.ResumeSession(context.Background(), ResumeSessionRequest{
+	_, _ = pa.resumeSessionLocal(context.Background(), ResumeSessionRequest{
 		SessionId: sessionPath,
 	})
 

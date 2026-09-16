@@ -81,7 +81,7 @@ func TestSetSessionConfigOption_ThinkingLevel(t *testing.T) {
 		sessions: map[string]*firSession{"s1": entry},
 	}
 
-	resp, err := pa.SetSessionConfigOption(context.Background(), SetSessionConfigOptionRequest{
+	resp, err := pa.setSessionConfigOptionLocal(context.Background(), SetSessionConfigOptionRequest{
 		SessionId: "s1",
 		ConfigId:  thinkingConfigID,
 		Value:     string(agent.ThinkingHigh),
@@ -122,7 +122,7 @@ func TestSetSessionConfigOption_ClampsUnsupportedLevel(t *testing.T) {
 	entry := &firSession{configAccessor: sess}
 	pa := &firAgent{sessions: map[string]*firSession{"s1": entry}}
 
-	resp, err := pa.SetSessionConfigOption(context.Background(), SetSessionConfigOptionRequest{
+	resp, err := pa.setSessionConfigOptionLocal(context.Background(), SetSessionConfigOptionRequest{
 		SessionId: "s1",
 		ConfigId:  thinkingConfigID,
 		Value:     string(agent.ThinkingMax),
@@ -150,7 +150,7 @@ func TestSetSessionConfigOption_ClampsToOffOnNonReasoning(t *testing.T) {
 	entry := &firSession{configAccessor: sess}
 	pa := &firAgent{sessions: map[string]*firSession{"s1": entry}}
 
-	_, err := pa.SetSessionConfigOption(context.Background(), SetSessionConfigOptionRequest{
+	_, err := pa.setSessionConfigOptionLocal(context.Background(), SetSessionConfigOptionRequest{
 		SessionId: "s1",
 		ConfigId:  thinkingConfigID,
 		Value:     string(agent.ThinkingHigh),
@@ -174,7 +174,7 @@ func TestSetSessionConfigOption_ClampsXHighToHighWhenUnsupported(t *testing.T) {
 	entry := &firSession{configAccessor: sess}
 	pa := &firAgent{sessions: map[string]*firSession{"s1": entry}}
 
-	_, err := pa.SetSessionConfigOption(context.Background(), SetSessionConfigOptionRequest{
+	_, err := pa.setSessionConfigOptionLocal(context.Background(), SetSessionConfigOptionRequest{
 		SessionId: "s1",
 		ConfigId:  thinkingConfigID,
 		Value:     string(agent.ThinkingXHigh),
@@ -198,7 +198,7 @@ func TestSetSessionConfigOption_PassesThroughSupportedLevel(t *testing.T) {
 	entry := &firSession{configAccessor: sess}
 	pa := &firAgent{sessions: map[string]*firSession{"s1": entry}}
 
-	_, err := pa.SetSessionConfigOption(context.Background(), SetSessionConfigOptionRequest{
+	_, err := pa.setSessionConfigOptionLocal(context.Background(), SetSessionConfigOptionRequest{
 		SessionId: "s1",
 		ConfigId:  thinkingConfigID,
 		Value:     string(agent.ThinkingMax),
@@ -219,7 +219,7 @@ func TestSetSessionConfigOption_RejectsEmptyLevel(t *testing.T) {
 	entry := &firSession{configAccessor: sess}
 	pa := &firAgent{sessions: map[string]*firSession{"s1": entry}}
 
-	_, err := pa.SetSessionConfigOption(context.Background(), SetSessionConfigOptionRequest{
+	_, err := pa.setSessionConfigOptionLocal(context.Background(), SetSessionConfigOptionRequest{
 		SessionId: "s1",
 		ConfigId:  thinkingConfigID,
 		Value:     "",
@@ -239,7 +239,7 @@ func TestSetSessionConfigOption_RejectsGarbageLevel(t *testing.T) {
 	entry := &firSession{configAccessor: sess}
 	pa := &firAgent{sessions: map[string]*firSession{"s1": entry}}
 
-	_, err := pa.SetSessionConfigOption(context.Background(), SetSessionConfigOptionRequest{
+	_, err := pa.setSessionConfigOptionLocal(context.Background(), SetSessionConfigOptionRequest{
 		SessionId: "s1",
 		ConfigId:  thinkingConfigID,
 		Value:     "bogus",
@@ -259,7 +259,7 @@ func TestSetSessionConfigOption_UnknownConfig(t *testing.T) {
 		sessions: map[string]*firSession{"s1": entry},
 	}
 
-	_, err := pa.SetSessionConfigOption(context.Background(), SetSessionConfigOptionRequest{
+	_, err := pa.setSessionConfigOptionLocal(context.Background(), SetSessionConfigOptionRequest{
 		SessionId: "s1",
 		ConfigId:  "nonexistent",
 		Value:     "whatever",
@@ -274,7 +274,7 @@ func TestSetSessionConfigOption_UnknownSession(t *testing.T) {
 		sessions: map[string]*firSession{},
 	}
 
-	_, err := pa.SetSessionConfigOption(context.Background(), SetSessionConfigOptionRequest{
+	_, err := pa.setSessionConfigOptionLocal(context.Background(), SetSessionConfigOptionRequest{
 		SessionId: "nonexistent",
 		ConfigId:  thinkingConfigID,
 		Value:     "off",

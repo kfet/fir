@@ -8,8 +8,6 @@ import (
 
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/models"
-
-	acpsdk "github.com/coder/acp-go-sdk"
 )
 
 // ParseModelID splits an ACP model ID "provider/modelId" into its components.
@@ -34,20 +32,20 @@ func shortProvider(provider string) string {
 // Only includes models that have auth configured (API key or OAuth token).
 // Models are sorted in a stable priority order (by capability/SWE score) so
 // the Poe chat model dropdown is consistent across sessions.
-func BuildModelState(reg *models.ModelRegistry, currentModel *ai.Model) *acpsdk.SessionModelState {
+func BuildModelState(reg *models.ModelRegistry, currentModel *ai.Model) *SessionModelState {
 	if currentModel == nil {
 		return nil
 	}
 	available := models.SortModels(reg.GetAvailable(), nil)
-	modelInfos := make([]acpsdk.ModelInfo, 0, len(available))
+	modelInfos := make([]ModelInfo, 0, len(available))
 	for _, m := range available {
-		modelInfos = append(modelInfos, acpsdk.ModelInfo{
-			ModelId: acpsdk.ModelId(fmt.Sprintf("%s/%s", m.Provider, m.ID)),
+		modelInfos = append(modelInfos, ModelInfo{
+			ModelId: ModelId(fmt.Sprintf("%s/%s", m.Provider, m.ID)),
 			Name:    fmt.Sprintf("%s / %s", m.Name, shortProvider(m.Provider)),
 		})
 	}
-	return &acpsdk.SessionModelState{
+	return &SessionModelState{
 		AvailableModels: modelInfos,
-		CurrentModelId:  acpsdk.ModelId(fmt.Sprintf("%s/%s", currentModel.Provider, currentModel.ID)),
+		CurrentModelId:  ModelId(fmt.Sprintf("%s/%s", currentModel.Provider, currentModel.ID)),
 	}
 }

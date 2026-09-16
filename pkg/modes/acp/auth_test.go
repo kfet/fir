@@ -83,12 +83,18 @@ func TestToSDKAuthMethods(t *testing.T) {
 	}
 
 	// First method should have env_var meta.
-	if sdk[0].Id != "env-openai" {
-		t.Errorf("sdk[0].Id = %q, want env-openai", sdk[0].Id)
+	// v0.13 made AuthMethod a union; fir emits the Agent variant (see
+	// toSDKAuthMethods) so the flat fields now live one level down.
+	agentMethod := sdk[0].Agent
+	if agentMethod == nil {
+		t.Fatal("sdk[0] should be the Agent auth-method variant")
 	}
-	meta, ok := sdk[0].Meta.(map[string]any)
-	if !ok {
-		t.Fatal("sdk[0].Meta should be map[string]any")
+	if agentMethod.Id != "env-openai" {
+		t.Errorf("sdk[0].Agent.Id = %q, want env-openai", agentMethod.Id)
+	}
+	meta := agentMethod.Meta
+	if meta == nil {
+		t.Fatal("sdk[0].Agent.Meta should be populated")
 	}
 	if meta["type"] != "env_var" {
 		t.Errorf("meta[type] = %v, want env_var", meta["type"])

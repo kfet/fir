@@ -155,15 +155,9 @@ func (pa *firAgent) NewSession(ctx context.Context, params acpsdk.NewSessionRequ
 	// Store client-provided MCP configs so /reload can re-merge them.
 	entry.clientMCPConfigs = mergeRequestMCPServers(nil, params.McpServers)
 
-	var models *acpsdk.SessionModelState
-	if m := entry.session.Model(); m != nil {
-		models = BuildModelState(entry.modelRegistry, m)
-	}
-
 	firlog.Info("acp new session: done", "total_ms", time.Since(newSessionStart).Milliseconds())
 	return acpsdk.NewSessionResponse{
 		SessionId: acpsdk.SessionId(sessionID),
-		Models:    models,
 	}, nil
 }
 
@@ -310,32 +304,37 @@ func (pa *firAgent) SetSessionMode(_ context.Context, _ acpsdk.SetSessionModeReq
 // These are handled by rawMethodHandler in conn.go, which calls these methods.
 // ============================================================================
 
-func (pa *firAgent) SetSessionModel(_ context.Context, params acpsdk.SetSessionModelRequest) (acpsdk.SetSessionModelResponse, error) {
+func (pa *firAgent) SetSessionModel(_ context.Context, params SetSessionModelRequest) (SetSessionModelResponse, error) {
 	pa.mu.Lock()
 	entry, ok := pa.sessions[string(params.SessionId)]
 	pa.mu.Unlock()
 	if !ok {
-		return acpsdk.SetSessionModelResponse{}, newSessionNotFound(string(params.SessionId))
+		return SetSessionModelResponse{}, newSessionNotFound(string(params.SessionId))
 	}
 
 	provider, modelID, err := ParseModelID(string(params.ModelId))
 	if err != nil {
-		return acpsdk.SetSessionModelResponse{}, err
+		return SetSessionModelResponse{}, err
 	}
 
 	model := entry.modelRegistry.Find(provider, modelID)
 	if model == nil {
-		return acpsdk.SetSessionModelResponse{}, fmt.Errorf("model not found: %s", params.ModelId)
+		return SetSessionModelResponse{}, fmt.Errorf("model not found: %s", params.ModelId)
 	}
 	if err := entry.session.SetModel(model); err != nil {
-		return acpsdk.SetSessionModelResponse{}, err
+		return SetSessionModelResponse{}, err
 	}
-	return acpsdk.SetSessionModelResponse{}, nil
+	return SetSessionModelResponse{}, nil
 }
 
 // ListSessions handles the session/list method.
 // It returns sessions from the caller's working directory.
-func (pa *firAgent) ListSessions(_ context.Context, params ListSessionsRequest) (ListSessionsResponse, error) {
+// listSessionsLocal is fir's original session/list implementation. It keeps
+// fir's own request/response types (types.go), which predate the SDK's and
+// differ on the wire in one way that matters: fir always emits "title", as
+// null when unknown, where the SDK marks it omitempty. fir's own dispatch
+// table (conn.go) calls this directly, so that wire shape is unchanged.
+func (pa *firAgent) listSessionsLocal(_ context.Context, params ListSessionsRequest) (ListSessionsResponse, error) {
 	agentDir := resolveAgentDir()
 
 	// When FIR_AGENT_DIR is explicitly set, don't scan legacy dirs.
@@ -434,7 +433,11 @@ func (pa *firAgent) ListSessions(_ context.Context, params ListSessionsRequest) 
 
 // ResumeSession handles the session/resume method.
 // It creates a new AgentSession and switches it to the requested session file.
-func (pa *firAgent) ResumeSession(ctx context.Context, params ResumeSessionRequest) (ResumeSessionResponse, error) {
+// resumeSessionLocal is fir's original session/resume implementation, kept on
+// fir's own request/response types (types.go) because its response carries the
+// legacy "models" object that the spec-shaped ResumeSessionResponse has no
+// field for. fir's dispatch table (conn.go) calls this directly.
+func (pa *firAgent) resumeSessionLocal(ctx context.Context, params ResumeSessionRequest) (ResumeSessionResponse, error) {
 	cwd := params.Cwd
 	if cwd == "" {
 		cwd = os.Getenv("PWD")
@@ -1070,4 +1073,64 @@ func findSessionFileByUUID(dir, uuid string) string {
 		}
 	}
 	return ""
+}
+
+// ListSessions satisfies acpsdk.Agent, whose session/list became part of the
+// spec in v0.13. It adapts the spec-shaped request onto fir's existing
+// implementation and maps the result back. Clients reaching fir through its
+// own dispatch table still get listSessionsLocal's response verbatim; this
+// path exists for clients that go through the SDK's typed router.
+func (pa *firAgent) ListSessions(ctx context.Context, params acpsdk.ListSessionsRequest) (acpsdk.ListSessionsResponse, error) {
+	var cwd string
+	if params.Cwd != nil {
+		cwd = *params.Cwd
+	}
+	local, err := pa.listSessionsLocal(ctx, ListSessionsRequest{Cwd: cwd})
+	if err != nil {
+		return acpsdk.ListSessionsResponse{}, err
+	}
+	out := make([]acpsdk.SessionInfo, 0, len(local.Sessions))
+	for _, s := range local.Sessions {
+		info := acpsdk.SessionInfo{
+			SessionId: acpsdk.SessionId(s.SessionId),
+			Cwd:       s.Cwd,
+			Title:     s.Title,
+		}
+		if s.UpdatedAt != "" {
+			updated := s.UpdatedAt
+			info.UpdatedAt = &updated
+		}
+		out = append(out, info)
+	}
+	// fir enumerates every session in one pass; there is no further page.
+	return acpsdk.ListSessionsResponse{Sessions: out}, nil
+}
+
+// Logout satisfies acpsdk.Agent, which gained the method in v0.13.
+//
+// fir does not implement credential teardown over ACP on purpose: its
+// credentials are shared process-wide (pkg/auth AuthStorage backs the CLI,
+// the TUI and every other mode), so honouring session-scoped logout here
+// would sign the user out everywhere with no way to confirm. Until that is
+// designed properly, report it as unsupported rather than doing something
+// destructive and surprising. Use `fir auth logout` instead.
+func (pa *firAgent) Logout(_ context.Context, _ acpsdk.LogoutRequest) (acpsdk.LogoutResponse, error) {
+	return acpsdk.LogoutResponse{}, acpsdk.NewMethodNotFound("authenticate/logout")
+}
+
+// ResumeSession satisfies acpsdk.Agent, whose session/resume became part of
+// the spec in v0.13. It adapts the spec-shaped request onto fir's existing
+// implementation. The legacy "models" object fir normally returns has no home
+// in the spec response and is dropped on this path; clients that want it use
+// fir's own dispatch route, which still calls resumeSessionLocal.
+func (pa *firAgent) ResumeSession(ctx context.Context, params acpsdk.ResumeSessionRequest) (acpsdk.ResumeSessionResponse, error) {
+	_, err := pa.resumeSessionLocal(ctx, ResumeSessionRequest{
+		SessionId:  string(params.SessionId),
+		Cwd:        params.Cwd,
+		McpServers: params.McpServers,
+	})
+	if err != nil {
+		return acpsdk.ResumeSessionResponse{}, err
+	}
+	return acpsdk.ResumeSessionResponse{}, nil
 }

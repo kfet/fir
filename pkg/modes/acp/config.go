@@ -3,7 +3,10 @@ package acp
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
+
+	acpsdk "github.com/coder/acp-go-sdk"
 
 	"github.com/kfet/agent"
 	"github.com/kfet/fir/pkg/ai"
@@ -107,7 +110,11 @@ func buildConfigOptions(entry *firSession) []SessionConfigOption {
 }
 
 // SetSessionConfigOption handles the session/set_config_option method.
-func (pa *firAgent) SetSessionConfigOption(_ context.Context, params SetSessionConfigOptionRequest) (SetSessionConfigOptionResponse, error) {
+// setSessionConfigOptionLocal is fir's original session/set_config_option
+// implementation, kept on fir's own flat request/response types (types.go).
+// The SDK turned the request into a Boolean|ValueId union in v0.13; fir's own
+// dispatch table (conn.go) still decodes the flat form it has always spoken.
+func (pa *firAgent) setSessionConfigOptionLocal(_ context.Context, params SetSessionConfigOptionRequest) (SetSessionConfigOptionResponse, error) {
 	pa.mu.Lock()
 	entry, ok := pa.sessions[params.SessionId]
 	pa.mu.Unlock()
@@ -153,4 +160,38 @@ func (pa *firAgent) SetSessionConfigOption(_ context.Context, params SetSessionC
 	return SetSessionConfigOptionResponse{
 		ConfigOptions: buildConfigOptions(entry),
 	}, nil
+}
+
+// SetSessionConfigOption satisfies acpsdk.Agent. v0.13 modelled the request as
+// a union — a boolean toggle or a value-id selection — so this flattens either
+// variant onto fir's existing string-valued implementation.
+//
+// The response's ConfigOptions are left empty: rebuilding fir's option set as
+// the SDK's SessionConfigOption union duplicates buildConfigOptions for a path
+// no current client takes (fir's own dispatch route returns the full set).
+// Worth revisiting if fir ever drops its own dispatch table.
+func (pa *firAgent) SetSessionConfigOption(ctx context.Context, params acpsdk.SetSessionConfigOptionRequest) (acpsdk.SetSessionConfigOptionResponse, error) {
+	var flat SetSessionConfigOptionRequest
+	switch {
+	case params.ValueId != nil:
+		flat = SetSessionConfigOptionRequest{
+			SessionId: string(params.ValueId.SessionId),
+			ConfigId:  string(params.ValueId.ConfigId),
+			Value:     string(params.ValueId.Value),
+		}
+	case params.Boolean != nil:
+		flat = SetSessionConfigOptionRequest{
+			SessionId: string(params.Boolean.SessionId),
+			ConfigId:  string(params.Boolean.ConfigId),
+			Value:     strconv.FormatBool(params.Boolean.Value),
+		}
+	default:
+		return acpsdk.SetSessionConfigOptionResponse{}, acpsdk.NewInvalidParams(map[string]any{
+			"error": "set_config_option requires either a boolean or a value-id variant",
+		})
+	}
+	if _, err := pa.setSessionConfigOptionLocal(ctx, flat); err != nil {
+		return acpsdk.SetSessionConfigOptionResponse{}, err
+	}
+	return acpsdk.SetSessionConfigOptionResponse{}, nil
 }

@@ -4,6 +4,8 @@ import (
 	"context"
 	"time"
 
+	acpsdk "github.com/coder/acp-go-sdk"
+
 	firlog "github.com/kfet/fir/pkg/log"
 )
 
@@ -224,4 +226,18 @@ func (pa *firAgent) stopIdleReaper() {
 	close(pa.stopReaper)
 	<-pa.reaperDone
 	pa.stopReaper = nil
+}
+
+// CloseSession handles the spec's session/close method, added to the Agent
+// interface in acp-go-sdk v0.13. Its contract — cancel any ongoing work and
+// free the session's resources — is exactly what fir's older, unstable
+// session/release already did, so this delegates rather than duplicating the
+// teardown. Both entry points remain: clients that speak session/release keep
+// working, and spec-conformant clients get session/close.
+func (pa *firAgent) CloseSession(ctx context.Context, params acpsdk.CloseSessionRequest) (acpsdk.CloseSessionResponse, error) {
+	_, err := pa.ReleaseSession(ctx, ReleaseSessionRequest{SessionId: string(params.SessionId)})
+	if err != nil {
+		return acpsdk.CloseSessionResponse{}, err
+	}
+	return acpsdk.CloseSessionResponse{}, nil
 }

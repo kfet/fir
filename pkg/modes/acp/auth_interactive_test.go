@@ -373,9 +373,10 @@ func TestInteractiveAuth_ConcurrentSameMethod(t *testing.T) {
 // response's Meta. Fails the test on shape mismatch.
 func authMetaFromResponse(t *testing.T, resp acpsdk.AuthenticateResponse) (state, id, url, instructions string) {
 	t.Helper()
-	m, ok := resp.Meta.(map[string]any)
-	if !ok {
-		t.Fatalf("response Meta is %T, want map[string]any", resp.Meta)
+	// v0.13 typed Meta as map[string]any; no assertion needed.
+	m := resp.Meta
+	if m == nil {
+		t.Fatalf("response Meta is nil, want a populated map[string]any")
 	}
 	a, ok := m["auth"].(map[string]any)
 	if !ok {

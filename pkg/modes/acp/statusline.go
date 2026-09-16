@@ -62,7 +62,7 @@ func buildStatusLineMeta(obs *store.ObservableStore) map[string]any {
 
 // statusLineMeta returns the _meta value for a firSession's observable
 // cards store. Returns nil when there is nothing to report.
-func (s *firSession) statusLineMeta() any {
+func (s *firSession) statusLineMeta() map[string]any {
 	if s == nil || s.session == nil {
 		return nil
 	}

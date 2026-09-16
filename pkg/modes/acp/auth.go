@@ -33,11 +33,7 @@ func buildAuthMethods(authStorage *auth.AuthStorage, modelRegistry *models.Model
 	var methods []ExtendedAuthMethod
 
 	// Check if client supports terminal-auth (like Zed does).
-	clientSupportsMeta := clientCaps.Meta
-	supportsTerminalAuth := false
-	if metaMap, ok := clientSupportsMeta.(map[string]any); ok {
-		supportsTerminalAuth = metaMap["terminal-auth"] == true
-	}
+	supportsTerminalAuth := clientCaps.Meta["terminal-auth"] == true
 
 	// Collect unique provider IDs from all known models.
 	providers := collectProviders(modelRegistry)
@@ -143,11 +139,18 @@ func toSDKAuthMethods(methods []ExtendedAuthMethod) []acpsdk.AuthMethod {
 	result := make([]acpsdk.AuthMethod, len(methods))
 	for i, m := range methods {
 		desc := m.Description
+		// v0.13 turned AuthMethod into a union. fir carries its extended
+		// kind in _meta (buildAuthMeta), not in the union discriminant, so
+		// the Agent variant is used throughout: it marshals with no
+		// top-level "type", which is byte-identical to the flat pre-v0.13
+		// shape every current client reads.
 		result[i] = acpsdk.AuthMethod{
-			Id:          acpsdk.AuthMethodId(m.Id),
-			Name:        m.Name,
-			Description: &desc,
-			Meta:        buildAuthMeta(m),
+			Agent: &acpsdk.AuthMethodAgent{
+				Id:          m.Id,
+				Name:        m.Name,
+				Description: &desc,
+				Meta:        buildAuthMeta(m),
+			},
 		}
 	}
 	return result

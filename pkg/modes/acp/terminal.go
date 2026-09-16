@@ -86,7 +86,7 @@ func AcpBashExec(
 		ts.mu.Lock()
 		delete(ts.pendingBashTerminals, toolCallID)
 		ts.mu.Unlock()
-		conn.KillTerminalCommand(context.Background(), acpsdk.KillTerminalCommandRequest{SessionId: sid, TerminalId: termID})
+		conn.KillTerminal(context.Background(), acpsdk.KillTerminalRequest{SessionId: sid, TerminalId: termID})
 		conn.ReleaseTerminal(context.Background(), acpsdk.ReleaseTerminalRequest{SessionId: sid, TerminalId: termID})
 		return nil, fmt.Errorf("aborted")
 	}
@@ -102,7 +102,7 @@ func AcpBashExec(
 	exitResult, waitErr := conn.WaitForTerminalExit(execCtx, acpsdk.WaitForTerminalExitRequest{SessionId: sid, TerminalId: termID})
 	if waitErr != nil && execCtx.Err() != nil && timeout > 0 {
 		timedOut = true
-		conn.KillTerminalCommand(context.Background(), acpsdk.KillTerminalCommandRequest{SessionId: sid, TerminalId: termID})
+		conn.KillTerminal(context.Background(), acpsdk.KillTerminalRequest{SessionId: sid, TerminalId: termID})
 	} else if waitErr != nil {
 		ts.mu.Lock()
 		delete(ts.pendingBashTerminals, toolCallID)
@@ -203,7 +203,7 @@ func KillBackgroundCommand(
 	}
 
 	sid := acpsdk.SessionId(sessionID)
-	conn.KillTerminalCommand(ctx, acpsdk.KillTerminalCommandRequest{SessionId: sid, TerminalId: termID})
+	conn.KillTerminal(ctx, acpsdk.KillTerminalRequest{SessionId: sid, TerminalId: termID})
 	result, _ := conn.TerminalOutput(ctx, acpsdk.TerminalOutputRequest{SessionId: sid, TerminalId: termID})
 	conn.ReleaseTerminal(ctx, acpsdk.ReleaseTerminalRequest{SessionId: sid, TerminalId: termID})
 
@@ -231,7 +231,7 @@ func CleanupPendingBashTerminals(ctx context.Context, conn acpConn, ts *terminal
 
 	sid := acpsdk.SessionId(sessionID)
 	for _, termID := range pending {
-		conn.KillTerminalCommand(ctx, acpsdk.KillTerminalCommandRequest{SessionId: sid, TerminalId: termID})
+		conn.KillTerminal(ctx, acpsdk.KillTerminalRequest{SessionId: sid, TerminalId: termID})
 		conn.ReleaseTerminal(ctx, acpsdk.ReleaseTerminalRequest{SessionId: sid, TerminalId: termID})
 	}
 }
@@ -248,7 +248,7 @@ func CleanupBackgroundTerminals(ctx context.Context, conn acpConn, ts *terminalS
 
 	sid := acpsdk.SessionId(sessionID)
 	for _, termID := range terminals {
-		conn.KillTerminalCommand(ctx, acpsdk.KillTerminalCommandRequest{SessionId: sid, TerminalId: termID})
+		conn.KillTerminal(ctx, acpsdk.KillTerminalRequest{SessionId: sid, TerminalId: termID})
 		conn.ReleaseTerminal(ctx, acpsdk.ReleaseTerminalRequest{SessionId: sid, TerminalId: termID})
 	}
 }
