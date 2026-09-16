@@ -1,6 +1,7 @@
 package extension
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -191,13 +192,29 @@ func DiscoverExtra(dirs []string) ([]ExtProcConfig, error) {
 // Files that fail these checks are silently skipped. The resulting configs have
 // scope "package" and are merged at lower priority than global/project
 // extensions.
+// frontmatterScanLimit bounds how much of a file is read when looking for a
+// comment frontmatter block. The block is a LEADING comment by definition, so
+// there is no reason to pull a multi-megabyte compiled-binary entry point into
+// memory on every discovery pass merely to confirm it has none.
+const frontmatterScanLimit = 64 << 10
+
+// readFileHead returns at most limit bytes from the start of path.
+func readFileHead(path string, limit int64) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return io.ReadAll(io.LimitReader(f, limit))
+}
+
 func ConfigsFromFiles(files []string) []ExtProcConfig {
 	byName := make(map[string]ExtProcConfig, len(files))
 	for _, filePath := range files {
 		if !isExecutableFile(filePath) {
 			continue
 		}
-		data, err := os.ReadFile(filePath)
+		data, err := readFileHead(filePath, frontmatterScanLimit)
 		if err != nil {
 			continue
 		}
@@ -221,6 +238,13 @@ func ConfigsFromFiles(files []string) []ExtProcConfig {
 		}
 		if name == "" || name == "." || name == string(filepath.Separator) {
 			continue
+		}
+		if prev, dup := byName[name]; dup && prev.Path != filePath {
+			// Two entry points in one package claim the same name — e.g.
+			// foo/main (named by directory) and foo/foo.py (named by stem).
+			// Last wins, which is arbitrary; say so rather than swallow it.
+			firlog.Debug("package extension name collision; last wins",
+				"name", name, "winner", filePath, "shadowed", prev.Path)
 		}
 		byName[name] = makeExtConfig(name, filePath, "package", fm)
 	}

@@ -317,6 +317,15 @@ fir_ext.registerProvider({
 });
 ```
 
+**pi-mono authors, note the behaviour change.** `pi_compat` maps pi's
+`config.apiKey` to fir's literal `apiKey`, and *additionally* to
+`envKeys.primary` when the value looks like an env-var name
+(`^[A-Z][A-Z0-9_]+$`), so both readings keep working. The one visible
+consequence: if you pass `apiKey: "LLAMA_API_KEY"` meaning "read this env var"
+and the variable is **unset**, fir no longer reports
+`no API key for provider …` — it now sends the string `LLAMA_API_KEY` as the
+bearer token, so the failure surfaces as a `401` from the server instead.
+
 ## Security
 
 ### Project-Local Trust

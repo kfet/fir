@@ -62,7 +62,10 @@ func TestMakeJSWrapper(t *testing.T) {
 }
 
 // TestMakeJSWrapperRepairsDangling verifies a dangling `main` symlink (target
-// gone, e.g. after an SDK-cache change) is repaired on reinstall.
+// gone, e.g. after an SDK-cache change) is repaired on reinstall. Repair is
+// delegated to healRunShSymlink — the same policy discovery applies — so the
+// call reports `created == false` (nothing new was introduced) while still
+// leaving a working link behind.
 func TestMakeJSWrapperRepairsDangling(t *testing.T) {
 	extDir := filepath.Join(t.TempDir(), "pi-llama")
 	if err := os.MkdirAll(extDir, 0o755); err != nil {
@@ -79,11 +82,20 @@ func TestMakeJSWrapperRepairsDangling(t *testing.T) {
 	if err != nil {
 		t.Fatalf("makeJSWrapper: %v", err)
 	}
-	if !created {
-		t.Fatal("expected dangling symlink to be repaired (recreated)")
+	if created {
+		t.Error("repair is not a creation; expected created == false")
 	}
-	if target, _ := os.Readlink(filepath.Join(extDir, "main")); target != runSh {
-		t.Errorf("repaired symlink target = %q, want %q", target, runSh)
+	// healRunShSymlink re-points a dangling wrapper at the CURRENT SDK's
+	// run.sh, which is the whole point: the link must resolve again.
+	target, err := os.Readlink(filepath.Join(extDir, "main"))
+	if err != nil {
+		t.Fatalf("main is no longer a symlink: %v", err)
+	}
+	if filepath.Base(target) != "run.sh" {
+		t.Errorf("repaired symlink target = %q, want a run.sh", target)
+	}
+	if _, err := os.Stat(filepath.Join(extDir, "main")); err != nil {
+		t.Errorf("repaired symlink still dangling: %v", err)
 	}
 }
 
@@ -98,7 +110,10 @@ func TestFindJSTSEntryDirs(t *testing.T) {
 	writePkgFile(t, filepath.Join(root, "helpers.ts"), "export const x = 1\n", 0o644)
 	// An entry directly inside an `extensions/` dir.
 	writePkgFile(t, filepath.Join(root, "extensions", "index.ts"), "export default function(){}\n", 0o644)
-	// A deeper, non-`extensions`-named subdir — NOT descended into.
+	// An entry nested one level down inside `extensions/` — the conventional
+	// `extensions/<name>/index.ts` layout, which package auto-discovery
+	// (a full WalkDir) would find as `extensions/foo/main`. Wrapper
+	// generation must therefore reach it too.
 	writePkgFile(t, filepath.Join(root, "extensions", "foo", "foo.ts"), "export default function(){}\n", 0o644)
 	// A shebanged .js directly under ext/ — already a native extension, skipped.
 	writePkgFile(t, filepath.Join(root, "ext", "main.js"), "#!/usr/bin/env node\n", 0o755)
@@ -122,8 +137,8 @@ func TestFindJSTSEntryDirs(t *testing.T) {
 	if !got["extensions"] {
 		t.Errorf("extensions/ entry not found; got %v", got)
 	}
-	if got[filepath.Join("extensions", "foo")] {
-		t.Errorf("deep non-extensions subdir should not be descended into; got %v", got)
+	if !got[filepath.Join("extensions", "foo")] {
+		t.Errorf("extensions/<name>/ entry not found; got %v", got)
 	}
 	if got["ext"] {
 		t.Errorf("shebanged native entry should be skipped; got %v", got)
@@ -283,12 +298,25 @@ func TestDanglingMainSymlinkSelfHeals(t *testing.T) {
 // fir_ext.js/pi_compat.js — everything looks healthy while the extension is
 // several releases behind. Discovery must re-point it at the current SDK.
 func TestStaleMainSymlinkRepointed(t *testing.T) {
+	// Point the SDK cache at a temp root so the "previous SDK" below is
+	// genuinely INSIDE fir's cache — which is what licenses the re-point.
+	// A directory merely *named* `sdks` must not qualify; see
+	// TestForeignRunShSymlinkUntouched.
+	cacheRoot := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", cacheRoot)
+
+	current, err := jsRunShPath()
+	if err != nil {
+		t.Fatalf("jsRunShPath: %v", err)
+	}
+
 	pkgDir := filepath.Join(t.TempDir(), "pi-llama")
 	writePkgFile(t, filepath.Join(pkgDir, "index.ts"), "export default function(pi){}\n", 0o644)
 
-	// A previous SDK cache dir that still exists, with a runnable run.sh.
-	oldSDK := filepath.Join(t.TempDir(), "sdks", "0ldc0de", "node")
-	oldRunSh := filepath.Join(oldSDK, "run.sh")
+	// A previous SDK cache dir that still exists, with a runnable run.sh,
+	// sitting beside the current one under <cache>/fir/sdks/.
+	oldRunSh := filepath.Join(filepath.Dir(filepath.Dir(current)), "..", "0ldc0de", "node", "run.sh")
+	oldRunSh = filepath.Clean(oldRunSh)
 	writePkgFile(t, oldRunSh, "#!/bin/sh\nexit 0\n", 0o755)
 
 	main := filepath.Join(pkgDir, "main")
@@ -304,16 +332,43 @@ func TestStaleMainSymlinkRepointed(t *testing.T) {
 		t.Fatalf("ScanPackageResources: %v", err)
 	}
 
-	current, err := jsRunShPath()
-	if err != nil {
-		t.Fatalf("jsRunShPath: %v", err)
-	}
 	target, err := os.Readlink(main)
 	if err != nil {
 		t.Fatalf("readlink: %v", err)
 	}
 	if target != current {
 		t.Errorf("stale main not re-pointed: target=%q, want %q", target, current)
+	}
+}
+
+// TestLookalikeSdksDirUntouched pins the blast-radius guard precisely: the
+// re-point is licensed by living inside fir's ACTUAL SDK cache, not by having
+// an ancestor directory named `sdks`. A user maintaining their own SDK fork
+// under ~/projects/sdks/myfork/run.sh must keep their symlink.
+func TestLookalikeSdksDirUntouched(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+
+	pkgDir := filepath.Join(t.TempDir(), "custom-ext")
+	writePkgFile(t, filepath.Join(pkgDir, "index.ts"), "export default function(pi){}\n", 0o644)
+
+	mine := filepath.Join(t.TempDir(), "sdks", "myfork", "node", "run.sh")
+	writePkgFile(t, mine, "#!/bin/sh\nexit 0\n", 0o755)
+
+	main := filepath.Join(pkgDir, "main")
+	if err := os.Symlink(mine, main); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := ScanPackageResources(pkgDir); err != nil {
+		t.Fatalf("ScanPackageResources: %v", err)
+	}
+
+	target, err := os.Readlink(main)
+	if err != nil {
+		t.Fatalf("readlink: %v", err)
+	}
+	if target != mine {
+		t.Errorf("lookalike-sdks symlink was rewritten: target=%q, want %q", target, mine)
 	}
 }
 

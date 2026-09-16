@@ -45,7 +45,7 @@ done
 # nvm / fnm install node under versioned dirs; add the newest if present.
 for _nvm_root in "${HOME:-}/.nvm/versions/node" "${HOME:-}/.local/share/fnm/node-versions"; do
   if [ -d "$_nvm_root" ]; then
-    _nvm_bin="$(find "$_nvm_root" -maxdepth 2 -type d -name bin 2>/dev/null | sort -V | tail -1)"
+    _nvm_bin="$(find "$_nvm_root" -maxdepth 2 -type d -name bin 2>/dev/null | sort -V 2>/dev/null | tail -1 || true)"
     if [ -n "$_nvm_bin" ]; then
       case ":$PATH:" in
         *":$_nvm_bin:"*) ;;

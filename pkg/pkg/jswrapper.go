@@ -81,9 +81,9 @@ func jsRunShPath() (string, error) {
 // findJSTSEntryDirs returns the set of directories that contain a JS/TS
 // extension entry point. Only conventional entry-point filenames
 // (index/main/<dirname>.ts|js, without a shebang) qualify, so a directory of
-// helper modules never gets a wrapper. The walk descends from the package root
-// only into `extensions`/`ext` subdirectories (mirroring fir's extension
-// layout) to avoid wrapping arbitrary source trees.
+// helper modules never gets a wrapper. The walk covers the package root plus
+// everything beneath any `extensions`/`ext` directory (mirroring fir's own
+// `.fir/extensions/<name>/` layout), rather than arbitrary source trees.
 func findJSTSEntryDirs(pkgDir string) ([]string, error) {
 	seen := make(map[string]bool)
 	var dirs []string
@@ -129,8 +129,32 @@ func findJSTSEntryDirs(pkgDir string) ([]string, error) {
 		return nil, err
 	}
 
-	// Descend only through extensions/ext subdirectories (recursively),
-	// matching install.py's historical behaviour.
+	// Descend into extensions/ext subdirectories, then walk EVERYTHING beneath
+	// them. Package auto-discovery recurses fully (filepath.WalkDir), so it
+	// finds an `extensions/<name>/main` entry point; if wrapper generation
+	// only looked at `extensions/` itself, the conventional
+	// `extensions/<name>/index.ts` layout — the very one this change is built
+	// around — would never get a `main` symlink to be discovered.
+	var walkAll func(dir string) error
+	walkAll = func(dir string) error {
+		if err := walk(dir); err != nil {
+			return err
+		}
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			return nil
+		}
+		for _, e := range entries {
+			if !e.IsDir() || jsWrapperSkipDirs[e.Name()] {
+				continue
+			}
+			if err := walkAll(filepath.Join(dir, e.Name())); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
 	var descend func(dir string) error
 	descend = func(dir string) error {
 		entries, err := os.ReadDir(dir)
@@ -145,13 +169,13 @@ func findJSTSEntryDirs(pkgDir string) ([]string, error) {
 				continue
 			}
 			if e.Name() == "extensions" || e.Name() == "ext" {
-				sub := filepath.Join(dir, e.Name())
-				if err := walk(sub); err != nil {
+				if err := walkAll(filepath.Join(dir, e.Name())); err != nil {
 					return err
 				}
-				if err := descend(sub); err != nil {
-					return err
-				}
+				continue
+			}
+			if err := descend(filepath.Join(dir, e.Name())); err != nil {
+				return err
 			}
 		}
 		return nil
@@ -182,25 +206,24 @@ func fileHasShebang(path string) bool {
 // resolves its own SDK directory (for pi_compat.js) and discovers the entry
 // point from the symlink's directory ($0).
 //
-// Returns false (no error) if a usable `main` already exists. A dangling
-// symlink (target gone after an SDK-cache change) is repaired.
+// Returns false (no error) if a usable, current `main` already exists. A
+// symlink that is dangling or merely stale (pointing into a superseded SDK
+// cache dir) is brought up to date by healRunShSymlink, so install-time and
+// discovery-time repair share one policy rather than implementing two.
 func makeJSWrapper(extDir, runSh string) (bool, error) {
 	link := filepath.Join(extDir, "main")
 	if fi, err := os.Lstat(link); err == nil {
 		if fi.Mode()&os.ModeSymlink != 0 {
-			if _, serr := os.Stat(link); serr == nil {
-				return false, nil // valid symlink already present
-			}
-			// Dangling symlink — repair it.
-			if rerr := os.Remove(link); rerr != nil {
-				return false, fmt.Errorf("removing stale main symlink %s: %w", link, rerr)
-			}
-		} else {
-			// A real file/dir named `main` already exists — leave it alone.
+			// Dangling or stale wrapper symlinks are repaired here, exactly as
+			// discovery would. A symlink to a run.sh outside fir's SDK cache is
+			// the user's and is left alone.
+			healRunShSymlink(link)
 			return false, nil
 		}
+		// A real file/dir named `main` already exists — leave it alone.
+		return false, nil
 	}
-	if err := os.Symlink(runSh, link); err != nil {
+	if err := replaceSymlink(link, runSh); err != nil {
 		return false, fmt.Errorf("symlinking %s → %s: %w", link, runSh, err)
 	}
 	return true, nil

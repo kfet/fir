@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/kfet/fir/pkg/extension/sdk"
 )
 
 // FirManifest is the schema for fir.json at the package root.
@@ -264,26 +266,51 @@ func healRunShSymlink(p string) bool {
 	if resolves && target == runSh {
 		return true // already current — nothing to do
 	}
-	if err := os.Remove(p); err != nil {
+	if err := replaceSymlink(p, runSh); err != nil {
 		return resolves
-	}
-	if err := os.Symlink(runSh, p); err != nil {
-		return false
 	}
 	return true
 }
 
-// isSDKCachePath reports whether target lives inside fir's extracted-SDK
-// cache (…/sdks/<hash>/…), which is the only place healRunShSymlink is
-// allowed to re-point a symlink away from.
-func isSDKCachePath(target string) bool {
-	for dir := filepath.Dir(target); ; dir = filepath.Dir(dir) {
-		if filepath.Base(dir) == "sdks" {
-			return true
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return false
-		}
+// replaceSymlink points link at target, atomically. A plain remove-then-create
+// leaves NO entry at all if the process dies (or loses a race with a
+// concurrent session) in between, and nothing recreates it outside
+// `fir install` — the extension would go permanently undiscoverable. Creating
+// a uniquely-named temporary link and renaming it over the old one is atomic
+// on POSIX: readers see either the old link or the new one, never neither.
+func replaceSymlink(link, target string) error {
+	tmp := fmt.Sprintf("%s.tmp-%d", link, os.Getpid())
+	_ = os.Remove(tmp)
+	if err := os.Symlink(target, tmp); err != nil {
+		return err
 	}
+	if err := os.Rename(tmp, link); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
+}
+
+// isSDKCachePath reports whether target lives inside fir's extracted-SDK cache
+// directory, which is the only place healRunShSymlink is allowed to re-point a
+// symlink away from. The cache root is resolved from the SDK package itself
+// rather than matched by directory NAME: a basename test for "sdks" would also
+// claim a user's own `~/projects/sdks/myfork/run.sh` and silently overwrite a
+// hand-made symlink fir has no business touching.
+func isSDKCachePath(target string) bool {
+	root, err := sdkCacheRoot()
+	if err != nil || root == "" {
+		return false
+	}
+	return strings.HasPrefix(filepath.Clean(target), root+string(os.PathSeparator))
+}
+
+// sdkCacheRoot returns the directory holding the per-version extracted SDK
+// trees (the parent of the `<hash>` dir that jsRunShPath resolves inside).
+func sdkCacheRoot() (string, error) {
+	base, err := sdk.EnsureExtracted()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Dir(filepath.Clean(base)), nil
 }

@@ -183,6 +183,17 @@ _Updated 2026-09-16, after the package-discovery / literal-`apiKey` /
     unclaimed `<cache>/fir/sdks/<hash>/` trees (14 days), alongside the same
     pass for builtin skills and extensions.
 
+18b. **Make discovery read-only again — stable `sdks/current` symlink.**
+    `autoDiscover` currently *writes* to package directories: it re-points stale
+    `main → run.sh` wrapper symlinks (`healRunShSymlink`) so an extension follows
+    SDK upgrades. Correct, atomic (temp-link + rename) and guarded to fir's own
+    SDK cache, but a scan with a filesystem side effect is a surprising design,
+    and it silently does nothing on a read-only package dir. The clean fix is to
+    have `sdk.EnsureExtracted()` maintain a stable
+    `<cache>/fir/sdks/current → <hash>` symlink and have wrappers point at
+    `…/sdks/current/node/run.sh`. Nothing ever goes stale, healing disappears,
+    and discovery goes back to being a pure read.
+
 19. **Documentation** — partially done.
     - ✅ `docs/extensions.md` — documents the package `main`/binary convention and
       provider API keys (literal vs env-var-name).
