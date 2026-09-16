@@ -1,56 +1,124 @@
 # Coverage-gate on-ramp: queue items 1-6 sealed
 
-Branch: `test/pkg-pkg-coverage` (worktree `~/fir-covpkg`), rebased onto local
-`main` at v1.1.1. Not merged, not pushed. `make all` is green on that base.
+Branch: `work/pkg-coverage` (worktree `~/src/fir-covpkg`), rebased onto local
+`main` at **v1.11.0** (`f34725fd`). Not merged, not pushed. `make all` is green
+on that base.
+
+Every figure below was re-measured on the post-rebase tree with
+`make coverage`. The previous revision of this file carried numbers taken
+against v1.1.1; they have all moved and none of them is reproduced here.
 
 ## Result
 
 The whole on-ramp from `BACKLOG.md` is cleared, in queue order, one commit per
 package. Nothing was added to `.covignore` to achieve it.
 
-| # | Package | Before | After | Gated statements |
+| # | Package | Before (main) | After | Gated statements |
 | ---: | --- | ---: | ---: | ---: |
 | 1 | `pkg/extension/apikind` | 0.0% | **100.0%** | 6 |
 | 2 | `pkg/ai/envkeys` | 61.7% | **100.0%** | 47 |
-| 3 | `pkg/extension/sdk` | 67.2% | **100.0%** | 64 |
-| 4 | `pkg/ai/providers/declcfg` | 82.8% | **100.0%** | 122 |
+| 3 | `pkg/extension/sdk` | 71.6% | **100.0%** | 66 |
+| 4 | `pkg/ai/providers/declcfg` | 82.8% | **100.0%** | 121 |
 | 5 | `pkg/agent/tools` | 77.8% | **100.0%** | 117 |
 | 6 | `pkg/log` | 77.9% | **100.0%** | 199 |
 | 12 | `pkg/pkg` (done before the retarget) | 69.6% | **100.0%** | 518 |
 
-| Metric | At adoption | Now |
-| --- | ---: | ---: |
-| Gated at a hard `-min=100` | 372 statements (1.2%) | **1,443 (4.6%)** |
-| Excluded — structural | 12,446 (39.5%) | 12,446 (39.5%) |
-| Excluded — pure debt | 18,677 (59.3%) | **17,602 (55.9%)** |
-| Whole tree (`COVERAGE_FLOOR` tier) | 67.0% | **68.1%** |
-| `COVERAGE_FLOOR` | 66 | **67** |
+"Before" is `go test -covermode=set ./...` on `f34725fd` with none of this
+branch applied. Statement counts are today's, from `bin/coverage.gated.out`,
+and differ from the pre-rebase report where main's own commits moved them
+(`sdk` 64 → 66 via the cache refactor, `declcfg` 122 → 121, `pkg/pkg`
+520 → 518 after this branch's own dead-code deletion).
 
-Every number above is from `make coverage`, not from eyeballing: each package
-was promoted only after the gate itself passed with its `.covignore` line
-deleted.
+| Metric | At adoption | Now (measured) |
+| --- | ---: | ---: |
+| Gated at a hard `-min=100` | 372 statements (1.2%) | **1,483 (4.5%)** |
+| Excluded — structural | 12,446 (39.5%) | 13,078 (40.1%) |
+| Excluded — pure debt | 18,677 (59.3%) | **18,033 (55.3%)** |
+| Whole tree (`COVERAGE_FLOOR` tier) | 67.0% | **68.7%** |
+| `COVERAGE_FLOOR` | 66 | **67** |
+| Tree size | 31,495 statements | 32,594 statements |
+
+The structural bucket grew without a line being added to section 1 — the tree
+itself grew ~1,100 statements over the 98 commits this branch was rebased
+across, and section 1's patterns caught their share of it.
+
+`COVERAGE_FLOOR` stays at **67** rather than moving to 68: measured is 68.7%,
+and the Makefile's own comment argues for ~1 point of slack because the
+whole-tree number drifts by a handful of statements between runs. 67 preserves
+exactly the margin main already runs with (66 against a measured 67.8%).
 
 ```
 $ make coverage
   coverage profile             ✓
   coverage gate (100%)         ✓
   coverage floor (67%)         ✓
-$ awk '…' bin/coverage.gated.out     # 1443/1443 statements, all covered
+$ awk '…' bin/coverage.gated.out     # 1483/1483 statements, all covered
 ```
 
-## A note on `pkg/pkg`
+## The rebase: what was re-adjudicated
 
-The first five commits on this branch took `pkg/pkg` (queue item 12) to 100%
-and sealed it, before the retarget. They are **kept**, not reverted: the
-package is at 100%, the gate enforces it, and the work found a real bug. It is
-out of queue order, which is recorded as such in `BACKLOG.md`. Say the word and
-it comes off the branch, but deleting a sealed package to restore queue purity
-seemed the worse trade.
+This branch was ~3 weeks and 98 commits stale. Three commits change production
+behaviour rather than adding tests, and each was re-checked against today's
+`main` rather than assumed to still apply.
+
+**`fix(sdk): stop leaking a full SDK copy when the extract race is lost` —
+KEPT, bug still live.** Main landed `0a0c4c35` (one cache location and one
+collection policy) and `d97e1cd6` (platform cache dir, not a hardcoded
+`~/.cache`) in this file — the branch's only merge conflict. Main's structure
+won: `defaultCacheDir` is `cache.Dir("sdks")`, and `sweepStale` runs on both
+return paths. But main's `EnsureExtracted` still sets `success = true` in the
+lost-race arm, and `cache.SweepAged` is called with `cache.NotDotted`, whose
+own doc comment says it exists *because* "in-progress extractions are named
+`.extract-*`". So main's new collector is specifically prevented from
+collecting the directory this bug leaks. The one-line fix is still required and
+is retained on top of main's structure.
+
+**`fix(pkg): make install dedup agree with uninstall on unreadable entries` —
+KEPT, nothing superseded it.** The brief expected main to have rewritten this
+code via `bdc4dfeb`, `0dcb202b` and `3f7ae34d`. It did not: all three are
+**ancestors of the branch point** (`699d5059`), so they were already in the
+branch's base. `git log f34725fd -- pkg/pkg/` shows no commit newer than the
+merge base at all — `pkg/pkg` is untouched on main since this branch forked.
+Main's `containsPackage` still carries the unreachable verbatim fallback, and
+main's `filterPackage` still matches verbatim first, so the asymmetry the fix
+describes is exactly as live as it was three weeks ago. The fix now also
+inherits main's subdir-aware `sourceIdentity` for free.
+
+**`refactor(pkg): delete dead code and dedupe the local-path seam` — KEPT, the
+deleted code is still dead.** `CurrentRef` has no referent anywhere in the tree
+(`go vet ./...` and the full suite pass with it gone). `globPatterns`' discarded
+`WalkDir` error is still unreachable — the closure still returns `nil` on every
+error, and `WalkDir` only returns what the closure returns. `gitDirBase` and the
+unconditionally-`nil` errors of `addPackage`/`removePackage` are likewise
+unreferenced on today's main.
+
+**One test rewritten.** `TestDefaultCacheDirNoHome` asserted the error string
+`"sdk: resolve home dir"` and a `$HOME/.cache/fir/sdks` layout. `d97e1cd6`
+deliberately replaced that with `pkg/cache`, which consults `$XDG_CACHE_HOME`
+and then the platform cache dir. This is a behaviour main changed on purpose,
+not a regression, so the test was rewritten rather than fixed: it is now
+`TestDefaultCacheDirNoCacheRoot`, asserting the same *contract* (an unresolvable
+cache root is a loud error naming the cause, not a silent extraction into the
+working directory) against main's mechanism. `TestDefaultCacheDir` was
+retargeted at the `$XDG_CACHE_HOME` arm, which also makes it deterministic on a
+host that has that variable set — the old version would have failed there.
+
+**No test was dropped.** Apart from the one rewrite above, the entire branch
+suite compiles and passes against v1.11.0 unmodified.
+
+**One changelog block was misfiled by the rebase and moved back.** Git matched
+surrounding context and dropped this branch's four entries into the released
+`[1.2.0]` section of `cmd/fir/CHANGELOG.md`, leaving `[Unreleased]` empty. No
+conflict was raised. They are back under `[Unreleased]`, `[1.2.0]` is
+byte-identical to main's again, and the diff against main is now purely
+additive. This is the second time a rebase has done this to this branch — a
+clean `git rebase` is not evidence that a changelog survived one.
 
 ## Bugs found
 
-Three, plus one gap. None cosmetic. Tests at 100% surface these because the
-assertions that reach the last few branches are the ones nobody writes.
+Two bugs fixed, one documented, one whole untested failure surface closed.
+Tests at 100% surface these because the assertions that reach the last few
+branches are the ones nobody writes.
 
 1. **`pkg/extension/sdk`: a leaked SDK copy on every lost extraction race.**
    `EnsureExtracted` publishes the embedded SDK by renaming a temp directory
@@ -60,8 +128,9 @@ assertions that reach the last few branches are the ones nobody writes.
    directory, which was then abandoned as `.extract-XXXXXX` forever. The comment
    ("prevent cleanup of already-renamed dir") described a danger that could not
    occur: the deferred `RemoveAll` only ever touches `tmp`. On a host running
-   several fir sessions the cache grew without bound. Fixed; caught by asserting
-   that no `.extract-*` survives a simulated lost race, not by the error path.
+   several fir sessions the cache grew without bound, and main's later sweeper
+   skips dotted names by design. Fixed; caught by asserting that no `.extract-*`
+   survives a simulated lost race, not by the error path.
 
 2. **`pkg/pkg`: install-dedup and uninstall disagreed on identity.**
    `containsPackage`'s verbatim fallback for an unparseable settings entry sat
@@ -90,26 +159,27 @@ Minimal, and each defensible on its own terms.
 - `sdkFS` — an `fs.FS` package var defaulting to the embedded tree, beside the
   `cacheDir` var the file already used for exactly this purpose. `embed.FS`
   cannot fail a read or a listing, so every I/O error branch in the hash and
-  extract walks was unreachable without it.
+  extract walks was unreachable without it. Survived the rebase unchanged;
+  main's refactor did not touch the walks.
 - `debugEnvSet()` — `FIR_DEBUG` parsing split out of `pkg/log`'s `init()`, which
   runs once per process before any test can set the variable.
 
-**Dead code deleted rather than covered (in the retargeted work):**
+**Dead code deleted rather than covered:**
 
 - `fnRandID` checked an error from `crypto/rand.Read`, which since Go 1.24 never
   returns one — it fills the buffer entirely or crashes the program. The module
   is on `go 1.25.0`.
-- (In the earlier `pkg/pkg` commits: `gitDirBase`, `CurrentRef`, the
-  unconditionally-`nil` errors of `addPackage`/`removePackage`, a duplicated
-  local-path resolution, and a `WalkDir` error check whose callback swallows
-  everything.)
+- `gitDirBase`, `CurrentRef`, the unconditionally-`nil` errors of
+  `addPackage`/`removePackage`, a duplicated local-path resolution, and a
+  `WalkDir` error check whose callback swallows everything. All re-verified as
+  still dead on v1.11.0.
 
 No other production behaviour changed.
 
 ## `.covignore` entries added
 
-**None** — in either section, for any of the seven packages. Section 2 lost six
-lines (plus `pkg/pkg`'s earlier); section 1 is untouched.
+**None** — in either section, for any of the seven packages. Section 2 lost
+seven lines; section 1 is untouched.
 
 ## Standing constraint: run the suite unprivileged
 
@@ -122,20 +192,21 @@ so this holds today; a root-based CI image would break it. Recorded in
 
 ## Documentation updated
 
-- `BACKLOG.md` — six rows struck from the promotion queue, a "sealed since
-  adoption" table added, the bucket table now shows at-adoption vs today, the
-  gated statement count updated (372 → 1,443), and the root constraint noted.
-  `pkg/mcp/autoreply` is called out as the next cheapest.
-- `Makefile` — `COVERAGE_FLOOR` 66 → 67 (measured 68.1%, keeping the ~1 point of
-  slack the surrounding comment argues for, so the tier does not flap).
-- `CONTRIBUTING.md` — "The coverage ratchet" section (added with the `pkg/pkg`
-  work) explains the two tiers and what sealing a package costs.
-- `CHANGELOG.md` — entries under `## [Unreleased]`.
+- `BACKLOG.md` — seven rows struck from the promotion queue, a "sealed since
+  adoption" table added, the bucket table showing at-adoption vs today, the
+  gated statement count updated (372 → 1,483), and the root constraint noted.
+  `pkg/mcp/autoreply` is called out as the next cheapest (still 72 uncovered of
+  253 on today's main — re-verified, not assumed).
+- `Makefile` — `COVERAGE_FLOOR` 66 → 67 (measured 68.7%).
+- `CONTRIBUTING.md` — "The coverage ratchet" section explains the two tiers and
+  what sealing a package costs.
+- `CHANGELOG.md` — entries under `## [Unreleased]`, with the statement counts
+  corrected to the re-measured figures.
 
 ## Commits
 
 Hashes are deliberately not listed — they change on every rebase, and this
-file has already carried a stale set once. Run `git log --oneline main..HEAD`.
+file has already carried a stale set twice. Run `git log --oneline main..HEAD`.
 The subjects, in order:
 
 ```
@@ -157,32 +228,11 @@ docs(coverage): correct the report against the post-rebase tree
 test(log): fold the gzip round-trip into its error test, mirroring copyFile
 ```
 
-## Review pass
-
-The branch was reviewed against its own diff and rebased onto current `main`
-(19 commits ahead, up to v1.1.1) so the gate proves the sealed packages against
-the tree they will land on rather than a stale one — a gate result is a
-property of a tree, not of a diff. Main had touched none of the sealed
-packages. Two things came out of it:
-
-- **A test helper misreported panics.** `mustPanic` rendered the recovered
-  value through a type switch that returned `""` for anything that was not a
-  `string` or an `error`, and the caller read `""` as "no panic". A panic with
-  an unexpected type would have been reported as *"expected a panic, got
-  none"* — an inverted diagnosis of the exact thing the helper exists to catch.
-- **The rebase silently misfiled this branch's CHANGELOG entries** into the
-  released `[0.99.0]` section, because git matched surrounding context after
-  main's releases moved the old `[Unreleased]` block down. No conflict was
-  raised. Moved back under `[Unreleased]`; `[0.99.0]` is byte-identical to
-  main's again. Worth knowing: a clean `git rebase` is not evidence that a
-  changelog survived one.
-
-Three redundancies were also removed (a local `equalStrings` that stdlib
-`slices.Equal` already provides, a dead local plus a comment narrating an
-approach a test does not take, and a hand-rolled logger save/restore where the
-package already had `resetLogger()`).
+Plus the rebase commit that follows this file, carrying the `extract.go`
+conflict resolution, the rewritten cache-dir tests, the changelog relocation
+and the re-measured figures throughout.
 
 ## Next cheapest
 
 `pkg/mcp/autoreply` (72 uncovered of 253), then `pkg/session/compaction`
-(77/600) and `pkg/auth` (134/525).
+(77/600) and `pkg/auth` (130/625). All three re-measured on v1.11.0.

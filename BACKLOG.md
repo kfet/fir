@@ -14,9 +14,12 @@ from that file until only the structural section remains.
 
 | Bucket | At adoption | Today | Share today |
 | --- | ---: | ---: | ---: |
-| Gated at 100% | 372 | 1,443 | 4.6% |
-| Excluded — structural | 12,446 | 12,446 | 39.5% |
-| Excluded — pure debt | 18,677 | 17,602 | 55.9% |
+| Gated at 100% | 372 | 1,483 | 4.5% |
+| Excluded — structural | 12,446 | 13,078 | 40.1% |
+| Excluded — pure debt | 18,677 | 18,033 | 55.3% |
+
+The tree has grown from 31,495 to 32,594 statements since adoption, which is
+why the structural bucket rose without a line being added to section 1.
 
 The gated scope at adoption was `pkg/ai` (hand-written), `pkg/envvars`,
 `pkg/mcp/history` and `pkg/modes/print`. All four were taken to exactly 100%
@@ -24,23 +27,25 @@ as part of the adoption, so the gate is small but real — it is not measuring
 a generated table.
 
 **Sealed since adoption.** Seven packages have been promoted out of section
-2 at 100%, taking the gated scope from 372 to **1,443 statements** (4.6% of
-the tree) and the whole-tree number from 67.0% to 68.1%:
+2 at 100%, taking the gated scope from 372 to **1,483 statements** (4.5% of
+the tree) and the whole-tree number from 67.8% to 68.7%:
 
 | Package | Statements | Queue item |
 | --- | ---: | --- |
 | `pkg/extension/apikind` | 6 | 1 |
 | `pkg/ai/envkeys` | 47 | 2 |
-| `pkg/extension/sdk` | 64 | 3 |
-| `pkg/ai/providers/declcfg` | 122 | 4 |
+| `pkg/extension/sdk` | 66 | 3 |
+| `pkg/ai/providers/declcfg` | 121 | 4 |
 | `pkg/agent/tools` | 117 | 5 |
 | `pkg/log` | 199 | 6 |
 | `pkg/pkg` | 518 | 12 (out of order) |
 
 Nothing was added to the ledger to achieve this: every uncovered branch was
 either reached by a test or deleted as genuinely dead code. Filesystem and
-git work is done against `t.TempDir()`; no test touches the network. Four
-real bugs were found on the way (see CHANGELOG under `## [Unreleased]`).
+git work is done against `t.TempDir()`; no test touches the network. Two
+real bugs were found and fixed on the way, one more was documented but not
+fixed, and one whole untested failure surface was closed (see CHANGELOG
+under `## [Unreleased]`).
 
 Note that three promoted packages force failures with `chmod 0500`, which is
 a no-op under root — the suite must be run unprivileged, and now that these
@@ -79,8 +84,8 @@ statements as of adoption):
 | --- | --- | ---: | ---: |
 | ~~1~~ | ~~`pkg/extension/apikind`~~ | — | 6 (sealed) |
 | ~~2~~ | ~~`pkg/ai/envkeys`~~ | — | 47 (sealed) |
-| ~~3~~ | ~~`pkg/extension/sdk`~~ | — | 64 (sealed) |
-| ~~4~~ | ~~`pkg/ai/providers/declcfg`~~ | — | 122 (sealed) |
+| ~~3~~ | ~~`pkg/extension/sdk`~~ | — | 66 (sealed) |
+| ~~4~~ | ~~`pkg/ai/providers/declcfg`~~ | — | 121 (sealed) |
 | ~~5~~ | ~~`pkg/agent/tools`~~ | — | 117 (sealed) |
 | ~~6~~ | ~~`pkg/log`~~ | — | 199 (sealed) |
 | 7 | `pkg/mcp/autoreply` | 72 | 253 |
@@ -88,7 +93,7 @@ statements as of adoption):
 | 9 | `pkg/auth` | 134 | 525 |
 | 10 | `pkg/session/store` | 147 | 1015 |
 | 11 | `pkg/config` | 158 | 593 |
-| 12 | ~~`pkg/pkg`~~ | ~~161~~ | ~~520~~ (sealed) |
+| 12 | ~~`pkg/pkg`~~ | ~~161~~ | ~~520~~ → 518 (sealed) |
 | 13 | `pkg/resources` | 198 | 922 |
 | 14 | `pkg/mcp` | 238 | 1602 |
 | 15 | `pkg/models` | 266 | 1317 |
@@ -105,7 +110,7 @@ would put the gate over 19,000 statements — **60% of the tree** — at a hard
 
 **Measuring progress.** `make coverage` prints both numbers under `V=1`.
 Three things should move monotonically: rows deleted from section 2 of
-`.covignore`, the gated statement count (372 at adoption, 1,443 today), and
+`.covignore`, the gated statement count (372 at adoption, 1,483 today), and
 `COVERAGE_FLOOR`. If none of them has moved in a release cycle, the ledger
 has become a carve-out and this entry has failed.
 

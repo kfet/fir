@@ -129,28 +129,32 @@ func sampleFS() fstest.MapFS {
 // resolve this path from their own environment, so it is a contract, not an
 // implementation detail.
 func TestDefaultCacheDir(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	// The platform cache root is consulted via pkg/cache, which honours
+	// $XDG_CACHE_HOME when it is absolute. Pin that arm: it is the one
+	// that behaves identically on every OS the suite runs on.
+	root := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", root)
 
 	got, err := defaultCacheDir()
 	if err != nil {
 		t.Fatalf("defaultCacheDir: %v", err)
 	}
-	if want := filepath.Join(home, ".cache", "fir", "sdks"); got != want {
+	if want := filepath.Join(root, "fir", "sdks"); got != want {
 		t.Errorf("defaultCacheDir = %q, want %q", got, want)
 	}
 }
 
-// TestDefaultCacheDirNoHome pins that an unresolvable home is an error naming
-// the cause, not an extraction into the working directory.
-func TestDefaultCacheDirNoHome(t *testing.T) {
+// TestDefaultCacheDirNoCacheRoot pins that an unresolvable cache root is an
+// error naming the cause, not an extraction into the working directory.
+func TestDefaultCacheDirNoCacheRoot(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", "")
 	t.Setenv("HOME", "")
 
 	_, err := defaultCacheDir()
 	if err == nil {
-		t.Fatal("expected an error with no home directory")
+		t.Fatal("expected an error with no resolvable cache root")
 	}
-	if !strings.Contains(err.Error(), "sdk: resolve home dir") {
+	if !strings.Contains(err.Error(), "resolve user cache dir") {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
