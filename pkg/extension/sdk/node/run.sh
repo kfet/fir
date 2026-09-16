@@ -62,7 +62,6 @@ export PATH
 DIR="$(cd "$(dirname "$0")" && pwd)"
 DIRNAME="$(basename "$DIR")"
 
-
 # Locate the SDK dir. run.sh is extracted alongside fir_ext.js and pi_compat.js,
 # so follow the symlink back to the real script location.
 SCRIPT_REAL="$(readlink -f "$0" 2>/dev/null || realpath "$0" 2>/dev/null || echo "$0")"

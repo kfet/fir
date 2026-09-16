@@ -69,7 +69,6 @@ const _authModifyModelsHandlers = new Map();
 /** @type {Map<string, Function>} */
 const _authResolveEndpointHandlers = new Map();
 
-
 // Hosted-provider registries — populated by registerProvider() and the
 // provider* handler registrations, reported at the init handshake and
 // dispatched via provider/* RPCs.
@@ -481,7 +480,6 @@ function authModifyModels(providerId, handler) {
 function authResolveEndpoint(providerId, handler) {
   _authResolveEndpointHandlers.set(providerId, handler);
 }
-
 
 // ---------------------------------------------------------------------------
 // Hosted-provider registration
