@@ -46,13 +46,8 @@ func GenerateJSWrappers(pkgDir string) (int, error) {
 		return 0, nil
 	}
 
-	dirs, err := findJSTSEntryDirs(pkgDir)
-	if err != nil {
-		return 0, err
-	}
-
 	created := 0
-	for _, d := range dirs {
+	for _, d := range findJSTSEntryDirs(pkgDir) {
 		ok, err := makeJSWrapper(d, runSh)
 		if err != nil {
 			return created, err
@@ -84,7 +79,12 @@ func jsRunShPath() (string, error) {
 // helper modules never gets a wrapper. The walk covers the package root plus
 // everything beneath any `extensions`/`ext` directory (mirroring fir's own
 // `.fir/extensions/<name>/` layout), rather than arbitrary source trees.
-func findJSTSEntryDirs(pkgDir string) ([]string, error) {
+//
+// There is deliberately no error return. An unreadable directory is SKIPPED,
+// not fatal: a package with one bad subdirectory should still contribute the
+// extensions it does have, and a wrapper that cannot be generated shows up as
+// a missing extension rather than a failed install.
+func findJSTSEntryDirs(pkgDir string) []string {
 	seen := make(map[string]bool)
 	var dirs []string
 
@@ -95,10 +95,10 @@ func findJSTSEntryDirs(pkgDir string) ([]string, error) {
 		}
 	}
 
-	walk := func(dir string) error {
+	walk := func(dir string) {
 		entries, err := os.ReadDir(dir)
 		if err != nil {
-			return nil // skip unreadable dirs
+			return // skip unreadable dirs
 		}
 		for _, e := range entries {
 			if e.IsDir() {
@@ -110,7 +110,7 @@ func findJSTSEntryDirs(pkgDir string) ([]string, error) {
 				continue
 			}
 			if strings.HasSuffix(name, ".d.ts") {
-				continue
+				continue // type declarations are not an entry point
 			}
 			stem := strings.TrimSuffix(name, filepath.Ext(name))
 			if !jsEntryBasenames[stem] && stem != filepath.Base(dir) {
@@ -121,13 +121,10 @@ func findJSTSEntryDirs(pkgDir string) ([]string, error) {
 			}
 			add(dir)
 		}
-		return nil
 	}
 
 	// Root level.
-	if err := walk(pkgDir); err != nil {
-		return nil, err
-	}
+	walk(pkgDir)
 
 	// Descend into extensions/ext subdirectories, then walk EVERYTHING beneath
 	// them. Package auto-discovery recurses fully (filepath.WalkDir), so it
@@ -135,31 +132,26 @@ func findJSTSEntryDirs(pkgDir string) ([]string, error) {
 	// only looked at `extensions/` itself, the conventional
 	// `extensions/<name>/index.ts` layout — the very one this change is built
 	// around — would never get a `main` symlink to be discovered.
-	var walkAll func(dir string) error
-	walkAll = func(dir string) error {
-		if err := walk(dir); err != nil {
-			return err
-		}
+	var walkAll func(dir string)
+	walkAll = func(dir string) {
+		walk(dir)
 		entries, err := os.ReadDir(dir)
 		if err != nil {
-			return nil
+			return
 		}
 		for _, e := range entries {
 			if !e.IsDir() || jsWrapperSkipDirs[e.Name()] {
 				continue
 			}
-			if err := walkAll(filepath.Join(dir, e.Name())); err != nil {
-				return err
-			}
+			walkAll(filepath.Join(dir, e.Name()))
 		}
-		return nil
 	}
 
-	var descend func(dir string) error
-	descend = func(dir string) error {
+	var descend func(dir string)
+	descend = func(dir string) {
 		entries, err := os.ReadDir(dir)
 		if err != nil {
-			return nil
+			return
 		}
 		for _, e := range entries {
 			if !e.IsDir() {
@@ -169,22 +161,15 @@ func findJSTSEntryDirs(pkgDir string) ([]string, error) {
 				continue
 			}
 			if e.Name() == "extensions" || e.Name() == "ext" {
-				if err := walkAll(filepath.Join(dir, e.Name())); err != nil {
-					return err
-				}
+				walkAll(filepath.Join(dir, e.Name()))
 				continue
 			}
-			if err := descend(filepath.Join(dir, e.Name())); err != nil {
-				return err
-			}
+			descend(filepath.Join(dir, e.Name()))
 		}
-		return nil
 	}
-	if err := descend(pkgDir); err != nil {
-		return nil, err
-	}
+	descend(pkgDir)
 
-	return dirs, nil
+	return dirs
 }
 
 // fileHasShebang reports whether path begins with "#!".

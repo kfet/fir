@@ -122,10 +122,7 @@ func TestFindJSTSEntryDirs(t *testing.T) {
 	// A non-entry dir (src) — not descended into.
 	writePkgFile(t, filepath.Join(root, "src", "index.ts"), "export default function(){}\n", 0o644)
 
-	dirs, err := findJSTSEntryDirs(root)
-	if err != nil {
-		t.Fatalf("findJSTSEntryDirs: %v", err)
-	}
+	dirs := findJSTSEntryDirs(root)
 	got := map[string]bool{}
 	for _, d := range dirs {
 		rel, _ := filepath.Rel(root, d)
