@@ -1,6 +1,7 @@
 # Pi-mono Extension Compat Layer — Remaining Work
 
-_Updated 2025-03-24 after initial implementation and end-to-end testing_
+_Updated 2026-09-16, after the package-discovery / literal-`apiKey` /
+`auth/resolve_endpoint` work landed on top of v1.11.0._
 
 ## What Works Today
 
@@ -27,9 +28,11 @@ _Updated 2025-03-24 after initial implementation and end-to-end testing_
   what lets installed packages ship **compiled binary** extensions (which cannot carry
   a comment-frontmatter block) as well as the runtime-wrapped JS/TS case. Loose
   `.py`/`.sh` scripts still require frontmatter and are named by filename. A
-  `main → run.sh` symlink left dangling by an SDK-cache change is **self-healed** to
-  the current SDK's `run.sh` at discovery time, so the extension keeps loading across
-  fir upgrades.
+  `main → run.sh` symlink is kept in step with the SDK at discovery time: one left
+  **dangling** (SDK cache dir pruned) *and* one that is merely **stale** (the old cache
+  dir survives, so it silently keeps running a superseded `run.sh`/`fir_ext.js`) are
+  both re-pointed at the current SDK's `run.sh`. Only symlinks targeting a `run.sh`
+  inside fir's SDK cache are touched — a link to a user's own `run.sh` is left alone.
 - **Literal `apiKey` on a pi provider** — pi's `config.apiKey` is a literal key
   value, and it now authenticates. `pi_compat` passes it to fir as the provider's
   `api_key` (a new `ProviderSpec` field), which fir resolves **last** — after a
@@ -49,6 +52,11 @@ _Updated 2025-03-24 after initial implementation and end-to-end testing_
   `null` ("no correction") instead of erroring, and `pi_compat` installs a
   resolver reporting the provider's configured `baseUrl` for any provider that
   has one.
+- **Extension naming follows the package directory** — `pi_compat` derives the
+  handshake name with `deriveExtensionName()`: a generic entry-point stem
+  (`index`/`main`) defers to the containing directory, a specific one (`todos.ts`)
+  is used as-is. Without this every conventional `index.ts` pi package announced
+  itself as `index`, so fir discovered `pi-llama` and then addressed it as `index`.
 - **SDK extraction** — `run.sh`, `pi_compat.js`, `fir_ext.js` all extracted to `~/.cache/fir/sdks/<hash>/node/`
 - **Discovery** — extensionless `main`/binary entries and frontmatter-bearing
   `.py`/`.sh` scripts both flow through `ScanPackageResources` →
@@ -128,7 +136,8 @@ _Updated 2025-03-24 after initial implementation and end-to-end testing_
    `registerProvider` is mapped to fir's hosted-provider handshake (see
    `docs/pi-mono-compat-layer.md` § Hosted provider registration). Works for the
    `api`-passthrough case (e.g. pi-llama via `openai-completions`), including a
-   **literal `apiKey`** (see below). Not covered: `oauth`, `streamSimple`,
+   **literal `apiKey`** (see *Literal `apiKey` on a pi provider*, above). Not covered:
+   `oauth`, `streamSimple`,
    `headers`, baseUrl-only overrides (a `baseUrl` *with* models is applied per
    model), and live `unregisterProvider()` — all warn + degrade since providers
    are fixed at the init handshake.
@@ -153,28 +162,34 @@ _Updated 2025-03-24 after initial implementation and end-to-end testing_
 
 ### P3 — Polish
 
-16. **Test suite for pi_compat.js**
-    No unit tests yet. Should test:
-    - Event mapping (pi-mono event names → fir events/hooks)
-    - Hook result translation (block/allow, tool_result modification)
-    - Tool registration and execution flow
-    - Context method delegation
+16. **Test suite for pi_compat.js** — ✅ **Partially done.**
+    `pkg/extension/sdk/node/fir_ext_test.js` (run by `make test-node-sdk`) covers the
+    provider-registration surface including both `apiKey` shapes,
+    `auth/resolve_endpoint` present/absent/unknown-method, `wrapContext` UI mapping,
+    `mapHookResult` block/allow/no-opinion translation, acknowledged-event ordering,
+    and `deriveExtensionName`. Still uncovered: **tool registration and execution
+    flow**, and the full pi-event-name → fir-event/hook mapping table.
 
 17. **Test suite for run.sh**
-    No tests. Should test:
+    Still none. `run.sh` is exercised only indirectly (as a symlink target in
+    `pkg/pkg/jswrapper_test.go` and `pkg/extension/jspackage_discovery_test.go`);
+    nothing tests its own logic. Should test:
     - Entry point discovery priority
-    - Pi-mono import detection
-    - Runtime fallback chain (bun → node → npx tsx)
+    - Pi-mono import detection (both `@mariozechner/` and `@earendil-works/` scopes)
+    - Runtime fallback chain (bun → node → npx tsx) and the `PATH` augmentation
     - Non-pi-mono JS/TS passthrough
 
 18. ~~**Clean up old SDK cache dirs**~~ — done. `pkg/cache.SweepAged` ages out
     unclaimed `<cache>/fir/sdks/<hash>/` trees (14 days), alongside the same
     pass for builtin skills and extensions.
 
-19. **Documentation**
-    - Add to `docs/extensions.md` — how to install and use pi-mono extensions
-    - Update `docs/extension-protocol.md` with JS/TS extension notes
-    - README section on pi-mono compatibility
+19. **Documentation** — partially done.
+    - ✅ `docs/extensions.md` — documents the package `main`/binary convention and
+      provider API keys (literal vs env-var-name).
+    - ✅ `docs/extension-protocol.md` — documents the `api_key` `ProviderSpec` field
+      and its resolution precedence.
+    - ❌ Still missing: an end-user "how to install and use a pi-mono extension"
+      walkthrough, and a README section on pi-mono compatibility.
 
 20. **`StringEnum` from `@mariozechner/pi-ai`**
     Some extensions import `StringEnum` for Google-compatible enum schemas. Need a shim or note in docs.
