@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [1.13.1] - 2026-09-17
+
+### Changed
+- **Model catalog regenerated**: 9 model(s) with changed pricing/limits.
+
 ### Fixed
 - **`wait` no longer tells agents its own progress is invisible.** The tool's description ended `Returns once — progress is UI-only`, and `Context.report_progress` was documented as sending "to the UI". Both are false in ACP mode: `report_progress` is wired through `session_bridge.go` to `EventToolExecutionUpdate` and emitted by `pkg/modes/acp/methods.go` as a `tool_call` update with `status=in_progress`, which `acp-kit`'s `client.IsProgress` counts as evidence of progress. The claim was load-bearing in the worst way — agents read their own tool descriptions, concluded a long `wait` was invisible to the supervising relay, and then *misdiagnosed unrelated turn cancellations* as "my wait looked wedged", recommending 90-second chunk-and-`resume` workarounds for a failure mode `heartbeat.go` has prevented since 0.88.0. Two independent agents reached the same wrong conclusion from the same sentence, which is what a confidently-wrong docstring buys: agreement, not accuracy. Corrected in all three places (`wait`, `pipe`, and the SDK docstring that is upstream of both), with the ACP-mode qualifier stated explicitly rather than implied. Documentation only; no behaviour change.
 
