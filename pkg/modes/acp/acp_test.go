@@ -505,13 +505,22 @@ func TestHandleEvent_AutoCompactionEnd_Error(t *testing.T) {
 		ErrorMessage: "compaction API error (503)",
 	})
 
-	updates := mc.getUpdates()
-	if len(updates) != 1 {
-		t.Fatalf("expected 1 update for auto_compaction_end error, got %d", len(updates))
+	if len(mc.getUpdates()) != 0 {
+		t.Errorf("compaction failure must not be sent as agent message text, got %d updates", len(mc.getUpdates()))
 	}
-	raw, _ := json.Marshal(updates[0])
-	if !strings.Contains(string(raw), "compaction API error") {
-		t.Errorf("expected error text in update, got %s", raw)
+	notices := mc.noticesOf(NoticeMethod)
+	if len(notices) != 1 {
+		t.Fatalf("expected 1 notice for auto_compaction_end error, got %d", len(notices))
+	}
+	p, ok := notices[0].params.(noticeParams)
+	if !ok {
+		t.Fatalf("unexpected notice params type %T", notices[0].params)
+	}
+	if p.Kind != "compaction_failed" || p.SessionId != "s1" || p.Level != "warning" {
+		t.Errorf("unexpected notice: %+v", p)
+	}
+	if !strings.Contains(p.Text, "compaction API error") {
+		t.Errorf("expected error text in notice, got %q", p.Text)
 	}
 }
 

@@ -337,7 +337,8 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mc
 			if r := []rune(short); len(r) > 160 {
 				short = string(r[:160]) + "…"
 			}
-			pa.sendAgentMessage(sessionID, fmt.Sprintf("⏳ Provider rate-limited/overloaded — retrying in %.0fs (attempt %d): %s", delaySeconds, attempt, short))
+			pa.sendNotice(sessionID, "warning", "provider_retry",
+				fmt.Sprintf("⏳ Provider rate-limited/overloaded — retrying in %.0fs (attempt %d): %s", delaySeconds, attempt, short))
 		},
 	})
 	if err != nil {
@@ -356,37 +357,15 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mc
 		mcpStatus:       mcp.StatusFunc(result.MCPManager),
 	}
 
-	// Surface MCP server lifecycle events to the ACP client. The Manager
-	// buffers these, so attaching the consumer here — after Setup has begun
-	// dialing — still delivers the initial "connecting" events. The goroutine
-	// exits when the Manager is closed (session teardown).
+	// Drain MCP server lifecycle events into the log. These must NOT be sent
+	// as agent message text: the pump is a session-lifetime goroutine that
+	// races the answer stream on the same ordered connection, so a lifecycle
+	// line can land mid-sentence inside the model's reply. MCP status is
+	// state, not an event — clients pull it via the advertised /mcp command.
+	// The goroutine exits when the Manager is closed (session teardown).
 	if entry.mcpManager != nil {
 		mgr := entry.mcpManager
-		go func() {
-			for {
-				select {
-				case <-mgr.Done():
-					return
-				case ev := <-mgr.ServerEvents():
-					switch ev.Kind {
-					case mcp.ServerConnecting:
-						pa.sendAgentMessage(sessionID, fmt.Sprintf("MCP server %q connecting…", ev.Name))
-					case mcp.ServerReady:
-						if ev.Err != nil {
-							pa.sendAgentMessage(sessionID, fmt.Sprintf("⚠️ MCP server %q failed to connect: %v", ev.Name, ev.Err))
-						} else {
-							pa.sendAgentMessage(sessionID, fmt.Sprintf("MCP server %q connected", ev.Name))
-						}
-					case mcp.ServerDisconnected:
-						if ev.Err != nil {
-							pa.sendAgentMessage(sessionID, fmt.Sprintf("⚠️ MCP server %q disconnected: %v", ev.Name, ev.Err))
-						} else {
-							pa.sendAgentMessage(sessionID, fmt.Sprintf("MCP server %q disconnected", ev.Name))
-						}
-					}
-				}
-			}
-		}()
+		go drainMCPEvents(sessionID, mgr.Done(), mgr.ServerEvents())
 	}
 
 	// --wait-mcp: block session creation until every MCP server has finished
@@ -566,7 +545,83 @@ func mergeRequestMCPServers(configs map[string]mcp.ServerConfig, servers []acpsd
 	return configs
 }
 
+// drainMCPEvents consumes the Manager's lifecycle event channel and logs each
+// event. It deliberately produces no client-visible output — see the call site.
+func drainMCPEvents(sessionID string, done <-chan struct{}, events <-chan mcp.ServerEvent) {
+	for {
+		select {
+		case <-done:
+			return
+		case ev := <-events:
+			switch ev.Kind {
+			case mcp.ServerConnecting:
+				firlog.Info("acp mcp: server connecting", "session", sessionID, "server", ev.Name)
+			case mcp.ServerReady:
+				if ev.Err != nil {
+					firlog.Warn("acp mcp: server failed to connect", "session", sessionID, "server", ev.Name, "err", ev.Err)
+				} else {
+					firlog.Info("acp mcp: server connected", "session", sessionID, "server", ev.Name)
+				}
+			case mcp.ServerDisconnected:
+				if ev.Err != nil {
+					firlog.Warn("acp mcp: server disconnected", "session", sessionID, "server", ev.Name, "err", ev.Err)
+				} else {
+					firlog.Info("acp mcp: server disconnected", "session", sessionID, "server", ev.Name)
+				}
+			}
+		}
+	}
+}
+
+// NoticeMethod is the ACP extension-method name fir uses to deliver
+// out-of-band, mid-turn operational notices (currently provider retries).
+//
+// Such notices must never be sent as agent message text: they would be
+// byte-identical to the model's own answer tokens on the same ordered stream,
+// and can interleave mid-sentence. Extension notifications are a separate
+// JSON-RPC method, so a client can route them to a status line — and the ACP
+// spec says implementations SHOULD ignore unrecognized notifications, so an
+// older client simply drops them.
+//
+// It is namespaced under acp-kit rather than fir so sibling ACP relays
+// (poe-acp, slack-acp, zulip-acp) can share one handler.
+//
+// See: https://agentclientprotocol.com/protocol/extensibility
+const NoticeMethod = "_dev.acp-kit/notice"
+
+// noticeParams is the payload of a NoticeMethod notification.
+type noticeParams struct {
+	SessionId string `json:"sessionId"`
+	// Level is one of "info", "warning", "error".
+	Level string `json:"level"`
+	// Kind is a stable machine-readable discriminator, e.g. "provider_retry".
+	Kind string `json:"kind"`
+	// Text is a human-readable one-liner, safe to show in a status area.
+	Text string `json:"text"`
+}
+
+// sendNotice delivers an operational notice over the ACP extension channel.
+// Failures are logged and swallowed: a notice is never worth failing a turn.
+func (pa *firAgent) sendNotice(sessionID, level, kind, text string) {
+	if pa.conn == nil {
+		return
+	}
+	err := pa.conn.NotifyExtension(context.Background(), NoticeMethod, noticeParams{
+		SessionId: sessionID,
+		Level:     level,
+		Kind:      kind,
+		Text:      text,
+	})
+	if err != nil {
+		firlog.Warn("acp notice: delivery failed", "session", sessionID, "kind", kind, "err", err)
+	}
+}
+
+// sendAgentMessage emits text as a genuine agent reply (command output,
+// handoff/turn failures). A trailing blank line keeps it visually separate
+// from anything the model streams next.
 func (pa *firAgent) sendAgentMessage(sessionID, text string) {
+	text = strings.TrimRight(text, "\n") + "\n\n"
 	_ = pa.conn.SessionUpdate(context.Background(), acpsdk.SessionNotification{
 		SessionId: acpsdk.SessionId(sessionID),
 		Update:    acpsdk.UpdateAgentMessageText(text),

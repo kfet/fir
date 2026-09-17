@@ -17,6 +17,36 @@ type mockConn struct {
 	terminalExit   *int
 	// waitError, if non-nil, is returned by WaitForTerminalExit.
 	waitError error
+	// notices records extension-method notifications sent via NotifyExtension.
+	notices []mockNotice
+	// notifyErr, if non-nil, is returned by NotifyExtension.
+	notifyErr error
+}
+
+// mockNotice is one recorded extension notification.
+type mockNotice struct {
+	method string
+	params any
+}
+
+// noticesOf returns the recorded notices for a given extension method.
+func (m *mockConn) noticesOf(method string) []mockNotice {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []mockNotice
+	for _, n := range m.notices {
+		if n.method == method {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+func (m *mockConn) NotifyExtension(_ context.Context, method string, params any) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.notices = append(m.notices, mockNotice{method: method, params: params})
+	return m.notifyErr
 }
 
 func newMockConn() *mockConn {

@@ -5,8 +5,10 @@ package acp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -25,6 +27,8 @@ type acpConn interface {
 	WaitForTerminalExit(ctx context.Context, params acpsdk.WaitForTerminalExitRequest) (acpsdk.WaitForTerminalExitResponse, error)
 	ReadTextFile(ctx context.Context, params acpsdk.ReadTextFileRequest) (acpsdk.ReadTextFileResponse, error)
 	WriteTextFile(ctx context.Context, params acpsdk.WriteTextFileRequest) (acpsdk.WriteTextFileResponse, error)
+	// NotifyExtension sends an ACP extension-method notification ("_"-prefixed).
+	NotifyExtension(ctx context.Context, method string, params any) error
 }
 
 // Compile-time check that *acpsdk.AgentSideConnection satisfies acpConn.
@@ -327,6 +331,16 @@ func (r *rawConn) ReadTextFile(ctx context.Context, params acpsdk.ReadTextFileRe
 
 func (r *rawConn) WriteTextFile(ctx context.Context, params acpsdk.WriteTextFileRequest) (acpsdk.WriteTextFileResponse, error) {
 	return acpsdk.SendRequest[acpsdk.WriteTextFileResponse](r.conn, ctx, acpsdk.ClientMethodFsWriteTextFile, params)
+}
+
+// NotifyExtension sends an ACP extension-method notification. Method names
+// must start with "_"; anything else is a programming error and is rejected
+// rather than put on the wire.
+func (r *rawConn) NotifyExtension(ctx context.Context, method string, params any) error {
+	if !strings.HasPrefix(method, "_") {
+		return fmt.Errorf("extension method name must start with '_' (got %q)", method)
+	}
+	return r.conn.SendNotification(ctx, method, params)
 }
 
 // toReqErr converts a Go error to a JSON-RPC RequestError.

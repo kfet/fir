@@ -107,6 +107,17 @@ func (pa *firAgent) Initialize(_ context.Context, params acpsdk.InitializeReques
 		ProtocolVersion: acpsdk.ProtocolVersionNumber,
 		AgentInfo:       &acpsdk.Implementation{Name: "fir", Version: version},
 		AgentCapabilities: acpsdk.AgentCapabilities{
+			// Advertise the acp-kit notice extension so clients can route
+			// out-of-band operational notices to a status area instead of
+			// the transcript. Clients that do not know the key ignore it.
+			Meta: map[string]any{
+				"dev.acp-kit": map[string]any{
+					"notice": map[string]any{
+						"method":  NoticeMethod,
+						"version": 1,
+					},
+				},
+			},
 			PromptCapabilities: acpsdk.PromptCapabilities{
 				Image:           true,
 				EmbeddedContext: true,
@@ -856,7 +867,10 @@ func (pa *firAgent) handleEvent(sessionID string, entry *firSession, event sessi
 		return
 	case "auto_compaction_end":
 		if event.ErrorMessage != "" {
-			pa.sendAgentMessage(sessionID, fmt.Sprintf("⚠️ Compaction failed: %s", event.ErrorMessage))
+			// Auto-compaction runs mid-turn, so this must go out of band —
+			// as agent message text it could land inside the model's reply.
+			pa.sendNotice(sessionID, "warning", "compaction_failed",
+				fmt.Sprintf("⚠️ Compaction failed: %s", event.ErrorMessage))
 		}
 		return
 	}
