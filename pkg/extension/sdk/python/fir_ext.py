@@ -2986,11 +2986,16 @@ class Context:
         )
 
     def report_progress(self, message: str) -> None:
-        """Send a transient progress message to the UI.
+        """Send a transient progress message for the running tool call.
 
         Updates the spinner text inside the tool's display component
         (e.g. "Read config.toml" or "Synthesizing..."). Fire-and-forget —
         does not wait for a response.
+
+        Not TUI-only: in ACP mode each call is forwarded to the client as a
+        real ``tool_call`` update with ``status=in_progress``. Relays treat
+        that as evidence of progress, so a long-running tool that reports
+        is not cut by a wedged-turn watchdog.
 
         Front-load the message: some clients truncate the spinner label to
         about 12 runes, so put the identifying part first.

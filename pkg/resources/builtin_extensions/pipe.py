@@ -824,7 +824,9 @@ _PIPE_DESCRIPTION = (
     "substitutions, but are omitted from the final result and replaced by a "
     "one-line size marker. The last step is always a leaf; errored steps "
     "are always shown regardless of leaf status. This lets you build large "
-    "data pipelines without polluting LLM context with intermediate blobs.\n\n"
+    "data pipelines without polluting LLM context with intermediate blobs. "
+    "Each step emits a progress update as it starts, so a long pipe stays "
+    "visibly alive rather than looking stalled.\n\n"
     "[SYS_EXT] Reach for pipe when you already know the full chain of "
     "tool calls upfront and intermediate outputs are bulky or only the "
     "final result matters — it skips the LLM round-trips and avoids "
@@ -836,7 +838,7 @@ _PIPE_PARAMETERS: dict[str, Any] = {
     "properties": {
         "label": {
             "type": "string",
-            "description": "Optional short label shown in UI progress.",
+            "description": "Optional short label shown in progress updates.",
         },
         "steps": {
             "type": "array",
@@ -937,7 +939,13 @@ _WAIT_DESCRIPTION = (
     "reused. Handles are session-scoped, expire after 2h, and are dropped "
     "once the loop finishes. The terminal "
     "payload reports outcome/polls/elapsed/message plus the last probe output "
-    "(the bare WAIT: line is stripped). Returns once — progress is UI-only.\n\n"
+    "(the bare WAIT: line is stripped). Returns to the model exactly ONCE — "
+    "but the loop is NOT silent on the wire: every poll emits a tool_call "
+    "update carrying the poll count and elapsed time, so clients render a "
+    "live spinner. In ACP mode those updates reach the client as real "
+    "tool_call updates, which supervising relays count as progress, so do "
+    "NOT chunk a long wait into short timeouts merely to keep a watchdog "
+    "fed — per-poll progress simply is not part of the returned payload.\n\n"
     "[SYS_EXT] Reach for wait (not pipe) when you must BLOCK until something "
     "becomes true — a build finishes, a file appears, a service comes up, a "
     "log line is emitted. Use pipe for a one-shot chain you run immediately. "
@@ -950,7 +958,7 @@ _WAIT_PARAMETERS: dict[str, Any] = {
     "properties": {
         "label": {
             "type": "string",
-            "description": "Optional short label shown in UI progress.",
+            "description": "Optional short label shown in progress updates.",
         },
         "steps": {
             "type": "array",
