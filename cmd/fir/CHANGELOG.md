@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## [1.13.0] - 2026-09-17
+
+### Fixed
+- **ACP lifecycle notices no longer land inside the model's reply.** fir sent MCP server connect/disconnect events, provider rate-limit retries and compaction failures through `sendAgentMessage`, which wraps them as `UpdateAgentMessageText` — byte-identical to the model's own answer tokens. The MCP event pump is a session-lifetime goroutine on `context.Background()`; it races the answer stream on the SDK's `writeMu`, which serialises whole messages but imposes no ordering between producers. The observed result was a notice spliced mid-sentence into a user's reply: `So if I put the mutation endpoint MCP server "daisy-main" connectedinside that space,`. A separator or italic formatting cannot fix this — two independent writers share one ordered stream — so the fix is to stop putting them on that stream. The same leak also quietly defeated relays' ambient-silence detection, which accumulates agent message text to decide whether a turn abstained: an MCP server connecting mid-turn counted as a reply.
+
+  **MCP lifecycle events are now logged, not sent.** Connection status is state, not an event, and clients pull it with the `/mcp` command fir already advertises — which is exactly what the reference ACP adapter does (`claude-agent-acp` #1106). This removes code rather than adding any.
+
+  **Provider retries and compaction failures move to an extension notification**, `_dev.acp-kit/notice`. These are genuinely mid-turn and have no pull equivalent: a relay that shows nothing while a provider backs off looks hung. The method is namespaced under acp-kit rather than fir so sibling relays (zulip-acp, poe-acp, slack-acp) share one handler, and support is advertised in `agentCapabilities._meta`. Version skew is safe in both directions by spec — implementations SHOULD ignore unrecognized notifications — so an older client simply drops them. Requires the SDK v0.13.5 migration in 1.12.0, which is what made `NotifyExtension` reachable at all.
+
+  `sendAgentMessage` keeps its remaining callers — `/resume`, `/share`, handoff and turn failures, which are genuine replies — and now normalises a trailing blank line so they never fuse with streamed text.
+
 ## [1.12.0] - 2026-09-17
 
 ### Added
