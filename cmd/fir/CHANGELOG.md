@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [1.14.1] - 2026-09-18
+
+### Changed
+- **Model catalog regenerated**: added `mistral/zai-glm-5-3`; 2 model(s) with changed pricing/limits.
+
 ### Fixed
 - **`self` skill**: documents `auth.allow_private_network`, which was missing from the MCP auth-override reference.
 
