@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+- **Drift guard for the `self` skill's MCP reference**: tests in `pkg/resources` reflect over `mcp.ServerConfig`/`mcp.AuthConfig` and fail if a json tag is undocumented in the embedded skill, or if the skill documents a key that no longer exists in Go.
+- **`self` skill**: documents the per-server `roots` key, which was never covered.
+
 ## [1.14.1] - 2026-09-18
 
 ### Changed
