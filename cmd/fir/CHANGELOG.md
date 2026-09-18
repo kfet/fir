@@ -2,7 +2,10 @@
 
 ## [Unreleased]
 
+## [1.16.0] - 2026-09-18
+
 ### Changed
+- **Model catalog regenerated**: added 1 aggregator model; removed 1 aggregator model; 4 model(s) with changed pricing/limits.
 - **`self` skill MCP reference is now the source, not a copy of it**: the user-facing config contract lives in `pkg/mcp/config_contract.go`, is embedded into the binary as `mcp.ConfigContractSource`, and is served as the on-demand skill resource `self/mcp-config-contract.md`. The hand-written field-by-field enumeration in `SKILL.md` is gone; the skill now carries only operational judgement (worked examples, mode selection, failure modes).
 - **Skill placeholder expansion applies to every builtin `.md` file**, not just `SKILL.md`, so generated reference material can live in a companion resource file.
 
