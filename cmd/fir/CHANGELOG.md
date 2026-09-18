@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- **`self` skill**: documents `auth.allow_private_network`, which was missing from the MCP auth-override reference.
+
 ## [1.14.0] - 2026-09-18
 
 ### Changed
