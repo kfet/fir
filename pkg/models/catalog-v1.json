@@ -1,56 +1,30 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-09-17T01:01:04Z",
+  "generatedAt": "2026-09-18T01:05:00Z",
   "providers": {
-    "opencode": {
-      "models": [
-        {
-          "id": "union-alpha",
-          "name": "Union Alpha Free",
-          "api": "anthropic-messages",
-          "reasoning": true,
-          "input": [
-            "text",
-            "image"
-          ],
-          "cost": {
-            "input": 0,
-            "output": 0,
-            "cacheRead": 0,
-            "cacheWrite": 0
-          },
-          "contextWindow": 262144,
-          "maxTokens": 131072
-        }
-      ]
-    },
-    "opencode-go": {
-      "models": [
-        {
-          "id": "union-alpha",
-          "name": "Union Alpha Free",
-          "api": "anthropic-messages",
-          "reasoning": true,
-          "input": [
-            "text",
-            "image"
-          ],
-          "cost": {
-            "input": 0,
-            "output": 0,
-            "cacheRead": 0,
-            "cacheWrite": 0
-          },
-          "contextWindow": 262144,
-          "maxTokens": 131072
-        }
-      ]
-    },
     "openrouter": {
       "models": [
         {
-          "id": "stealth/union-alpha",
-          "name": "Union Alpha",
+          "id": "qwen/qwen3.8-27b:free",
+          "name": "Qwen: Qwen3.8 27B (free)",
+          "api": "openai-completions",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          },
+          "contextWindow": 262144,
+          "maxTokens": 235929
+        },
+        {
+          "id": "unbiased/pareto",
+          "name": "Pareto",
           "api": "openai-completions",
           "reasoning": false,
           "input": [
@@ -58,9 +32,9 @@
             "image"
           ],
           "cost": {
-            "input": 0,
-            "output": 0,
-            "cacheRead": 0,
+            "input": 2.5,
+            "output": 7.5,
+            "cacheRead": 0.25,
             "cacheWrite": 0
           },
           "contextWindow": 262144,
@@ -68,6 +42,15 @@
         }
       ],
       "modelOverrides": {
+        "deepseek/deepseek-chat": {
+          "cost": {
+            "input": 0.32,
+            "output": 0.89,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          },
+          "maxTokens": 16384
+        },
         "deepseek/deepseek-v4-flash": {
           "cost": {
             "input": 0.088606,
@@ -76,13 +59,14 @@
             "cacheWrite": 0
           }
         },
-        "deepseek/deepseek-v4-flash-0731": {
+        "deepseek/deepseek-v4-flash-vision-exp": {
           "cost": {
-            "input": 0.06,
-            "output": 0.12,
-            "cacheRead": 0.012,
+            "input": 0.2156,
+            "output": 0.6468,
+            "cacheRead": 0.00686,
             "cacheWrite": 0
-          }
+          },
+          "maxTokens": 262144
         },
         "deepseek/deepseek-v4-pro-0813": {
           "cost": {
@@ -93,82 +77,31 @@
           },
           "maxTokens": 384000
         },
-        "minimax/minimax-m1": {
-          "cost": {
-            "input": 0.4,
-            "output": 2.2,
-            "cacheRead": 0,
-            "cacheWrite": 0
-          }
-        },
-        "mistralai/mistral-small-3.2-24b-instruct": {
-          "cost": {
-            "input": 0.09375,
-            "output": 0.25,
-            "cacheRead": 0,
-            "cacheWrite": 0
-          }
-        },
-        "moonshotai/kimi-k2.7-code": {
-          "cost": {
-            "input": 0.7062,
-            "output": 3.21,
-            "cacheRead": 0.18,
-            "cacheWrite": 0
-          }
-        },
         "moonshotai/kimi-k3": {
           "cost": {
-            "input": 3,
-            "output": 15,
-            "cacheRead": 0.3,
+            "input": 2.1,
+            "output": 10.95,
+            "cacheRead": 0.23,
             "cacheWrite": 0
           }
         },
-        "nvidia/nemotron-3-nano-30b-a3b": {
+        "openai/gpt-oss-120b": {
           "cost": {
-            "input": 0.06,
-            "output": 0.24,
-            "cacheRead": 0,
-            "cacheWrite": 0
-          }
-        },
-        "nvidia/nemotron-3-ultra-550b-a55b": {
-          "cost": {
-            "input": 0.625,
-            "output": 3.125,
-            "cacheRead": 0.1875,
+            "input": 0.15,
+            "output": 0.6,
+            "cacheRead": 0.075,
             "cacheWrite": 0
           },
-          "maxTokens": 32768
+          "maxTokens": 65536
         },
-        "qwen/qwen3-vl-30b-a3b-instruct": {
+        "z-ai/glm-4.6": {
           "cost": {
-            "input": 0.13,
-            "output": 0.52,
-            "cacheRead": 0,
+            "input": 0.5,
+            "output": 2,
+            "cacheRead": 0.1,
             "cacheWrite": 0
           },
-          "maxTokens": 32768
-        },
-        "tencent/hy3": {
-          "cost": {
-            "input": 0.132,
-            "output": 0.528,
-            "cacheRead": 0.033,
-            "cacheWrite": 0
-          }
-        },
-        "z-ai/glm-5.2": {
           "maxTokens": 131072
-        },
-        "z-ai/glm-5.3-flash": {
-          "cost": {
-            "input": 0.09,
-            "output": 0.3,
-            "cacheRead": 0.018,
-            "cacheWrite": 0
-          }
         },
         "~deepseek/deepseek-flash-latest": {
           "maxTokens": 943718
@@ -182,95 +115,38 @@
           },
           "maxTokens": 384000
         },
-        "~moonshotai/kimi-latest": {
+        "~deepseek/deepseek-v4-flash-latest": {
           "cost": {
-            "input": 2,
-            "output": 11.2,
-            "cacheRead": 0.232,
-            "cacheWrite": 0
-          }
-        },
-        "~z-ai/glm-latest": {
-          "cost": {
-            "input": 0.833,
-            "output": 2.618,
-            "cacheRead": 0.13685,
+            "input": 0.0549,
+            "output": 0.1734,
+            "cacheRead": 0.0087,
             "cacheWrite": 0
           },
           "maxTokens": 943718
         }
       }
     },
-    "poe": {
+    "vercel-ai-gateway": {
       "models": [
         {
-          "id": "ds-v4.1-flash-el",
-          "name": "DS-V4.1-Flash-EL",
-          "api": "openai-completions",
-          "reasoning": false,
+          "id": "alibaba/qwen3.8-omni-flash",
+          "name": "Qwen 3.8 Omni Flash",
+          "api": "anthropic-messages",
+          "reasoning": true,
           "input": [
             "text",
             "image"
           ],
           "cost": {
-            "input": 0.303,
-            "output": 1.2121,
-            "cacheRead": 0,
+            "input": 0.15,
+            "output": 0.47,
+            "cacheRead": 0.016,
             "cacheWrite": 0
           },
           "contextWindow": 1000000,
-          "maxTokens": 8192
+          "maxTokens": 131072
         }
       ]
-    },
-    "vercel-ai-gateway": {
-      "modelOverrides": {
-        "alibaba/qwen3-next-80b-a3b-instruct": {
-          "contextWindow": 262114,
-          "maxTokens": 262114
-        },
-        "alibaba/qwen3-next-80b-a3b-thinking": {
-          "contextWindow": 262144,
-          "maxTokens": 262144
-        },
-        "alibaba/qwen3.8-max": {
-          "cost": {
-            "input": 2,
-            "output": 6,
-            "cacheRead": 0.25,
-            "cacheWrite": 0
-          },
-          "contextWindow": 262144
-        },
-        "deepseek/deepseek-v4.1-flash": {
-          "cost": {
-            "input": 0.3,
-            "output": 1.2,
-            "cacheRead": 0.03,
-            "cacheWrite": 0
-          },
-          "contextWindow": 1048576,
-          "maxTokens": 32768
-        },
-        "moonshotai/kimi-k2.5": {
-          "cost": {
-            "input": 0.6,
-            "output": 3,
-            "cacheRead": 0,
-            "cacheWrite": 0
-          },
-          "contextWindow": 256000,
-          "maxTokens": 256000
-        },
-        "openai/gpt-oss-20b": {
-          "cost": {
-            "input": 0.03,
-            "output": 0.14,
-            "cacheRead": 0,
-            "cacheWrite": 0
-          }
-        }
-      }
     }
   }
 }
