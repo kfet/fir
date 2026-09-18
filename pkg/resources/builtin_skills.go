@@ -13,6 +13,7 @@ import (
 
 	"github.com/kfet/fir/pkg/cache"
 	"github.com/kfet/fir/pkg/envvars"
+	"github.com/kfet/fir/pkg/mcp"
 )
 
 //go:embed builtin_skills
@@ -48,7 +49,7 @@ func builtinSkillsHash() (string, error) {
 		if err != nil {
 			return err
 		}
-		if d.Name() == "SKILL.md" {
+		if isExpandable(d.Name()) {
 			data = expandSkillPlaceholders(data)
 		}
 		h.Write(data)
@@ -133,8 +134,8 @@ func extractBuiltinSkillsTo() (string, error) {
 		if strings.HasSuffix(path, ".sh") {
 			perm = 0o755
 		}
-		// Expand template placeholders in SKILL.md files.
-		if d.Name() == "SKILL.md" {
+		// Expand template placeholders in Markdown files.
+		if isExpandable(d.Name()) {
 			data = expandSkillPlaceholders(data)
 		}
 		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
@@ -250,16 +251,42 @@ func LoadBuiltinSkills() LoadSkillsResult {
 	return LoadSkillsResult{Skills: skills, Diagnostics: diagnostics}
 }
 
-// expandSkillPlaceholders replaces known template markers in builtin SKILL.md
-// files so that documentation stays in sync with the code.
+// isExpandable reports whether a builtin-skill file participates in
+// placeholder expansion. Every Markdown file does, not just SKILL.md, so a
+// skill can park generated reference material in a companion resource file and
+// load it on demand instead of inlining it into an already long SKILL.md.
+func isExpandable(name string) bool { return strings.HasSuffix(name, ".md") }
+
+// expandSkillPlaceholders replaces known template markers in builtin skill
+// Markdown files so that documentation stays in sync with the code.
+//
+// This is how fir avoids hand-written mirrors of Go declarations: rather than
+// restating a struct in prose (which goes stale silently), the authoritative
+// source is embedded in its own package and injected here at load time.
 //
 // Supported placeholders:
 //
-//	{{FIR_ENV_VARS_TABLE}} — Markdown table of all public environment variables.
+//	{{FIR_ENV_VARS_TABLE}}       — Markdown table of all public environment variables.
+//	{{FIR_MCP_CONFIG_CONTRACT}}  — verbatim source of pkg/mcp/config_contract.go.
 func expandSkillPlaceholders(data []byte) []byte {
 	s := string(data)
-	if strings.Contains(s, "{{FIR_ENV_VARS_TABLE}}") {
-		s = strings.ReplaceAll(s, "{{FIR_ENV_VARS_TABLE}}", envvars.FormatMarkdownTable())
+	for _, p := range skillPlaceholders {
+		if strings.Contains(s, p.marker) {
+			s = strings.ReplaceAll(s, p.marker, p.content())
+		}
 	}
 	return []byte(s)
+}
+
+// skillPlaceholders lists each marker with the generator producing its
+// content. A slice, not a map: the expanded bytes feed builtinSkillsHash, so
+// expansion order must be fixed even if one placeholder's content ever
+// contains another's marker. Content is a func so nothing is computed unless a
+// skill asks for it.
+var skillPlaceholders = []struct {
+	marker  string
+	content func() string
+}{
+	{"{{FIR_ENV_VARS_TABLE}}", envvars.FormatMarkdownTable},
+	{"{{FIR_MCP_CONFIG_CONTRACT}}", func() string { return mcp.ConfigContractSource }},
 }

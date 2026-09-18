@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Changed
+- **`self` skill MCP reference is now the source, not a copy of it**: the user-facing config contract lives in `pkg/mcp/config_contract.go`, is embedded into the binary as `mcp.ConfigContractSource`, and is served as the on-demand skill resource `self/mcp-config-contract.md`. The hand-written field-by-field enumeration in `SKILL.md` is gone; the skill now carries only operational judgement (worked examples, mode selection, failure modes).
+- **Skill placeholder expansion applies to every builtin `.md` file**, not just `SKILL.md`, so generated reference material can live in a companion resource file.
+
+### Removed
+- **Forward prose drift guard for the MCP reference** (the reflection test asserting every json tag appears in `SKILL.md`): an undocumented field is now structurally impossible. Replaced by AST tests in `pkg/mcp` asserting the contract file declares exactly the contract — only exported types and consts, and every type reachable from `ConfigFile`. The inverse guard (no stale keys in the skill's prose) is kept.
+
+
 ## [1.15.0] - 2026-09-18
 
 ### Changed
