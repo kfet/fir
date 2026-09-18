@@ -99,6 +99,23 @@ type AuthConfig struct {
 	// this URI, so the port must be free when you log in. Deployments that
 	// need this normally also issue a pre-registered ClientID; set both.
 	RedirectURI string `json:"redirect_uri,omitempty"`
+	// AllowPrivateNetwork permits the OAuth discovery and token requests to
+	// reach a private or otherwise non-public address. By default the MCP SDK
+	// installs a hardened transport that refuses to connect to private,
+	// loopback, link-local or unique-local addresses, so an authorization
+	// server hosted on an internal network is unreachable.
+	//
+	// This relaxes only *where* the OAuth legs may connect. It does not relax
+	// any transport requirement: plain http to a non-loopback host is still
+	// refused, so a bearer token is never sent in cleartext. Nor does it make
+	// a private IP *literal* usable — the SDK rejects those at the URL level
+	// with no opt-out, so "https://192.168.1.10/" stays blocked. The case this
+	// enables is a private DNS name with a real certificate, e.g.
+	// "https://mcp.corp.internal/".
+	//
+	// Only meaningful when the resolved mode runs the OAuth chain, i.e.
+	// AuthModeAuto or AuthModeOAuth; it is rejected in bearer and none mode.
+	AllowPrivateNetwork bool `json:"allow_private_network,omitempty"`
 }
 
 // ResolveMode returns the effective AuthMode for a config, applying the
@@ -152,6 +169,13 @@ func (a *AuthConfig) Validate() error {
 		if _, err := validateRedirectURI(a.RedirectURI); err != nil {
 			return fmt.Errorf("auth.redirect_uri: %w", err)
 		}
+	}
+	if a.AllowPrivateNetwork && (mode == AuthModeBearer || mode == AuthModeNone) {
+		// The flag only widens where the OAuth discovery and token legs may
+		// connect, and neither runs in these modes. Rejecting it loudly stops
+		// a user believing it is what lets their static token reach an
+		// internal host — nothing on the data path consults it.
+		return fmt.Errorf("auth.allow_private_network is not used in mode %q; remove it or use mode %q", mode, AuthModeOAuth)
 	}
 	return nil
 }

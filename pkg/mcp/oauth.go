@@ -189,6 +189,24 @@ func newServerAuth(name string, cfg ServerConfig, store credentialStore) (*serve
 	if cfg.Auth != nil {
 		sa.cfg = *cfg.Auth
 	}
+	if sa.cfg.AllowPrivateNetwork {
+		// The SDK's newDiscoveryClient (oauthex/oauth2.go:104-113) only
+		// installs its hardened defaultDiscoveryTransport — the one whose
+		// Control hook refuses private/loopback/link-local peers — when the
+		// caller's client has no *http.Transport with a non-nil DialContext
+		// or DialTLSContext. A non-nil DialContext is therefore the SDK's
+		// documented opt-out signal: it means "the caller owns dialing".
+		//
+		// So hand it the stdlib default transport with the stdlib default
+		// dialer written out explicitly, purely so DialContext is non-nil.
+		// Behaviour is otherwise identical to http.DefaultTransport.
+		tr := http.DefaultTransport.(*http.Transport).Clone()
+		tr.DialContext = (&net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext
+		sa.hc.Transport = tr
+	}
 	return sa, nil
 }
 

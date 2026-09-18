@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Added
+- **MCP `auth.allow_private_network`**: per-server opt-in letting OAuth discovery/token traffic reach an authorization server on a private network. Sets an explicit `DialContext` on the OAuth HTTP client, which is the go-sdk's documented signal to skip its hardened discovery transport. Transport requirements are unchanged — plaintext http to a non-loopback host is still refused, and private IP literals remain blocked by the SDK; this enables private DNS names with real certificates (e.g. `https://mcp.corp.internal/`). Rejected with `"bearer"` and `"none"`, where it would be dead config.
+
 ## [1.13.1] - 2026-09-17
 
 ### Changed

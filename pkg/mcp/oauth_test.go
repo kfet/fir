@@ -951,6 +951,39 @@ func TestNewServerAuthDisabledAndInvalid(t *testing.T) {
 	require.ErrorContains(t, err, "must be absolute")
 }
 
+func TestNewServerAuthAllowPrivateNetworkTransport(t *testing.T) {
+	// Dead config where the OAuth chain never runs, exactly like
+	// authorization_servers and redirect_uri.
+	for _, a := range []*AuthConfig{
+		{Mode: AuthModeBearer, Token: "t", AllowPrivateNetwork: true},
+		{Token: "t", AllowPrivateNetwork: true},
+		{Mode: AuthModeNone, AllowPrivateNetwork: true},
+	} {
+		require.ErrorContains(t, a.Validate(), "auth.allow_private_network is not used in mode")
+	}
+	require.NoError(t, (&AuthConfig{AllowPrivateNetwork: true}).Validate())
+
+	// Default: no Transport, so the SDK installs its hardened
+	// defaultDiscoveryTransport with the private-address Control hook.
+	sa, err := newServerAuth("x", ServerConfig{Transport: "streamable", URL: "https://x/mcp"}, credentialStore{})
+	require.NoError(t, err)
+	require.NotNil(t, sa)
+	require.Nil(t, sa.hc.Transport)
+	require.Nil(t, sa.tokenHTTPClient().Transport)
+
+	// Opted in: a transport with a non-nil DialContext, the SDK's documented
+	// opt-out signal.
+	sa, err = newServerAuth("x", ServerConfig{Transport: "streamable", URL: "https://x/mcp",
+		Auth: &AuthConfig{AllowPrivateNetwork: true}}, credentialStore{})
+	require.NoError(t, err)
+	require.NotNil(t, sa.hc.Transport)
+	tr, ok := sa.hc.Transport.(*http.Transport)
+	require.True(t, ok)
+	require.NotNil(t, tr.DialContext)
+	// The token leg must reuse the same transport.
+	require.Equal(t, sa.hc.Transport, sa.tokenHTTPClient().Transport)
+}
+
 func TestAuthRequiredErrorMessage(t *testing.T) {
 	base := errors.New("boom")
 	err := &AuthRequiredError{Server: "gh", Reason: "token revoked", Cause: base}
