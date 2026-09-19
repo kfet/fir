@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+## [1.17.0] - 2026-09-19
+
+### Changed
+- **Model catalog regenerated**: added `opencode/deepseek-v4.1-flash`, `opencode/qwen3.8-flash` (+2 on aggregators); removed `kimi-coding/k3`, `kimi-coding/k3-256k`, `kimi-coding/kimi-for-coding`, `kimi-coding/kimi-for-coding-highspeed`; 19 model(s) with changed pricing/limits.
+
+### Added
+- **`wt` skill reaps its own litter**: new `scripts/gc.sh` kills tmux windows left behind by finished worktree agents, and the skill runs it after every spawn. Classification comes from tmux alone — no bookkeeping. A window with no agent process is reaped when its worktree is gone or it has been idle for more than three days; a window with a live agent is only ever reported, never killed. Liveness is read from the pane's process tree, because `spawn.sh` starts the agent as `fir ...; exec $SHELL` and tmux therefore reports the pane command as the shell; any live pane protects the whole window.
+
 ## [1.16.0] - 2026-09-18
 
 ### Changed
