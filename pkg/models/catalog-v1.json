@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-09-18T01:05:00Z",
+  "generatedAt": "2026-09-19T01:01:27Z",
   "providers": {
     "openrouter": {
       "models": [
         {
-          "id": "qwen/qwen3.8-27b:free",
-          "name": "Qwen: Qwen3.8 27B (free)",
+          "id": "prism-ml/ternary-bonsai-2-27b",
+          "name": "PrismML: Ternary Bonsai 2 27B",
           "api": "openai-completions",
           "reasoning": true,
           "input": [
@@ -14,139 +14,152 @@
             "image"
           ],
           "cost": {
-            "input": 0,
-            "output": 0,
+            "input": 0.075,
+            "output": 0.5,
             "cacheRead": 0,
             "cacheWrite": 0
           },
           "contextWindow": 262144,
-          "maxTokens": 235929
-        },
-        {
-          "id": "unbiased/pareto",
-          "name": "Pareto",
-          "api": "openai-completions",
-          "reasoning": false,
-          "input": [
-            "text",
-            "image"
-          ],
-          "cost": {
-            "input": 2.5,
-            "output": 7.5,
-            "cacheRead": 0.25,
-            "cacheWrite": 0
-          },
-          "contextWindow": 262144,
-          "maxTokens": 131072
+          "maxTokens": 32768
         }
       ],
       "modelOverrides": {
-        "deepseek/deepseek-chat": {
-          "cost": {
-            "input": 0.32,
-            "output": 0.89,
-            "cacheRead": 0,
-            "cacheWrite": 0
-          },
-          "maxTokens": 16384
-        },
         "deepseek/deepseek-v4-flash": {
           "cost": {
-            "input": 0.088606,
-            "output": 0.177212,
-            "cacheRead": 0.0177212,
-            "cacheWrite": 0
-          }
-        },
-        "deepseek/deepseek-v4-flash-vision-exp": {
-          "cost": {
-            "input": 0.2156,
-            "output": 0.6468,
-            "cacheRead": 0.00686,
-            "cacheWrite": 0
-          },
-          "maxTokens": 262144
-        },
-        "deepseek/deepseek-v4-pro-0813": {
-          "cost": {
-            "input": 0.66,
-            "output": 1.98,
-            "cacheRead": 0.022,
+            "input": 0.04844,
+            "output": 0.09688,
+            "cacheRead": 0.009688,
             "cacheWrite": 0
           },
           "maxTokens": 384000
         },
-        "moonshotai/kimi-k3": {
+        "deepseek/deepseek-v4-pro": {
           "cost": {
-            "input": 2.1,
-            "output": 10.95,
-            "cacheRead": 0.23,
-            "cacheWrite": 0
-          }
-        },
-        "openai/gpt-oss-120b": {
-          "cost": {
-            "input": 0.15,
-            "output": 0.6,
-            "cacheRead": 0.075,
+            "input": 0.66555,
+            "output": 1.3311,
+            "cacheRead": 0.0554625,
             "cacheWrite": 0
           },
-          "maxTokens": 65536
+          "maxTokens": 384000
         },
-        "z-ai/glm-4.6": {
+        "deepseek/deepseek-v4-pro-0813": {
           "cost": {
-            "input": 0.5,
-            "output": 2,
-            "cacheRead": 0.1,
+            "input": 0.57816,
+            "output": 1.73448,
+            "cacheRead": 0.018396,
+            "cacheWrite": 0
+          },
+          "maxTokens": 393216
+        },
+        "meta/muse-glimmer-30b": {
+          "cost": {
+            "input": 0.35,
+            "output": 1.5,
+            "cacheRead": 0.04,
+            "cacheWrite": 0
+          },
+          "maxTokens": 117964
+        },
+        "moonshotai/kimi-k3": {
+          "cost": {
+            "input": 1.95,
+            "output": 10.92,
+            "cacheRead": 0.2262,
+            "cacheWrite": 0
+          },
+          "maxTokens": 943718
+        },
+        "nvidia/nemotron-3-ultra-550b-a55b": {
+          "cost": {
+            "input": 0.6,
+            "output": 2.4,
+            "cacheRead": 0.12,
+            "cacheWrite": 0
+          },
+          "maxTokens": 182520
+        },
+        "nvidia/nemotron-3.5-lightning": {
+          "cost": {
+            "input": 0.07,
+            "output": 0.2,
+            "cacheRead": 0.04,
+            "cacheWrite": 0
+          },
+          "maxTokens": 235929
+        },
+        "qwen/qwen3-vl-30b-a3b-instruct": {
+          "cost": {
+            "input": 0.2,
+            "output": 0.7,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          },
+          "maxTokens": 32768
+        },
+        "z-ai/glm-5.2": {
+          "cost": {
+            "input": 0.5544,
+            "output": 1.7424,
+            "cacheRead": 0.10296,
+            "cacheWrite": 0
+          },
+          "maxTokens": 131072
+        },
+        "z-ai/glm-5.3": {
+          "cost": {
+            "input": 0.91,
+            "output": 2.86,
+            "cacheRead": 0.169,
             "cacheWrite": 0
           },
           "maxTokens": 131072
         },
         "~deepseek/deepseek-flash-latest": {
+          "cost": {
+            "input": 0.135,
+            "output": 0.54,
+            "cacheRead": 0.00405,
+            "cacheWrite": 0
+          },
           "maxTokens": 943718
         },
         "~deepseek/deepseek-pro-latest": {
           "cost": {
-            "input": 0.66,
-            "output": 1.98,
-            "cacheRead": 0.022,
+            "input": 0.57816,
+            "output": 1.73448,
+            "cacheRead": 0.018396,
             "cacheWrite": 0
           },
-          "maxTokens": 384000
+          "maxTokens": 393216
         },
         "~deepseek/deepseek-v4-flash-latest": {
           "cost": {
-            "input": 0.0549,
-            "output": 0.1734,
-            "cacheRead": 0.0087,
+            "input": 0.05104,
+            "output": 0.15312,
+            "cacheRead": 0.001624,
+            "cacheWrite": 0
+          },
+          "maxTokens": 131072
+        },
+        "~moonshotai/kimi-latest": {
+          "cost": {
+            "input": 1.95,
+            "output": 10.92,
+            "cacheRead": 0.2262,
             "cacheWrite": 0
           },
           "maxTokens": 943718
-        }
-      }
-    },
-    "vercel-ai-gateway": {
-      "models": [
-        {
-          "id": "alibaba/qwen3.8-omni-flash",
-          "name": "Qwen 3.8 Omni Flash",
-          "api": "anthropic-messages",
-          "reasoning": true,
-          "input": [
-            "text",
-            "image"
-          ],
+        },
+        "~z-ai/glm-latest": {
           "cost": {
-            "input": 0.15,
-            "output": 0.47,
-            "cacheRead": 0.016,
+            "input": 0.8918,
+            "output": 2.8028,
+            "cacheRead": 0.16562,
             "cacheWrite": 0
           },
-          "contextWindow": 1000000,
           "maxTokens": 131072
         }
-      ]
+      }
     }
   }
 }
