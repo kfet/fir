@@ -880,8 +880,30 @@ class TestSideQueryStream(unittest.TestCase):
         self.assertEqual(out, [])
         self.assertIsNone(stream.result)
         self.assertEqual(stream.error, "boom")
+        # No structured detail attached — callers must see None, not {}.
+        self.assertIsNone(stream.error_data)
         with self.assertRaises(RuntimeError):
             stream.collect()
+
+    def test_error_data_is_surfaced(self):
+        # A scrubbed response arrives as an error; the reasoning level the
+        # host actually dispatched travels in the error's `data`, and is the
+        # only way a caller can tell a downgraded "reasoning off" retry from
+        # an honoured one.
+        stream, q, results, _dq, _p = self._make_stream()
+        results[7] = {
+            "error": {"message": "no usable content", "data": {"reasoning_effort": "minimal"}}
+        }
+        q.put(fir_ext._SIDE_QUERY_END)
+        list(stream)
+        self.assertEqual(stream.error_data, {"reasoning_effort": "minimal"})
+
+    def test_non_dict_error_data_is_ignored(self):
+        stream, q, results, _dq, _p = self._make_stream()
+        results[7] = {"error": {"message": "boom", "data": "not-an-object"}}
+        q.put(fir_ext._SIDE_QUERY_END)
+        list(stream)
+        self.assertIsNone(stream.error_data)
 
     def test_idle_timeout(self):
         stream, _q, _r, _dq, _p = self._make_stream(idle_timeout=0.05)

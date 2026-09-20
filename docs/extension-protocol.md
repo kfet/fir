@@ -580,8 +580,14 @@ the highest available flagship when its configured default has gone away).
 Response:
 
 ```json
-{"models":[{"provider":"anthropic","id":"claude-opus-4-8","name":"Claude Opus 4.8"}]}
+{"models":[{"provider":"anthropic","id":"claude-opus-4-8","name":"Claude Opus 4.8","reasoning":true,"adaptive_thinking":true}]}
 ```
+
+`reasoning` marks a model that thinks at all; `adaptive_thinking` marks one
+whose thinking is **always on** — such a model cannot honour `effort:"off"`
+(the transport downgrades it to minimal). Both are omitted when false. An
+extension that needs a genuinely thinking-free call routes it to a candidate
+with `adaptive_thinking` unset.
 
 Hosts that predate this verb reply with a method-not-found error; SDK helpers
 (`ctx.available_models()`) swallow it and return `[]` so callers degrade to
@@ -838,6 +844,21 @@ when zero: `tokens_in` (uncached prompt), `tokens_out` (completion),
 `cache_read` and `cache_write` (prompt-cache hit and write sizes). These make
 the advisor path's prompt-cache behaviour observable from an extension — the
 `aside` extension renders them as `in 1.2k · read 48.3k · write 612 · out 900`.
+
+The streaming terminating response also carries `reasoning_effort`: the
+thinking level the call was **actually dispatched with**, which is not always
+the one requested. A request to disable thinking (`effort:"off"`) against an
+always-on adaptive model is downgraded to minimal effort by the transport, so
+an extension that turns reasoning off in order to *change* the response must
+check this field before reading the answer as a reasoning-off datapoint.
+
+Because a scrubbed ("no usable content") response arrives as an **error**,
+that same field travels in the JSON-RPC error's `data` object on the failure
+path — omitted when unknown:
+
+```json
+{"jsonrpc":"2.0","id":1015,"error":{"code":-32000,"message":"side-query: … no usable content (blocks: [thinking(th=0,sig=544)])","data":{"reasoning_effort":"minimal"}}}
+```
 
 `side_query/delta` notification params:
 

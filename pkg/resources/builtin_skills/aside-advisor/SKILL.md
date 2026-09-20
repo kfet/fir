@@ -41,7 +41,10 @@ When framing the question, instruct the advisor to be brief: *"Respond in under 
 
 ## If the call comes back "redacted reasoning only"
 
-The advisor reasoned and the provider scrubbed the trace, leaving nothing to return. This is deterministic on **your question combined with your session transcript**, not a flaky model — another model gets the byte-identical input and fails identically, so the chain stops after one reasoning-off retry instead of walking to other models. Only you can fix it: **rephrase**. Ask a narrower, less charged question, and avoid asking the advisor to reason *about* sensitive material quoted earlier in the session (credentials, access-control probing, anything that reads as an attack). Reword and call again — that usually succeeds on the first candidate.
+The advisor reasoned and the provider scrubbed the trace, leaving nothing to return. The extension retries once with reasoning turned off — with nothing left to scrub, the model must emit text or a legible refusal.
+
+- If that retry **really ran with thinking disabled** and was still redacted, the remaining explanation is your **question combined with your session transcript**, not a flaky model: other candidates get the byte-identical input, so the chain stops and hands you a diagnosis. Only you can fix it — **rephrase**. Ask a narrower, less charged question, and avoid asking the advisor to reason *about* sensitive material quoted earlier in the session (credentials, access-control probing, anything that reads as an attack). Reword and call again — that usually succeeds on the first candidate.
+- If the model has **always-on thinking** (most current Anthropic models), the request to disable reasoning is downgraded to minimal effort and the "retry" was the same call twice. Nothing was tested, so the walk advances instead, preferring a candidate whose thinking can genuinely be switched off. If the whole chain was like that, the error says so — reword, and/or configure an advisor candidate that can actually disable reasoning.
 
 An answer prefixed `(reasoning off)` is degraded: the advisor produced it with reasoning disabled after a scrub, so weigh it as a quick opinion rather than a considered one.
 

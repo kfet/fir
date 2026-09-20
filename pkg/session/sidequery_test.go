@@ -230,3 +230,75 @@ func TestSideQueryStream_ReportsCacheOnlyUsage(t *testing.T) {
 		t.Errorf("usage deltas = %+v", got)
 	}
 }
+
+// installRealStreamSimple wires DefaultStreamFn through the REAL
+// ai.StreamSimple against a throwaway registry, so the reasoning policy
+// (including the adaptive thinking-off downgrade) actually runs against
+// *model*'s flags rather than being stubbed out.
+func installRealStreamSimple(t *testing.T, model *ai.Model) {
+	t.Helper()
+	reg := ai.NewRegistry()
+	reg.RegisterApiProvider(&ai.ApiProvider{
+		Api: "sq-obs-api",
+		StreamSimple: func(_ context.Context, _ *core.Model, _ core.Context, _ *core.SimpleStreamOptions) *core.AssistantMessageEventStream {
+			msg := &core.AssistantMessage{
+				Content:    []core.AssistantContent{core.NewTextContent("advice")},
+				StopReason: core.StopReasonStop,
+			}
+			s := core.NewAssistantMessageEventStream()
+			go func() {
+				s.Push(core.AssistantMessageEvent{Type: core.EventDone, Message: msg})
+				s.End(msg)
+			}()
+			return s
+		},
+	}, "")
+
+	prev := agent.DefaultStreamFn
+	t.Cleanup(func() { agent.DefaultStreamFn = prev })
+	agent.DefaultStreamFn = func(ctx context.Context) agent.StreamFn {
+		return func(_ *core.Model, prompt core.Context, opts *core.SimpleStreamOptions) *core.AssistantMessageEventStream {
+			return ai.StreamSimple(ctx, reg, model, prompt, opts)
+		}
+	}
+}
+
+// TestSideQueryStream_ReportsResolvedReasoning: a caller that asks for
+// thinking-off must be able to see that an always-on adaptive model got
+// minimal effort instead. The aside extension's redacted-reasoning retry
+// reads an unchanged answer as evidence otherwise.
+func TestSideQueryStream_ReportsResolvedReasoning(t *testing.T) {
+	cases := []struct {
+		name      string
+		model     *ai.Model
+		want      string
+		requested ai.ThinkingLevel
+	}{
+		{
+			name:      "adaptive off is downgraded",
+			model:     &ai.Model{API: "sq-obs-api", ID: "adaptive", Provider: ai.ProviderAnthropic, MaxTokens: 8192, Reasoning: true, AdaptiveThinking: true},
+			requested: ai.ThinkingOff,
+			want:      string(ai.ThinkingMinimal),
+		},
+		{
+			name:      "non-adaptive off is honoured",
+			model:     &ai.Model{API: "sq-obs-api", ID: "plain", Provider: ai.ProviderAnthropic, MaxTokens: 8192, Reasoning: true},
+			requested: ai.ThinkingOff,
+			want:      string(ai.ThinkingOff),
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			installRealStreamSimple(t, tc.model)
+			s := newSideQueryTestSession(t)
+			res, err := s.SideQueryStream(context.Background(), "q",
+				&SideQueryOptions{Effort: tc.requested}, nil)
+			if err != nil {
+				t.Fatalf("SideQueryStream: %v", err)
+			}
+			if res.ReasoningEffort != tc.want {
+				t.Errorf("ReasoningEffort = %q, want %q", res.ReasoningEffort, tc.want)
+			}
+		})
+	}
+}

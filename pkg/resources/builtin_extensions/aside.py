@@ -911,6 +911,72 @@ def _is_empty_content_error(msg: str) -> bool:
 _REASONING_OFF_EFFORT = "off"
 
 
+def _resolved_effort_from_error(stream: Any) -> str | None:
+    """Read the actually-dispatched reasoning level off a FAILED stream.
+
+    The host attaches ``{"reasoning_effort": "..."}`` to the JSON-RPC error's
+    ``data`` object (docs/extension-protocol.md, "side_query"). Older hosts
+    and older SDKs have neither the field nor ``error_data`` — both degrade to
+    ``None``, i.e. "unknown", which callers must treat as "assume we got what
+    we asked for" so behaviour on an old host is unchanged.
+    """
+    data = getattr(stream, "error_data", None)
+    if not isinstance(data, dict):
+        return None
+    value = data.get("reasoning_effort")
+    return str(value) if value else None
+
+
+def _reasoning_off_honoured(resolved: str | None) -> bool:
+    """True unless the host positively reports that ``off`` was downgraded.
+
+    ``resolved`` is what the transport actually dispatched. ``ai.StreamSimple``
+    downgrades thinking-off to MINIMAL effort for always-on adaptive models
+    (``model.Reasoning && model.AdaptiveThinking``) — thinking stays on and its
+    trace is still scrubbed, so the "retry with reasoning off" was in fact a
+    byte-identical second call. Unknown (``None``) means an old host that does
+    not report the level; assume honoured, which preserves the pre-existing
+    behaviour rather than inventing a downgrade nobody observed.
+    """
+    return resolved is None or resolved == _REASONING_OFF_EFFORT
+
+
+def _can_disable_thinking(model_info: Mapping[str, Any]) -> bool:
+    """True when this model can genuinely run with reasoning turned off.
+
+    A model that does not reason at all trivially qualifies. One that reasons
+    adaptively (``adaptive_thinking``) does NOT: its thinking is always on and
+    an ``effort="off"`` request is silently downgraded.
+    """
+    if not model_info.get("reasoning"):
+        return True
+    return not model_info.get("adaptive_thinking")
+
+
+def _prefer_thinking_disablable(
+    ctx: fir_ext.Context, candidates: list[dict[str, str]]
+) -> list[dict[str, str]]:
+    """Reorder *candidates* so ones that can really disable thinking come first.
+
+    Called only after a reasoning-off retry turned out to be a no-op: at that
+    point the walk still has no evidence about the INPUT, and the cheapest way
+    to get some is a candidate where "off" is actually honoured. Stable, and a
+    pure reordering — nothing is dropped, so a host that reports no model flags
+    (older fir) leaves the chain exactly as it was.
+    """
+    flags: dict[tuple[str, str], bool] = {}
+    for m in _query_available_models(ctx):
+        provider, mid = m.get("provider"), m.get("id")
+        if provider and mid:
+            flags[(str(provider), str(mid))] = _can_disable_thinking(m)
+    if not flags:
+        return candidates
+    return sorted(
+        candidates,
+        key=lambda c: 0 if flags.get((c.get("provider", ""), c.get("model", "")), False) else 1,
+    )
+
+
 def _is_redacted_thinking_error(msg: str) -> bool:
     """True when a side_query came back as REDACTED REASONING ONLY.
 
@@ -934,13 +1000,23 @@ def _is_redacted_thinking_error(msg: str) -> bool:
 
     ``SideQueryStream`` snapshots the ENTIRE session transcript and appends
     the question, so every candidate in the chain receives byte-identical
-    input. The trigger is therefore ``question x transcript`` and it is
-    deterministic on that input: walking the chain re-measures a constant at
-    one advisor-rate call per candidate. Hence redacted does not advance —
-    it retries ONCE with reasoning off (nothing left to scrub, so the model
-    must emit text or a legible refusal) and then surfaces a diagnosis
-    telling the CALLING AGENT to rephrase, which is what actually worked in
-    the incident.
+    input. The original inference from that — "the trigger is
+    ``question x transcript``, deterministic on it, therefore never advance" —
+    over-read the evidence. The experiment could not have distinguished input
+    from route: a ``effort="off"`` request is DOWNGRADED to minimal effort on
+    an always-on adaptive model (``ai.resolveReasoning``), and all eight
+    attempts were adaptive Anthropic models, so not one of them ever ran with
+    thinking actually disabled. The 8/8 observation stands; "advancing cannot
+    help" does not follow from it.
+
+    What the routing does with that: redacted still does NOT advance
+    immediately — it retries ONCE with reasoning off, because with nothing
+    left to scrub the model must emit text or a legible refusal. But the walk
+    now checks whether the host HONOURED that request. If it did and the
+    response is still redacted, the input really is the remaining explanation
+    and the caller gets a diagnosis telling it to reword (which is what worked
+    in the incident). If the request was downgraded, nothing was tested: the
+    walk advances, preferring a candidate that can genuinely disable thinking.
     """
     if not msg or not _is_empty_content_error(msg):
         return False
@@ -950,6 +1026,11 @@ def _is_redacted_thinking_error(msg: str) -> bool:
 
 def _redacted_diagnosis(role_label: str | None, attempts: int, errs: list[str]) -> str:
     """Compose the terminal error for a redacted-reasoning-only failure.
+
+    Emitted ONLY after a retry that genuinely ran with thinking disabled and
+    was still redacted — see :func:`_reasoning_off_honoured`. With nothing
+    left to scrub, an empty response points at the input rather than at the
+    reasoning trace.
 
     ``advisor chain exhausted: <block summaries>`` told the calling agent
     nothing it could act on — it looked like flaky infrastructure, so the
@@ -963,14 +1044,42 @@ def _redacted_diagnosis(role_label: str | None, attempts: int, errs: list[str]) 
     return (
         f"{role} stopped after {attempts} attempt(s): every attempt returned "
         "REDACTED REASONING ONLY — a scrubbed thinking block with no text — "
-        "including a retry with reasoning disabled. This is deterministic on the "
-        "INPUT: the question combined with the current session context is very "
-        "likely tripping the provider's content policy, which scrubs the reasoning "
-        "trace and leaves nothing to return. Every other model would receive the "
-        "byte-identical transcript, so advancing to another model cannot help. "
+        "including a retry that really did run with reasoning disabled, where "
+        "there was nothing to scrub. That points at the INPUT: the question "
+        "combined with the current session context is very likely tripping the "
+        "provider's content policy, which scrubs the reasoning trace and leaves "
+        "nothing to return. Another model would receive the byte-identical "
+        "transcript, so advancing is unlikely to help. "
         "FIX (only the calling agent can do this): rephrase the question — make it "
         "narrower and less charged, and avoid asking about sensitive material "
         f"quoted earlier in the session — then call again. Evidence: {joined}"
+    )
+
+
+def _redacted_no_off_diagnosis(role_label: str | None, attempts: int, errs: list[str]) -> str:
+    """Terminal error when NO attempt could actually disable thinking.
+
+    Every candidate came back REDACTED REASONING ONLY, but each one has
+    always-on adaptive thinking, so the "retry with reasoning off" was
+    downgraded to minimal effort and never tested the hypothesis. Saying "we
+    tried with reasoning disabled" here would be false, and telling the caller
+    to reword would be a guess — so the diagnosis reports exactly what is
+    known and names both remedies.
+    """
+    role = role_label or "side query"
+    joined = "; ".join(errs)
+    return (
+        f"{role} failed after {attempts} attempt(s): every attempt returned "
+        "REDACTED REASONING ONLY — a scrubbed thinking block with no text — and "
+        "NONE of them could be retried with reasoning genuinely disabled: every "
+        "candidate has always-on adaptive thinking, so the request to turn "
+        "reasoning off was downgraded to minimal effort and the retry re-ran the "
+        "identical call. The cause is therefore not established: it may be the "
+        "input (question plus session context tripping a content policy) or the "
+        "scrub itself. FIX: rephrase the question — narrower, less charged, "
+        "avoiding sensitive material quoted earlier — and/or configure an advisor "
+        "candidate whose thinking can be switched off (a non-adaptive model), "
+        f"which is the probe that would settle it. Evidence: {joined}"
     )
 
 
@@ -1160,11 +1269,15 @@ def _run_side_query_with_card(
     model: str | None,
     provider: str | None,
     effort: str | None,
-) -> tuple[str | None, str | None, dict[str, int]]:
+) -> tuple[str | None, str | None, dict[str, int], str | None]:
     """Run a streaming side_query and publish a card for the whole lifecycle.
 
-    Returns ``(text, error, usage)`` — exactly one of text/error is non-None.
-    ``usage`` carries the call's token counters (empty when unknown). The
+    Returns ``(text, error, usage, resolved_effort)`` — exactly one of
+    text/error is non-None. ``usage`` carries the call's token counters (empty
+    when unknown). ``resolved_effort`` is the reasoning level the host
+    ACTUALLY dispatched with, or ``None`` when the host doesn't report it
+    (blocking flavor, older fir): it is NOT always the level we asked for —
+    ``off`` is downgraded to minimal effort on always-on adaptive models. The
     card identified by ``query/<unix-ms>`` is updated in place: starts at
     slug ``"running"``, ticks through size slugs as text accumulates, and
     settles on the LLM's finish reason (``"stop"``), the block-summary
@@ -1188,12 +1301,12 @@ def _run_side_query_with_card(
         except Exception as exc:
             err = str(exc)
             ctx.put_observable(key, slug="ERR", detail=err)
-            return None, err, {}
+            return None, err, {}, None
         if not text or not text.strip():
             ctx.put_observable(key, slug="empty", detail="advisor returned no content")
-            return None, "advisor returned no content", {}
+            return None, "advisor returned no content", {}, None
         ctx.put_observable(key, slug="stop", detail=text)
-        return text, None, {}
+        return text, None, {}, None
 
     stream = ctx.side_query_stream(question, model=model, provider=provider, effort=effort)
 
@@ -1245,7 +1358,7 @@ def _run_side_query_with_card(
     except Exception as exc:
         msg = str(exc)
         ctx.put_observable(key, slug="ERR", detail=f"{msg}\n\n{partial}")
-        return None, msg, usage
+        return None, msg, usage, None
 
     if stream.error is not None:
         err = stream.error
@@ -1257,7 +1370,10 @@ def _run_side_query_with_card(
             ctx.put_observable(key, slug=slug, detail=err)
         else:
             ctx.put_observable(key, slug="ERR", detail=f"{err}\n\n{partial}")
-        return None, err, usage
+        # A scrubbed response arrives as an ERROR, so the level the call
+        # actually ran at travels in the error's structured data — this is
+        # the one place the reasoning-off retry can learn it was downgraded.
+        return None, err, usage, _resolved_effort_from_error(stream)
 
     result = stream.result or {}
     text = result.get("text", partial)
@@ -1275,7 +1391,8 @@ def _run_side_query_with_card(
         slug=str(finish) or "stop",
         detail=f"{text}\n\n— {footer}" if footer else text,
     )
-    return text, None, usage
+    resolved = result.get("reasoning_effort") or None
+    return text, None, usage, (str(resolved) if resolved else None)
 
 
 def _run_side_query_chain(
@@ -1309,13 +1426,17 @@ def _run_side_query_chain(
         transient, the model is alive — cooling it off would degrade the chain
         over a hiccup).
       * A candidate returns REDACTED REASONING ONLY (``empty:redacted``) → the
-        same-candidate retry runs with reasoning OFF, and if that is redacted
-        too the walk STOPS with a diagnosis instead of advancing. Advancing
-        cannot help: every candidate receives the byte-identical transcript +
-        question, and that pair is what trips the scrub (8/8 across 3 models
-        plus the executor in the 2026-09-08 incident — see
-        :func:`_is_redacted_thinking_error`). Only the calling agent can fix
-        it, by rewording.
+        same-candidate retry runs with reasoning OFF. What happens next
+        depends on whether the host HONOURED that:
+          - honoured and still redacted → the walk STOPS with a diagnosis.
+            With nothing left to scrub, the remaining explanation is the
+            input, and every other candidate receives the byte-identical
+            transcript + question. Only the calling agent can fix it, by
+            rewording.
+          - DOWNGRADED (always-on adaptive model: ``off`` becomes minimal
+            effort) → the retry was the identical call twice and proved
+            nothing, so the walk ADVANCES, reordering what is left to prefer a
+            candidate that can genuinely disable thinking.
       * A candidate fails with a model-unavailability error → the model is
         cooled off for a backoff window and the walk ADVANCES to the next
         candidate.
@@ -1360,16 +1481,23 @@ def _run_side_query_chain(
     # redacted diagnosis so the caller can see the cost of re-measuring a
     # constant.
     attempts_made = 0
+    # True once ANY attempt in this walk really did run with thinking
+    # disabled. Only then is "we tried with reasoning off and it was still
+    # redacted" a statement we are entitled to make.
+    genuine_off_ran = False
     walk_key = f"aside/chain/{int(time.time() * 1000)}"
 
     def _attempt(
         *, model: str | None, provider: str | None, effort: str | None, label: str
-    ) -> tuple[str | None, str | None, dict[str, int], bool]:
+    ) -> tuple[str | None, str | None, dict[str, int], bool, bool]:
         """One candidate probe, with a single retry on empty content.
 
-        Returns ``(text, err, usage, degraded)``; ``degraded`` is True only
-        when the answer came from the reasoning-off retry, so the caller can
-        label it (a degraded path must never be silent).
+        Returns ``(text, err, usage, degraded, off_downgraded)``. ``degraded``
+        is True only when the answer came from a retry that GENUINELY ran with
+        reasoning off, so the caller can label it (a degraded path must never
+        be silent). ``off_downgraded`` is True when a reasoning-off retry was
+        requested but the host downgraded it — the retry then ran at the same
+        effort as the first call and proves nothing.
 
         At most two attempts: the second happens ONLY when the first failed
         with the transient empty-content class. A request-shaped error breaks
@@ -1384,6 +1512,12 @@ def _run_side_query_chain(
             reasoning got scrubbed"; with reasoning off there is nothing to
             scrub, so the model must produce text or a legible refusal — and
             the refusal is itself the diagnosis that was missing.
+
+            That request is not always granted: an always-on adaptive model
+            has ``off`` downgraded to minimal effort by the transport, so the
+            "degraded retry" is a byte-identical second call. The host reports
+            the level it actually used, and an unhonoured request is recorded
+            as such rather than counted as a reasoning-off datapoint.
           * everything else → an identical replay, as before: those classes
             really are transient blips.
 
@@ -1393,18 +1527,20 @@ def _run_side_query_chain(
         was considered and rejected — it invalidates that cached prefix and
         bills advisor-rate tokens on every degraded call.
         """
-        nonlocal attempts_made
+        nonlocal attempts_made, genuine_off_ran
         text: str | None = None
         err: str | None = None
         usage: dict[str, int] = {}
         use_effort = effort
         degraded = False
+        off_downgraded = False
         reasoning_off_next = False
         for attempt in range(2):
+            asked_off = False
             if attempt:
                 if reasoning_off_next:
                     use_effort = _REASONING_OFF_EFFORT
-                    degraded = use_effort != effort
+                    asked_off = True
                     slug = "retry:noreason"
                     detail = (
                         f"{label} returned redacted reasoning only — retrying once "
@@ -1419,21 +1555,42 @@ def _run_side_query_chain(
                 if _EMPTY_CONTENT_RETRY_BACKOFF > 0:
                     time.sleep(_EMPTY_CONTENT_RETRY_BACKOFF)
             attempts_made += 1
-            text, err, attempt_usage = _run_side_query_with_card(
+            text, err, attempt_usage, resolved = _run_side_query_with_card(
                 ctx, question, model=model, provider=provider, effort=use_effort
             )
             usage = _merge_usage(usage, attempt_usage)
+            if asked_off:
+                # Did the transport honour "off", or downgrade it? An
+                # always-on adaptive model gets minimal effort instead, so
+                # this second call was the first one again.
+                if _reasoning_off_honoured(resolved):
+                    genuine_off_ran = True
+                    degraded = use_effort != effort
+                else:
+                    off_downgraded = True
+                    ctx.put_observable(
+                        walk_key,
+                        slug="noreason:denied",
+                        detail=(
+                            f"{label} cannot disable thinking — asked for "
+                            f"reasoning off, host dispatched "
+                            f"'{resolved}'. The retry was not a reasoning-off "
+                            "retry."
+                        ),
+                    )
             if err is None or _is_request_shaped_error(err) or not _is_empty_content_error(err):
                 break
             reasoning_off_next = _is_redacted_thinking_error(err)
         if err is not None:
             # A degraded attempt that still failed produced no answer to label.
             degraded = False
-        return text, err, usage, degraded
+        return text, err, usage, degraded, off_downgraded
 
-    for cfg in chain:
+    pending = list(chain)
+    while pending:
+        cfg = pending.pop(0)
         label = f"{cfg['provider']}/{cfg['model']}"
-        text, err, usage, degraded = _attempt(
+        text, err, usage, degraded, off_downgraded = _attempt(
             model=cfg["model"],
             provider=cfg["provider"],
             effort=cfg.get("effort"),
@@ -1466,21 +1623,40 @@ def _run_side_query_chain(
             # can never earn a retry.
             return None, err, None, "", spent
         if _is_redacted_thinking_error(err):
-            # Redacted reasoning survived the reasoning-off retry. Do NOT
-            # advance: every remaining candidate — and the executor fallback —
-            # would receive the byte-identical transcript and question, and the
-            # 2026-09-08 incident measured exactly that, 8/8 redacted across 3
-            # models plus the executor in 77s (see
-            # _is_redacted_thinking_error). Stop and hand the caller a
-            # diagnosis it can act on: rewording is the only fix, and only the
-            # calling agent can do it.
             advisor_errs.append(f"{label}: {err}")
+            if off_downgraded:
+                # The "reasoning off" retry never happened: this candidate's
+                # thinking is always on, so the transport downgraded `off` to
+                # minimal effort and we simply made the same call twice. We
+                # have therefore learned NOTHING about the input yet — do not
+                # blame it, and do not stop. Advance, preferring a candidate
+                # where disabling thinking is actually honoured, because that
+                # is the probe that would settle the question.
+                failed_models.append(cfg["model"])
+                pending = _prefer_thinking_disablable(ctx, pending)
+                ctx.put_observable(
+                    walk_key,
+                    slug="advance:redacted",
+                    detail=(
+                        f"{label} redacted-reasoning-only, and it cannot disable "
+                        "thinking (the reasoning-off retry was downgraded) — "
+                        "advancing to a candidate that can\n\n" + err
+                    ),
+                )
+                continue
+            # Redacted reasoning survived a retry that REALLY ran with
+            # thinking disabled. Nothing was left to scrub and the response
+            # was still empty, so the trigger is the input, not the reasoning
+            # trace — and every remaining candidate receives the
+            # byte-identical transcript and question. Stop and hand the caller
+            # a diagnosis it can act on: rewording is the only fix, and only
+            # the calling agent can do it.
             ctx.put_observable(
                 walk_key,
                 slug="stop:redacted",
                 detail=(
-                    f"{label} redacted-reasoning-only with reasoning off — stopping "
-                    f"the walk (same input would fail on every candidate)\n\n{err}"
+                    f"{label} redacted-reasoning-only with reasoning genuinely off — "
+                    f"stopping the walk (same input would fail on every candidate)\n\n{err}"
                 ),
             )
             return (
@@ -1519,7 +1695,7 @@ def _run_side_query_chain(
     # Chain exhausted, stopped or empty → executor terminal fallback (the same
     # empty-content retry applies: the executor model is the last hope, one
     # blip must not sink the whole call).
-    text, err, usage, degraded = _attempt(
+    text, err, usage, degraded, _ = _attempt(
         model=None, provider=None, effort=None, label="executor model"
     )
     spent = _merge_usage(spent, usage)
@@ -1555,8 +1731,14 @@ def _run_side_query_chain(
     if _is_redacted_thinking_error(err):
         return (
             None,
-            _redacted_diagnosis(
-                role_label, attempts_made, [*advisor_errs, f"executor model: {err}"]
+            (
+                _redacted_diagnosis(
+                    role_label, attempts_made, [*advisor_errs, f"executor model: {err}"]
+                )
+                if genuine_off_ran
+                else _redacted_no_off_diagnosis(
+                    role_label, attempts_made, [*advisor_errs, f"executor model: {err}"]
+                )
             ),
             None,
             "",
@@ -1908,7 +2090,7 @@ def _agentic_probe(
         for attempt in range(2):
             if attempt and _EMPTY_CONTENT_RETRY_BACKOFF > 0:
                 time.sleep(_EMPTY_CONTENT_RETRY_BACKOFF)
-            text, err, usage = _run_side_query_with_card(
+            text, err, usage, _ = _run_side_query_with_card(
                 ctx,
                 question,
                 model=cfg["model"],

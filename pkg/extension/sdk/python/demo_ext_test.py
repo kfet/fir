@@ -198,6 +198,7 @@ class FakeFir:
                     "tokens_out": 7,
                     "cache_read": 4096,
                     "cache_write": 64,
+                    "reasoning_effort": "minimal",
                 }
             else:
                 result = {"ok": True, "text": "mock synthesis"}
@@ -697,6 +698,9 @@ class TestDemoTools(DemoTestCase):
         result = resp["result"]
         # The mock side_query returns "mock synthesis" — could be wrapped in content
         self.assertIsNotNone(result)
+        # The footer reports the reasoning level the call ACTUALLY ran at,
+        # which the mock reports as a downgraded "minimal".
+        self.assertIn("effort minimal", json.dumps(result))
         fake.stop()
 
     def test_batch_example_uses_side_query_stream(self) -> None:

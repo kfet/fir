@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/kfet/agent"
@@ -1704,6 +1705,16 @@ type SideQueryResult struct {
 	TokensOut  int `json:"tokens_out,omitempty"`
 	CacheRead  int `json:"cache_read,omitempty"`
 	CacheWrite int `json:"cache_write,omitempty"`
+
+	// ReasoningEffort is the thinking level the call was ACTUALLY dispatched
+	// with, as observed at the transport layer — not necessarily the one
+	// requested via SideQueryOptions.Effort. ai.StreamSimple downgrades
+	// thinking-off to minimal for always-on adaptive models (and when a
+	// provider rejects thinking-off), so a caller that asked for "off" in
+	// order to change the response must check this before treating the
+	// answer as a reasoning-off datapoint. Empty when unknown (e.g. no
+	// reasoning level reached the transport).
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 }
 
 // SideQuery makes a one-shot, ephemeral LLM call using the current session
@@ -1801,14 +1812,31 @@ func (s *AgentSession) SideQueryStream(ctx context.Context, question string, opt
 		}
 	}
 
-	text, msg, err := s.Agent.SimplePromptStream(withSideQuery(ctx), msgs, promptOpts, onEvent)
+	// Observe the reasoning level the transport actually dispatches with.
+	// ai.StreamSimple downgrades thinking-off for always-on adaptive models,
+	// so "what we asked for" and "what was sent" can differ — and the aside
+	// extension's redacted-reasoning retry depends on telling them apart.
+	// The last report wins (the thinking-off fallback can report twice); it
+	// is written from the stream goroutine and read only after
+	// SimplePromptStream returns, so an atomic keeps it race-free.
+	var resolvedReasoning atomic.Pointer[string]
+	sideQueryCtx := ai.WithReasoningObserver(withSideQuery(ctx), func(level ai.ThinkingLevel) {
+		lvl := string(level)
+		resolvedReasoning.Store(&lvl)
+	})
+
+	text, msg, err := s.Agent.SimplePromptStream(sideQueryCtx, msgs, promptOpts, onEvent)
+	resolvedEffort := ""
+	if v := resolvedReasoning.Load(); v != nil {
+		resolvedEffort = *v
+	}
 	if err != nil {
 		// Prefix with "side-query:" so callers (e.g. the aside extension) can
 		// surface a clear, attributable error to the main LLM instead of a
 		// raw, context-free API error string.
 		// Preserve any partial result available on the final message so the
 		// caller can persist what we did manage to get.
-		out := SideQueryResult{}
+		out := SideQueryResult{ReasoningEffort: resolvedEffort}
 		if msg != nil {
 			out.Blocks = agent.SummarizeBlocks(msg.Content)
 			out.FinishReason = string(msg.StopReason)
@@ -1838,13 +1866,14 @@ func (s *AgentSession) SideQueryStream(ctx context.Context, question string, opt
 	}
 
 	return SideQueryResult{
-		Text:         text,
-		Blocks:       agent.SummarizeBlocks(msg.Content),
-		FinishReason: string(msg.StopReason),
-		TokensIn:     msg.Usage.Input,
-		TokensOut:    msg.Usage.Output,
-		CacheRead:    msg.Usage.CacheRead,
-		CacheWrite:   msg.Usage.CacheWrite,
+		Text:            text,
+		Blocks:          agent.SummarizeBlocks(msg.Content),
+		FinishReason:    string(msg.StopReason),
+		TokensIn:        msg.Usage.Input,
+		TokensOut:       msg.Usage.Output,
+		CacheRead:       msg.Usage.CacheRead,
+		CacheWrite:      msg.Usage.CacheWrite,
+		ReasoningEffort: resolvedEffort,
 	}, nil
 }
 

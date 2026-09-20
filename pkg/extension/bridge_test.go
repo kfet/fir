@@ -1350,3 +1350,133 @@ func TestBridge_InboundListExtensions_EmptyIsArray(t *testing.T) {
 		t.Fatalf("expected [], got %s", string(*resp.Result))
 	}
 }
+
+// redactedSideQueryAPI fails the way a scrubbed response does: an error, with
+// a partial result that still knows which reasoning level was dispatched.
+type redactedSideQueryAPI struct {
+	*mockBridgeAPI
+	effort string
+}
+
+func (r *redactedSideQueryAPI) SideQueryStream(_ string, _ *session.SideQueryOptions, _ func(session.SideQueryDelta)) (session.SideQueryResult, error) {
+	return session.SideQueryResult{ReasoningEffort: r.effort},
+		errors.New("side-query: response had no usable content (blocks: [thinking(th=0,sig=940)])")
+}
+
+// TestBridge_SideQuery_ErrorCarriesResolvedReasoning: a redacted response
+// arrives as an ERROR, so the level actually dispatched has to travel in the
+// error's data — that is the only place the aside extension can learn its
+// "retry with reasoning off" was downgraded to minimal.
+func TestBridge_SideQuery_ErrorCarriesResolvedReasoning(t *testing.T) {
+	b, extCodec := pipePair(&InitResult{})
+	api := &redactedSideQueryAPI{mockBridgeAPI: newMockAPI(), effort: "minimal"}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = b.Run(ctx, api) }()
+
+	params := json.RawMessage(`{"question":"q","stream":true,"effort":"off"}`)
+	if err := extCodec.WriteRequest(7, "side_query", &params); err != nil {
+		t.Fatal(err)
+	}
+
+	var resp *Response
+	for resp == nil {
+		msg, err := extCodec.ReadMessage()
+		if err != nil {
+			t.Fatalf("ReadMessage: %v", err)
+		}
+		if r, ok := msg.(*Response); ok {
+			resp = r
+		}
+	}
+	if resp.Error == nil {
+		t.Fatal("expected an error response")
+	}
+	if resp.Error.Data == nil {
+		t.Fatal("expected error data carrying the resolved reasoning level")
+	}
+	var data SideQueryErrorData
+	if err := json.Unmarshal(*resp.Error.Data, &data); err != nil {
+		t.Fatalf("decode error data: %v", err)
+	}
+	if data.ReasoningEffort != "minimal" {
+		t.Errorf("reasoning_effort = %q, want %q", data.ReasoningEffort, "minimal")
+	}
+}
+
+// An unknown level must not invent a `data` object — extensions treat absence
+// as "assume the request was honoured", which is the old behaviour.
+func TestBridge_SideQuery_ErrorOmitsDataWhenLevelUnknown(t *testing.T) {
+	b, extCodec := pipePair(&InitResult{})
+	api := &redactedSideQueryAPI{mockBridgeAPI: newMockAPI()}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = b.Run(ctx, api) }()
+
+	params := json.RawMessage(`{"question":"q","stream":true}`)
+	if err := extCodec.WriteRequest(8, "side_query", &params); err != nil {
+		t.Fatal(err)
+	}
+
+	var resp *Response
+	for resp == nil {
+		msg, err := extCodec.ReadMessage()
+		if err != nil {
+			t.Fatalf("ReadMessage: %v", err)
+		}
+		if r, ok := msg.(*Response); ok {
+			resp = r
+		}
+	}
+	if resp.Error == nil {
+		t.Fatal("expected an error response")
+	}
+	if resp.Error.Data != nil {
+		t.Errorf("expected no error data, got %s", string(*resp.Error.Data))
+	}
+}
+
+// TestBridge_AvailableModels_CarriesThinkingFlags: an extension that needs a
+// genuinely thinking-free call must be able to pick a candidate where "off"
+// is honoured, so the adaptive flag has to cross the wire.
+func TestBridge_AvailableModels_CarriesThinkingFlags(t *testing.T) {
+	b, extCodec := pipePair(&InitResult{})
+	api := newMockAPI()
+	api.availableModels = []*ai.Model{
+		{Provider: "anthropic", ID: "adaptive", Name: "Adaptive", Reasoning: true, AdaptiveThinking: true},
+		{Provider: "anthropic", ID: "plain", Name: "Plain", Reasoning: true},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = b.Run(ctx, api) }()
+
+	if err := extCodec.WriteRequest(9, "available_models", nil); err != nil {
+		t.Fatal(err)
+	}
+	var resp *Response
+	for resp == nil {
+		msg, err := extCodec.ReadMessage()
+		if err != nil {
+			t.Fatalf("ReadMessage: %v", err)
+		}
+		if r, ok := msg.(*Response); ok {
+			resp = r
+		}
+	}
+	var got AvailableModelsResult
+	if err := json.Unmarshal(*resp.Result, &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(got.Models) != 2 {
+		t.Fatalf("models = %+v", got.Models)
+	}
+	if !got.Models[0].AdaptiveThinking || !got.Models[0].Reasoning {
+		t.Errorf("adaptive model lost its flags: %+v", got.Models[0])
+	}
+	if got.Models[1].AdaptiveThinking {
+		t.Errorf("plain model must not be adaptive: %+v", got.Models[1])
+	}
+}

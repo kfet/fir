@@ -333,12 +333,21 @@ def batch_example(params, ctx):
                     f"write {delta.cache_write} · out {delta.tokens_out}"
                 )
         if stream.error is not None:
+            # error_data carries structured detail about the failure — today
+            # `reasoning_effort`, the level actually dispatched (a thinking-off
+            # request is downgraded to minimal on always-on adaptive models).
+            effort = (stream.error_data or {}).get("reasoning_effort", "")
+            suffix = f" (reasoning_effort={effort})" if effort else ""
             return {
-                "content": [{"text": f"side_query failed: {stream.error}"}],
+                "content": [{"text": f"side_query failed: {stream.error}{suffix}"}],
                 "is_error": True,
             }
-        text = (stream.result or {}).get("text", partial)
-        return f"{text}\n\n[{usage}]" if usage else text
+        result = stream.result or {}
+        text = result.get("text", partial)
+        # The level the call really ran at — not necessarily the requested one.
+        effort = result.get("reasoning_effort", "")
+        footer = " · ".join(p for p in (usage, f"effort {effort}" if effort else "") if p)
+        return f"{text}\n\n[{footer}]" if footer else text
 
     return ctx.side_query(prompt)
 

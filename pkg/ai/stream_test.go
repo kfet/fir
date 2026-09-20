@@ -331,3 +331,104 @@ func TestStreamSimple_ThinkingOffErrorAfterStart(t *testing.T) {
 		t.Error("expected the error to reach the caller once output had started")
 	}
 }
+
+// --- Reasoning observation -------------------------------------------------
+
+// TestWithReasoningObserver_ReportsDowngrade pins the signal the aside
+// extension's redacted-reasoning retry depends on: a thinking-off request to
+// an always-on adaptive model is downgraded, and the observer says so. Without
+// it, a caller that asked for "off" reads an unchanged answer as new evidence.
+func TestWithReasoningObserver_ReportsDowngrade(t *testing.T) {
+	r := NewRegistry()
+	r.RegisterApiProvider(&ApiProvider{
+		Api: "obs-api",
+		StreamSimple: func(ctx context.Context, model *Model, prompt Context, options *SimpleStreamOptions) *AssistantMessageEventStream {
+			s := NewAssistantMessageEventStream()
+			final := &AssistantMessage{Content: []AssistantContent{NewTextContent("ok")}, StopReason: StopReasonStop}
+			go func() {
+				s.Push(AssistantMessageEvent{Type: EventStart, Partial: final})
+				s.Push(AssistantMessageEvent{Type: EventDone, Reason: StopReasonStop, Message: final})
+				s.End(final)
+			}()
+			return s
+		},
+	}, "")
+
+	prompt := Context{Messages: []Message{NewUserMsg("hi", 1000)}}
+
+	run := func(model *Model, want ThinkingLevel) {
+		t.Helper()
+		var seen []ThinkingLevel
+		ctx := WithReasoningObserver(context.Background(), func(l ThinkingLevel) {
+			seen = append(seen, l)
+		})
+		CompleteSimple(ctx, r, model, prompt, &SimpleStreamOptions{Reasoning: ThinkingOff})
+		if len(seen) == 0 {
+			t.Fatalf("%s: observer never fired", model.ID)
+		}
+		if got := seen[len(seen)-1]; got != want {
+			t.Errorf("%s: dispatched %q, observer reported %q", model.ID, want, got)
+		}
+	}
+
+	run(&Model{API: "obs-api", ID: "adaptive", Reasoning: true, AdaptiveThinking: true}, ThinkingMinimal)
+	run(&Model{API: "obs-api", ID: "plain", Reasoning: true}, ThinkingOff)
+}
+
+// TestWithReasoningObserver_ReportsFallbackRetry covers the other way an
+// unrequested level reaches the wire: the provider rejects thinking-off and
+// the transport transparently retries with minimal. The LAST report is the
+// level that produced the answer, so that is what the observer must end on.
+func TestWithReasoningObserver_ReportsFallbackRetry(t *testing.T) {
+	r := NewRegistry()
+	calls := 0
+	r.RegisterApiProvider(&ApiProvider{
+		Api: "obs-fb-api",
+		StreamSimple: func(ctx context.Context, model *Model, prompt Context, options *SimpleStreamOptions) *AssistantMessageEventStream {
+			calls++
+			s := NewAssistantMessageEventStream()
+			if calls == 1 {
+				go func() {
+					s.Push(AssistantMessageEvent{
+						Type:   EventError,
+						Reason: StopReasonError,
+						Error: &AssistantMessage{
+							ErrorMessage: `"thinking.type.disabled" is not supported for this model.`,
+						},
+					})
+					s.End(nil)
+				}()
+				return s
+			}
+			final := &AssistantMessage{Content: []AssistantContent{NewTextContent("ok")}, StopReason: StopReasonStop}
+			go func() {
+				s.Push(AssistantMessageEvent{Type: EventDone, Reason: StopReasonStop, Message: final})
+				s.End(final)
+			}()
+			return s
+		},
+	}, "")
+
+	var seen []ThinkingLevel
+	ctx := WithReasoningObserver(context.Background(), func(l ThinkingLevel) {
+		seen = append(seen, l)
+	})
+	model := &Model{API: "obs-fb-api", ID: "m", Reasoning: true}
+	prompt := Context{Messages: []Message{NewUserMsg("hi", 1000)}}
+	CompleteSimple(ctx, r, model, prompt, &SimpleStreamOptions{Reasoning: ThinkingOff})
+
+	if len(seen) != 2 || seen[0] != ThinkingOff || seen[1] != ThinkingMinimal {
+		t.Fatalf("expected reports [off minimal], got %v", seen)
+	}
+}
+
+// TestReportReasoning_NoObserverIsSafe: the overwhelmingly common case is a
+// context with no observer at all.
+func TestReportReasoning_NoObserverIsSafe(t *testing.T) {
+	reportReasoning(context.Background(), ThinkingOff)
+	//nolint:staticcheck // deliberately exercising the nil-ctx guard
+	reportReasoning(nil, ThinkingOff)
+	if got := WithReasoningObserver(context.Background(), nil); got == nil {
+		t.Fatal("nil observer must return a usable context")
+	}
+}

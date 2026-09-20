@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- **The advisor's "retry with reasoning off" was a no-op on always-on adaptive models, and the walk then blamed the input.** When a side query came back as REDACTED REASONING ONLY (a scrubbed thinking block with no text), `aside` retried the same candidate with `effort="off"` — nothing left to scrub, so the model must emit text or a legible refusal — and if that failed too it STOPPED the candidate walk and told the calling agent that only rewording could help. But `ai.resolveReasoning` downgrades thinking-off to minimal effort for any model with `Reasoning && AdaptiveThinking`, which every current Anthropic flagship is: thinking stayed on, the trace was still scrubbed, and the "degraded retry" was two identical calls. The extension could not see the downgrade, so an unchanged answer was read as fresh evidence. The 2026-09-08 forensics quoted in the code (8/8 redacted across three models) measured exactly this — no attempt in that experiment ever ran with thinking disabled. The transport now reports the reasoning level it ACTUALLY dispatched: on the `side_query` result as `reasoning_effort`, and — because a scrubbed response arrives as an *error* — in the JSON-RPC error's `data` object. `aside` only counts a reasoning-off retry that was honoured; a downgraded one advances the walk instead of stopping it, reordering the remaining candidates to prefer one that can genuinely disable thinking (`available_models` now carries `reasoning` / `adaptive_thinking`). The two false claims in the diagnosis and in the `aside-advisor` skill ("including a retry with reasoning disabled", "advancing to another model cannot help") are corrected, and a chain where nothing could disable thinking gets its own honest diagnosis rather than an assertion about the input.
+
 ## [1.18.0] - 2026-09-21
 
 ### Changed

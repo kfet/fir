@@ -2467,10 +2467,13 @@ class _FakeStream:
     content" case.
     """
 
-    def __init__(self, deltas, result=None, error=None):
+    def __init__(self, deltas, result=None, error=None, error_data=None):
         self._deltas = list(deltas)
         self.result = result
         self.error = error
+        # Structured detail attached to a failing response — the host puts
+        # the actually-dispatched reasoning level here.
+        self.error_data = error_data
         self._i = 0
 
     def __iter__(self):
@@ -3119,10 +3122,10 @@ class TestRedactedThinkingRouting(unittest.TestCase):
         # What happened, how many times.
         self.assertIn("2 attempt(s)", text)
         self.assertIn("REDACTED REASONING ONLY", text)
-        self.assertIn("reasoning disabled", text)
-        # Why another model cannot help.
+        self.assertIn("really did run with reasoning disabled", text)
+        # Why another model is unlikely to help.
         self.assertIn("content policy", text)
-        self.assertIn("advancing to another model cannot help", text)
+        self.assertIn("advancing is unlikely to help", text)
         # What the CALLING agent should do about it.
         self.assertIn("rephrase the question", text)
         # The per-candidate block summaries are kept as evidence.
@@ -3794,6 +3797,7 @@ class TestAgenticLoop(_AgenticBase):
                 reply,
                 None,
                 {"tokens_in": 10, "tokens_out": 5, "cache_read": 0, "cache_write": 0},
+                None,
             )
 
         with mock.patch.object(mod, "_run_side_query_with_card", side_effect=fake):
@@ -3933,6 +3937,199 @@ class TestAgenticToolSurface(unittest.TestCase):
             )
         self.assertEqual(run.call_args.args[0], "find X")
         self.assertEqual(run.call_args.kwargs["max_iterations"], 3)
+
+
+# ---------------------------------------------------------------------------
+# Reasoning-off retries that the host DOWNGRADED (always-on adaptive models)
+# ---------------------------------------------------------------------------
+
+_REDACTED_ERR_2 = "side-query: response had no usable content (blocks: [thinking(th=0,sig=1216)])"
+
+
+class TestDowngradedReasoningOffRetry(unittest.TestCase):
+    """``effort="off"`` is not always granted.
+
+    ``ai.resolveReasoning`` downgrades thinking-off to MINIMAL for a model with
+    always-on adaptive thinking, so the "retry with reasoning off" is the same
+    call twice — thinking stays on and is still scrubbed. The walk must not
+    read that as evidence about the input, and must not stop on it.
+    """
+
+    def setUp(self):
+        self.mod = _load_aside()
+        self.mod._ADVISOR = list(_RETRY_CHAIN)
+        self.mod._DELEGATE = None
+        # No backoff sleeps in unit tests.
+        self.mod._EMPTY_CONTENT_RETRY_BACKOFF = 0
+
+    def _ctx(self, behaviour, available=None):
+        """behaviour(model, effort) -> str (answer) | (error, resolved_effort)."""
+        calls = []
+
+        def factory(question, model, provider, effort):
+            calls.append((model, effort))
+            outcome = behaviour(model, effort)
+            if isinstance(outcome, tuple):
+                err, resolved = outcome
+                data = {"reasoning_effort": resolved} if resolved else None
+                return _FakeStream([], error=err, error_data=data)
+            return _FakeStream(
+                [{"type": "text", "text": outcome}],
+                result={"text": outcome, "finish_reason": "stop"},
+            )
+
+        ctx = _streaming_ctx(factory)
+        ctx.available_models = mock.MagicMock(return_value=available or _RETRY_AVAILABLE)
+        return ctx, calls
+
+    def test_predicate_treats_unknown_level_as_honoured(self):
+        # Old hosts report nothing; assuming a downgrade nobody observed would
+        # change behaviour on every one of them.
+        self.assertTrue(self.mod._reasoning_off_honoured(None))
+        self.assertTrue(self.mod._reasoning_off_honoured("off"))
+        self.assertFalse(self.mod._reasoning_off_honoured("minimal"))
+        self.assertFalse(self.mod._reasoning_off_honoured("low"))
+
+    def test_downgraded_retry_advances_instead_of_stopping(self):
+        # Every candidate is adaptive: `off` comes back as `minimal`. The
+        # first candidate must NOT end the walk.
+        def behaviour(model, effort):
+            if model == "claude-fable-5":
+                return (_REDACTED_ERR, "minimal" if effort == "off" else "high")
+            return "opus answered"
+
+        ctx, calls = self._ctx(behaviour)
+        result = self.mod._run_aside([], "q", ctx, escalate=True)
+        self.assertFalse(result["is_error"], result["content"][0]["text"])
+        text = result["content"][0]["text"]
+        self.assertIn("opus answered", text)
+        # Probe, downgraded retry, then the NEXT candidate — the walk advanced.
+        self.assertEqual(
+            calls,
+            [
+                ("claude-fable-5", None),
+                ("claude-fable-5", "off"),
+                ("claude-opus-4-8", None),
+            ],
+        )
+        slugs = [c.kwargs.get("slug") for c in ctx.put_observable.call_args_list]
+        self.assertIn("noreason:denied", slugs)
+        self.assertIn("advance:redacted", slugs)
+        self.assertNotIn("stop:redacted", slugs)
+
+    def test_downgraded_retry_is_never_labelled_as_reasoning_off(self):
+        # The first candidate's retry is downgraded and then ANSWERS. Calling
+        # that a reasoning-off answer would be a lie about how it was produced.
+        def factory(question, model, provider, effort):
+            if effort != "off":
+                return _FakeStream([], error=_REDACTED_ERR, error_data={"reasoning_effort": "high"})
+            text = "fable answered at minimal effort"
+            return _FakeStream(
+                [{"type": "text", "text": text}],
+                result={"text": text, "finish_reason": "stop", "reasoning_effort": "minimal"},
+            )
+
+        ctx = _streaming_ctx(factory)
+        ctx.available_models = mock.MagicMock(return_value=_RETRY_AVAILABLE)
+        result = self.mod._run_aside([], "q", ctx, escalate=True)
+        self.assertFalse(result["is_error"])
+        text = result["content"][0]["text"]
+        self.assertIn("fable answered at minimal effort", text)
+        self.assertNotIn("reasoning off", text)
+
+    def test_all_candidates_adaptive_yields_the_honest_diagnosis(self):
+        # Nothing in the chain can disable thinking, so no attempt ever tested
+        # the hypothesis. The error must say that instead of blaming the input.
+        def behaviour(model, effort):
+            return (_REDACTED_ERR_2, "minimal" if effort == "off" else "high")
+
+        ctx, calls = self._ctx(behaviour)
+        result = self.mod._run_aside([], "q", ctx, escalate=True)
+        self.assertTrue(result["is_error"])
+        text = result["content"][0]["text"]
+        self.assertIn("always-on adaptive thinking", text)
+        self.assertIn("non-adaptive model", text)
+        # And it must NOT claim a reasoning-off retry happened.
+        self.assertNotIn("really did run with reasoning disabled", text)
+        # Both candidates plus the executor fallback were tried.
+        self.assertEqual(
+            [m for m, _ in calls],
+            [
+                "claude-fable-5",
+                "claude-fable-5",
+                "claude-opus-4-8",
+                "claude-opus-4-8",
+                None,
+                None,
+            ],
+        )
+
+    def test_walk_prefers_a_candidate_that_can_disable_thinking(self):
+        # The chain is ordered [fable, opus]; fable is adaptive and gets
+        # redacted. Opus can actually turn thinking off, so it is the probe
+        # worth making — and here the third candidate, also adaptive, must not
+        # jump ahead of it.
+        chain = [
+            {"provider": "anthropic", "model": "adaptive-a"},
+            {"provider": "anthropic", "model": "adaptive-b"},
+            {"provider": "anthropic", "model": "switchable"},
+        ]
+        self.mod._ADVISOR = chain
+        available = [
+            {
+                "provider": "anthropic",
+                "id": "adaptive-a",
+                "reasoning": True,
+                "adaptive_thinking": True,
+            },
+            {
+                "provider": "anthropic",
+                "id": "adaptive-b",
+                "reasoning": True,
+                "adaptive_thinking": True,
+            },
+            {"provider": "anthropic", "id": "switchable", "reasoning": True},
+        ]
+
+        def behaviour(model, effort):
+            if model == "adaptive-a":
+                return (_REDACTED_ERR, "minimal" if effort == "off" else "high")
+            return f"{model} answered"
+
+        ctx, calls = self._ctx(behaviour, available=available)
+        result = self.mod._run_aside([], "q", ctx, escalate=True)
+        self.assertFalse(result["is_error"], result["content"][0]["text"])
+        self.assertIn("switchable answered", result["content"][0]["text"])
+        self.assertEqual(
+            [m for m, _ in calls],
+            ["adaptive-a", "adaptive-a", "switchable"],
+        )
+
+    def test_genuine_reasoning_off_still_stops_the_walk(self):
+        # The regression guard for the OTHER direction: when the host really
+        # did run with thinking disabled and the answer was still redacted,
+        # the walk must stop with the input diagnosis, as before.
+        def behaviour(model, effort):
+            return (_REDACTED_ERR, "off" if effort == "off" else "high")
+
+        ctx, calls = self._ctx(behaviour)
+        result = self.mod._run_aside([], "q", ctx, escalate=True)
+        self.assertTrue(result["is_error"])
+        text = result["content"][0]["text"]
+        self.assertIn("really did run with reasoning disabled", text)
+        self.assertEqual(calls, [("claude-fable-5", None), ("claude-fable-5", "off")])
+        slugs = [c.kwargs.get("slug") for c in ctx.put_observable.call_args_list]
+        self.assertIn("stop:redacted", slugs)
+
+    def test_old_host_without_error_data_keeps_stopping(self):
+        # No reasoning_effort reported at all (older fir): unchanged behaviour.
+        def behaviour(model, effort):
+            return (_REDACTED_ERR, None)
+
+        ctx, calls = self._ctx(behaviour)
+        result = self.mod._run_aside([], "q", ctx, escalate=True)
+        self.assertTrue(result["is_error"])
+        self.assertEqual(calls, [("claude-fable-5", None), ("claude-fable-5", "off")])
 
 
 if __name__ == "__main__":

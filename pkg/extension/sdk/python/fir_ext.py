@@ -401,9 +401,13 @@ otherwise noted.
 | ``side_query``   | ``{question, model?, provider?,       | ``{ok: true,              |
 |                  | effort?}``                            | text: "...",              |
 |                  | One-shot LLM call, no history.        | tokens_in, tokens_out,    |
-|                  | model/provider/effort override the    | cache_read,               |
-|                  | agent's defaults for this call.       | cache_write}``            |
-|                  |                                       | SDK timeout: 120 s        |
+|                  | model/provider/effort override the    | cache_read, cache_write,  |
+|                  | agent's defaults for this call.       | reasoning_effort}``       |
+|                  | ``reasoning_effort`` is the level     | SDK timeout: 120 s        |
+|                  | ACTUALLY dispatched (``off`` is       |                           |
+|                  | downgraded to minimal on always-on    |                           |
+|                  | adaptive models); on failure it       |                           |
+|                  | arrives in the error's ``data``.      |                           |
 +------------------+---------------------------------------+---------------------------+
 | ``set_session_   | ``{key, value}``                      | ``{ok: true}``            |
 | data``           | Persist string K/V; survives          |                           |
@@ -435,8 +439,11 @@ otherwise noted.
 |                  |                                       | parameters?}, …]``        |
 +------------------+---------------------------------------+---------------------------+
 | ``available_     | ``{}``                                | ``{models:[{provider,     |
-| models``         | Live-and-authed model set; ``[]`` on  | id, name}, …]}``          |
-|                  | old hosts.                            |                           |
+| models``         | Live-and-authed model set; ``[]`` on  | id, name, reasoning?,     |
+|                  | old hosts. ``adaptive_thinking``      | adaptive_thinking?}]}``   |
+|                  | marks a model whose thinking is       |                           |
+|                  | always on (cannot honour              |                           |
+|                  | ``effort:"off"``).                    |                           |
 +------------------+---------------------------------------+---------------------------+
 | ``prepend_       | ``{content}``                         | ``{ok: true}``            |
 | context``        | Appends a ``[SYS_EXT]`` user message  |                           |
@@ -1153,6 +1160,10 @@ class SideQueryResult(TypedDict, total=False):
     tokens_out: int
     cache_read: int
     cache_write: int
+    # The reasoning level the call was ACTUALLY dispatched with, which is
+    # not always the one requested: the host downgrades thinking-off to
+    # minimal effort for always-on adaptive models. Absent when unknown.
+    reasoning_effort: str
 
 
 class SetSessionDataParams(TypedDict, total=False):
@@ -2442,8 +2453,11 @@ class SideQueryStream:
 
     Yielded items are :class:`SideQueryDelta` objects. After iteration
     ends, ``.result`` holds the final :class:`SideQueryResult` (a dict
-    with ``text``, ``blocks``, ``finish_reason``) — or ``None`` if the
-    stream was abandoned via :py:meth:`close` before completion.
+    with ``text``, ``blocks``, ``finish_reason``, ``reasoning_effort``) —
+    or ``None`` if the stream was abandoned via :py:meth:`close` before
+    completion, or the host returned an error. On an error, ``.error``
+    holds the message and ``.error_data`` any structured detail the host
+    attached (e.g. ``{"reasoning_effort": "minimal"}``).
 
     The iterator's deadline is *per delta*: every incoming event resets
     the clock. Total wall-clock duration is unbounded as long as the host
@@ -2469,6 +2483,7 @@ class SideQueryStream:
         self._closed = False
         self.result: SideQueryResult | None = None
         self.error: str | None = None
+        self.error_data: dict[str, Any] | None = None
 
     def __iter__(self) -> SideQueryStream:
         return self
@@ -2526,6 +2541,13 @@ class SideQueryStream:
         resp = self._results.pop(self._rid, None)
         if resp and "error" in resp:
             self.error = resp["error"].get("message", "unknown error")
+            # Structured detail about the failure — today just
+            # ``reasoning_effort`` (the level actually dispatched). A
+            # scrubbed response arrives as an error, so this is the only
+            # place a caller can learn that its thinking-off request was
+            # downgraded.
+            data = resp["error"].get("data")
+            self.error_data = data if isinstance(data, dict) else None
         elif resp:
             r = resp.get("result")
             if isinstance(r, dict):
@@ -3083,13 +3105,18 @@ class Context:
             return result  # type: ignore[return-value]
         return []
 
-    def available_models(self, timeout: float = 10.0) -> list[dict[str, str]]:
+    def available_models(self, timeout: float = 10.0) -> list[dict[str, Any]]:
         """Return the models the session currently considers live and authed.
 
         Queries the host's ``available_models`` bridge verb, which returns
         the session model registry's ``GetAvailable()`` set — only models
         confirmed live by the provider's model list and backed by auth.
-        Each entry is a dict with ``provider``, ``id`` and ``name`` keys.
+        Each entry is a dict with ``provider``, ``id`` and ``name`` keys,
+        plus the booleans ``reasoning`` (the model thinks at all) and
+        ``adaptive_thinking`` (its thinking is ALWAYS ON, so a request to
+        disable reasoning is downgraded to minimal effort rather than
+        honoured). Both booleans are omitted when false, and absent entirely
+        on older hosts.
 
         Extensions use this to adapt routing to runtime availability — e.g.
         the aside advisor degrades to the highest available flagship when its

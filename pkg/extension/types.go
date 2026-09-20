@@ -183,6 +183,25 @@ type SideQueryResult struct {
 	TokensOut  int `json:"tokens_out,omitempty"`
 	CacheRead  int `json:"cache_read,omitempty"`
 	CacheWrite int `json:"cache_write,omitempty"`
+
+	// ReasoningEffort is the thinking level the call was actually dispatched
+	// with — which can differ from the requested effort, because the
+	// transport downgrades thinking-off to minimal on always-on adaptive
+	// models. An extension that asks for "off" to change the response must
+	// check this before treating the answer as a reasoning-off datapoint.
+	// Also delivered on the FAILURE path, in the JSON-RPC error's `data`
+	// object (see SideQueryErrorData) — a scrubbed response arrives as an
+	// error, and that is precisely when the distinction matters.
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+}
+
+// SideQueryErrorData is the `data` payload of the JSON-RPC error returned by
+// a failed "side_query". The failure path discards the result shape, so the
+// few fields a caller must still be able to see travel here.
+type SideQueryErrorData struct {
+	// ReasoningEffort mirrors SideQueryResult.ReasoningEffort: the level
+	// actually dispatched, empty when unknown.
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 }
 
 // SideQueryDeltaParams is the params shape of a "side_query/delta" outbound
@@ -233,6 +252,15 @@ type AvailableModel struct {
 	Provider string `json:"provider"`
 	ID       string `json:"id"`
 	Name     string `json:"name"`
+
+	// Reasoning reports whether the model produces reasoning/thinking at all.
+	// AdaptiveThinking reports whether its thinking is always on — such a
+	// model cannot be asked to disable reasoning (the transport downgrades
+	// thinking-off to minimal effort), which is what lets an extension route
+	// a "retry with thinking disabled" to a candidate where that request is
+	// actually honoured.
+	Reasoning        bool `json:"reasoning,omitempty"`
+	AdaptiveThinking bool `json:"adaptive_thinking,omitempty"`
 }
 
 // AvailableModelsResult is the result of "available_models" — the session

@@ -346,9 +346,11 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 				continue
 			}
 			out = append(out, AvailableModel{
-				Provider: m.Provider,
-				ID:       m.ID,
-				Name:     m.Name,
+				Provider:         m.Provider,
+				ID:               m.ID,
+				Name:             m.Name,
+				Reasoning:        m.Reasoning,
+				AdaptiveThinking: m.AdaptiveThinking,
 			})
 		}
 		result = AvailableModelsResult{Models: out}
@@ -467,17 +469,22 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 			res, err := api.SideQueryStream(p.Question, opts, onDelta)
 			stop()
 			if err != nil {
-				rpcErr = &Error{Code: -32000, Message: err.Error()}
+				rpcErr = &Error{
+					Code:    -32000,
+					Message: err.Error(),
+					Data:    sideQueryErrorData(res),
+				}
 			} else {
 				result = SideQueryResult{
-					Ok:           true,
-					Text:         res.Text,
-					Blocks:       res.Blocks,
-					FinishReason: res.FinishReason,
-					TokensIn:     res.TokensIn,
-					TokensOut:    res.TokensOut,
-					CacheRead:    res.CacheRead,
-					CacheWrite:   res.CacheWrite,
+					Ok:              true,
+					Text:            res.Text,
+					Blocks:          res.Blocks,
+					FinishReason:    res.FinishReason,
+					TokensIn:        res.TokensIn,
+					TokensOut:       res.TokensOut,
+					CacheRead:       res.CacheRead,
+					CacheWrite:      res.CacheWrite,
+					ReasoningEffort: res.ReasoningEffort,
 				}
 			}
 		} else {
@@ -1045,4 +1052,23 @@ func (b *Bridge) SeedSessionData(data map[string]string) {
 	for k, v := range data {
 		b.sessionData[k] = v
 	}
+}
+
+// sideQueryErrorData packages the still-meaningful parts of a FAILED side
+// query into the JSON-RPC error's `data` object. A scrubbed ("no usable
+// content") response arrives as an error, and that is exactly when the caller
+// needs to know which reasoning level was actually dispatched — e.g. the aside
+// extension must not read a downgraded thinking-off retry as evidence that
+// disabling reasoning changed nothing. Returns nil when there is nothing to
+// report, so unaffected callers see no `data` at all.
+func sideQueryErrorData(res session.SideQueryResult) *json.RawMessage {
+	if res.ReasoningEffort == "" {
+		return nil
+	}
+	raw, err := json.Marshal(SideQueryErrorData{ReasoningEffort: res.ReasoningEffort})
+	if err != nil {
+		return nil
+	}
+	msg := json.RawMessage(raw)
+	return &msg
 }

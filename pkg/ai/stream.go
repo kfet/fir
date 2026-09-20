@@ -42,6 +42,9 @@ func StreamSimple(ctx context.Context, registry *Registry, model *Model, prompt 
 		return errorStream(model, "no API provider registered for api: "+model.API)
 	}
 	options = resolveReasoning(model, options)
+	if options != nil {
+		reportReasoning(ctx, options.Reasoning)
+	}
 	if options != nil && options.Reasoning == ThinkingOff && model != nil && model.Reasoning {
 		return streamSimpleWithThinkingOffFallback(ctx, provider, model, prompt, options)
 	}
@@ -62,6 +65,41 @@ func resolveReasoning(model *Model, options *SimpleStreamOptions) *SimpleStreamO
 		return &cp
 	}
 	return options
+}
+
+// --- reasoning observation -------------------------------------------------
+//
+// The resolved reasoning level is not always the one the caller asked for:
+// resolveReasoning downgrades thinking-off on an always-on adaptive model, and
+// the thinking-off fallback below swaps in minimal thinking when a provider
+// rejects the request. Both are correct transport policy — but a caller that
+// asked for thinking-off in order to CHANGE the response (the aside
+// extension's redacted-reasoning retry) must be able to tell whether it
+// actually got what it asked for, or it will read an unchanged answer as new
+// evidence. The observer reports the level that was really dispatched.
+
+type reasoningObserverKey struct{}
+
+// WithReasoningObserver returns a context whose StreamSimple calls report the
+// reasoning level they actually dispatch with. fn may be called more than once
+// for one logical call (e.g. the thinking-off fallback retry); the LAST report
+// is the level that produced the response. fn runs on whichever goroutine
+// drives the stream, so it must be cheap and safe to call concurrently.
+func WithReasoningObserver(ctx context.Context, fn func(ThinkingLevel)) context.Context {
+	if fn == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, reasoningObserverKey{}, fn)
+}
+
+// reportReasoning notifies any observer installed on ctx. No-op otherwise.
+func reportReasoning(ctx context.Context, level ThinkingLevel) {
+	if ctx == nil {
+		return
+	}
+	if fn, ok := ctx.Value(reasoningObserverKey{}).(func(ThinkingLevel)); ok && fn != nil {
+		fn(level)
+	}
 }
 
 // streamSimpleWithThinkingOffFallback runs a thinking-off request and, if the
@@ -89,6 +127,7 @@ func streamSimpleWithThinkingOffFallback(ctx context.Context, provider *ApiProvi
 					}
 					cp := *options
 					cp.Reasoning = ThinkingMinimal
+					reportReasoning(ctx, cp.Reasoning)
 					retry := provider.StreamSimple(ctx, model, prompt, &cp)
 					for e2 := range retry.Events {
 						out.Push(e2)
