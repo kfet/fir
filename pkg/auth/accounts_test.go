@@ -327,3 +327,110 @@ func TestBedrockIAMFromExtra_ModeDefault(t *testing.T) {
 		t.Errorf("mode = %q want profile", c2.Mode)
 	}
 }
+
+func TestSetDefaultAccountPromotesAndDemotes(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "auth.json")
+	s := NewAuthStorage(path)
+
+	if err := s.Set("openrouter", AuthCredential{Type: CredentialTypeAPIKey, Key: "old-default"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Set("openrouter#account2", AuthCredential{Type: CredentialTypeAPIKey, Key: "new-key"}); err != nil {
+		t.Fatal(err)
+	}
+
+	demoted, err := s.SetDefaultAccount("openrouter", "account2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if demoted != "openrouter#account2" {
+		t.Errorf("demoted slot = %q want openrouter#account2", demoted)
+	}
+	if got := s.GetApiKey("openrouter"); got != "new-key" {
+		t.Errorf("default key = %q want new-key", got)
+	}
+	if got := s.GetApiKey("openrouter#account2"); got != "old-default" {
+		t.Errorf("demoted key = %q want old-default", got)
+	}
+
+	// Both moves must be on disk, in one consistent state.
+	fresh := NewAuthStorage(path)
+	if got := fresh.GetApiKey("openrouter"); got != "new-key" {
+		t.Errorf("reloaded default = %q want new-key", got)
+	}
+	if got := fresh.GetApiKey("openrouter#account2"); got != "old-default" {
+		t.Errorf("reloaded named = %q want old-default", got)
+	}
+	if n := len(fresh.AccountsForProvider("openrouter")); n != 2 {
+		t.Errorf("accounts after swap = %d want 2", n)
+	}
+
+	// The swap is reversible.
+	if _, err := fresh.SetDefaultAccount("openrouter", "account2"); err != nil {
+		t.Fatal(err)
+	}
+	if got := fresh.GetApiKey("openrouter"); got != "old-default" {
+		t.Errorf("swap back = %q want old-default", got)
+	}
+}
+
+func TestSetDefaultAccountNoExistingDefault(t *testing.T) {
+	s := NewInMemoryAuthStorage(AuthStorageData{
+		"openrouter#work": {Type: CredentialTypeAPIKey, Key: "work-key", Label: "work@x.com"},
+	})
+
+	demoted, err := s.SetDefaultAccount("openrouter", "work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if demoted != "" {
+		t.Errorf("demoted = %q want empty", demoted)
+	}
+	if got := s.GetApiKey("openrouter"); got != "work-key" {
+		t.Errorf("default key = %q want work-key", got)
+	}
+	if s.Has("openrouter#work") {
+		t.Error("source slot should be vacated")
+	}
+}
+
+func TestSetDefaultAccountDemotesByIdentity(t *testing.T) {
+	s := NewInMemoryAuthStorage(AuthStorageData{
+		"anthropic":       {Type: CredentialTypeAPIKey, Key: "k1", Label: "alice@x.com"},
+		"anthropic#bob":   {Type: CredentialTypeAPIKey, Key: "k2", Label: "bob@x.com"},
+		"anthropic#carol": {Type: CredentialTypeAPIKey, Key: "k3", Label: "carol@x.com"},
+	})
+
+	demoted, err := s.SetDefaultAccount("anthropic", "bob")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if demoted != "anthropic#alice@x.com" {
+		t.Errorf("demoted = %q want anthropic#alice@x.com", demoted)
+	}
+	if got := s.GetApiKey("anthropic"); got != "k2" {
+		t.Errorf("default = %q want k2", got)
+	}
+	if got := s.GetApiKey("anthropic#carol"); got != "k3" {
+		t.Error("untouched account changed")
+	}
+}
+
+func TestSetDefaultAccountErrors(t *testing.T) {
+	s := NewInMemoryAuthStorage(AuthStorageData{
+		"openrouter": {Type: CredentialTypeAPIKey, Key: "k"},
+	})
+	if _, err := s.SetDefaultAccount("openrouter", ""); err == nil {
+		t.Error("empty account id should fail")
+	}
+	if _, err := s.SetDefaultAccount("openrouter", "default"); err == nil {
+		t.Error("'default' account id should fail")
+	}
+	if _, err := s.SetDefaultAccount("openrouter", "missing"); err == nil {
+		t.Error("unknown slot should fail")
+	}
+	if got := s.GetApiKey("openrouter"); got != "k" {
+		t.Errorf("failed switch mutated storage: %q", got)
+	}
+}

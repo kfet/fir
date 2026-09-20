@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Added
+- **`fir login use <provider#account>` switches which stored account is a provider's default.** A provider's bare `auth.json` slot is what every lookup that does not name an account resolves to, but nothing could write that slot except a fresh login: adding a second account always landed in `<provider>#<account>`, and `fir logout <provider>` removed the only reachable one, stranding the rest (`no API key for provider "openrouter"` with two accounts still stored). The new verb promotes a named account into the bare slot and demotes the previous default to a named slot of its own — named after its identity (email/account id/label) or the first free `accountN`. Nothing is deleted, so the switch is reversible by running it again. Both moves land in one locked read-modify-write (`AuthStorage.persistChanges`), so auth.json is never observed without a default. `fir logout` now prints the `fir login use` lines for the accounts it left behind when it removes a default, `fir login list` advertises the verb, and bash/zsh completions offer stored slot keys after `fir login use`.
+
 ## [1.17.0] - 2026-09-19
 
 ### Changed

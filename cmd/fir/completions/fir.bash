@@ -181,7 +181,9 @@ _fir_complete_subcommand() {
             COMPREPLY=( $(compgen -W "--steer --follow --cwd" -- "$cur") ) ;;
         login)
             if [[ $pos -eq 1 ]]; then
-                COMPREPLY=( $(compgen -W "list $(_fir_providers)" -- "$cur") )
+                COMPREPLY=( $(compgen -W "list use $(_fir_providers)" -- "$cur") )
+            elif [[ $pos -eq 2 && ${words[2]} == "use" ]]; then
+                COMPREPLY=( $(compgen -W "$(_fir_slots)" -- "$cur") )
             fi ;;
         auth)
             if [[ $pos -eq 1 ]]; then

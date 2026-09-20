@@ -431,6 +431,35 @@ func (s *AuthStorage) persistProviderChange(provider string, cred *AuthCredentia
 	s.lastStamp = s.backendStamp()
 }
 
+// persistChanges applies several slot changes to the backing file in ONE
+// locked read-modify-write. A nil credential deletes the slot. Keys are
+// applied in the given order, so a caller can delete and re-create the same
+// slot in a single atomic step. Use this instead of repeated
+// persistProviderChange calls when the file must never be observed in a
+// half-applied state (e.g. promoting an account to default).
+func (s *AuthStorage) persistChanges(order []string, changes map[string]*AuthCredential) {
+	if s.loadError != nil {
+		return
+	}
+	_, err := s.storage.WithLock(func(current []byte) (any, []byte) {
+		currentData := s.parseStorageData(current)
+		for _, key := range order {
+			if cred := changes[key]; cred != nil {
+				currentData[key] = *cred
+			} else {
+				delete(currentData, key)
+			}
+		}
+		b, _ := json.MarshalIndent(currentData, "", "  ")
+		return nil, b
+	})
+	if err != nil {
+		s.recordError(err)
+		return
+	}
+	s.lastStamp = s.backendStamp()
+}
+
 // Get returns the credential for a provider, or nil if not found.
 func (s *AuthStorage) Get(provider string) *AuthCredential {
 	s.mu.RLock()

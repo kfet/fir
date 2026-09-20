@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strings"
 
@@ -157,6 +158,95 @@ func (s *AuthStorage) AllAccounts() []Account {
 		return out[i].AccountID < out[j].AccountID
 	})
 	return out
+}
+
+// SetDefaultAccount promotes a stored named account to the provider's default
+// (bare) slot, and demotes the account currently in that slot to a named slot.
+// The two moves are applied to auth.json in one locked write, so the file is
+// never observed with the default slot missing.
+//
+// It returns the slot key the previous default was moved to, or "" when the
+// provider had no default account.
+//
+// This is the switch verb: a provider's bare slot is what every lookup that
+// does not name an account resolves to, so without a promote there is no way
+// to change which account serves plain "<provider>/<model>" — and removing a
+// default would strand the remaining accounts.
+func (s *AuthStorage) SetDefaultAccount(provider, accountID string) (demotedSlot string, err error) {
+	if provider == "" {
+		return "", fmt.Errorf("provider required")
+	}
+	if accountID == "" || accountID == "default" {
+		return "", fmt.Errorf("account id required: use <provider>#<account>")
+	}
+	from := SlotKey(provider, accountID)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	promoted, ok := s.data[from]
+	if !ok {
+		return "", fmt.Errorf("no stored account for slot %q", from)
+	}
+
+	order := make([]string, 0, 3)
+	changes := make(map[string]*AuthCredential, 3)
+
+	oldDefault, hadDefault := s.data[provider]
+	if hadDefault {
+		demotedSlot = s.freeSlotLocked(provider, &oldDefault, from)
+	}
+
+	// Vacate the source slot first, so a demote back into it still wins.
+	delete(s.data, from)
+	order = append(order, from)
+	changes[from] = nil
+
+	if hadDefault {
+		cred := oldDefault
+		s.data[demotedSlot] = cred
+		order = append(order, demotedSlot)
+		changes[demotedSlot] = &cred
+	}
+
+	newDefault := promoted
+	s.data[provider] = newDefault
+	order = append(order, provider)
+	changes[provider] = &newDefault
+
+	s.persistChanges(order, changes)
+	s.audit.record(AuditActionSet, provider, &newDefault, len(s.data))
+	return demotedSlot, nil
+}
+
+// freeSlotLocked picks a named slot for a credential being demoted out of the
+// default position. It prefers the credential's own identity (email/account
+// id/label), and otherwise allocates the first free "accountN". The caller
+// must hold s.mu; `vacated` is the slot being emptied by the same operation
+// and is therefore treated as free.
+func (s *AuthStorage) freeSlotLocked(provider string, cred *AuthCredential, vacated string) string {
+	free := func(slot string) bool {
+		if slot == vacated {
+			return true
+		}
+		_, taken := s.data[slot]
+		return !taken
+	}
+
+	id := accountIDFromCreds(AuthCredToOAuthCreds(cred))
+	if id == "" {
+		id = sanitizeAccountID(cred.Label)
+	}
+	if id != "" && id != "default" {
+		if slot := SlotKey(provider, id); free(slot) {
+			return slot
+		}
+	}
+	for i := 2; ; i++ {
+		if slot := SlotKey(provider, fmt.Sprintf("account%d", i)); free(slot) {
+			return slot
+		}
+	}
 }
 
 // accountProvider wraps a base ai.OAuthProvider so it presents as a distinct

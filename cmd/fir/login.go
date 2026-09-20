@@ -171,6 +171,11 @@ func runLoginSubcommand() error {
 	if len(positional) == 0 || (len(positional) == 1 && positional[0] == "list") {
 		return runLoginList(args)
 	}
+	// "fir login use <provider#account>": promote an account to default.
+	if positional[0] == "use" {
+		return runLoginUse(positional[1:])
+	}
+
 	if len(positional) > 1 {
 		return fmt.Errorf("fir login: expected one provider id, got %d arguments", len(positional))
 	}
@@ -184,15 +189,80 @@ func runLoginSubcommand() error {
 	return runLoginWithExtensions(args, positional[0])
 }
 
+// runLoginUse implements `fir login use <provider#account>`: it promotes a
+// stored named account into the provider's default slot and demotes the
+// current default to a named slot. Nothing is deleted, so the switch is
+// reversible. No extensions are loaded — this is a pure storage operation.
+func runLoginUse(args []string) error {
+	agentDir := resolveAgentDir()
+	authStorage := auth.NewAuthStorage(filepath.Join(agentDir, "auth.json"))
+
+	if len(args) != 1 {
+		fmt.Println("Usage: fir login use <provider[#account]>")
+		printStoredAccounts(authStorage)
+		if len(args) == 0 {
+			return nil
+		}
+		return fmt.Errorf("fir login use: expected one slot key, got %d arguments", len(args))
+	}
+
+	slot := args[0]
+	provider, accountID := auth.SplitSlot(slot)
+	if accountID == "" {
+		if authStorage.Has(provider) {
+			fmt.Fprintf(os.Stderr, "%s is already the default account.\n", provider)
+			printStoredAccounts(authStorage)
+			return nil
+		}
+		return fmt.Errorf("fir login use: name an account, e.g. %s#account2", provider)
+	}
+	if !authStorage.Has(slot) {
+		printStoredAccounts(authStorage)
+		return fmt.Errorf("no stored account for slot %q", slot)
+	}
+
+	demoted, err := authStorage.SetDefaultAccount(provider, accountID)
+	if err != nil {
+		return fmt.Errorf("switch account: %w", err)
+	}
+	if demoted == slot {
+		fmt.Fprintf(os.Stderr, "%s is now the default for %s (swapped: the previous default now holds %s).\n", slot, provider, slot)
+	} else if demoted != "" {
+		fmt.Fprintf(os.Stderr, "%s is now the default for %s (previous default kept as %s).\n", slot, provider, demoted)
+	} else {
+		fmt.Fprintf(os.Stderr, "%s is now the default for %s.\n", slot, provider)
+	}
+	printStoredAccounts(authStorage)
+	return nil
+}
+
+// printStoredAccounts lists every stored account slot, marking the default.
+func printStoredAccounts(authStorage *auth.AuthStorage) {
+	accts := authStorage.AllAccounts()
+	if len(accts) == 0 {
+		return
+	}
+	fmt.Println("\nStored accounts:")
+	for _, a := range accts {
+		tag := ""
+		if a.AccountID == "" {
+			tag = " (default)"
+		}
+		fmt.Printf("  %s  [%s]  %s%s\n", a.SlotKey, a.Type, a.DisplayName(), tag)
+	}
+}
+
 // printLoginHelp prints the usage text for `fir login`.
 func printLoginHelp() {
 	fmt.Println("Usage: fir login <provider-id> [--no-extensions] [--extension name] [--disable-extension name] [--debug]")
 	fmt.Println("       fir login bedrock [--mode iam-profile|iam-keys|bearer] [--account NAME] [--region REGION] ...")
+	fmt.Println("       fir login use <provider#account>")
 	fmt.Println("       fir login list")
 	fmt.Println()
 	fmt.Println("Runs the OAuth login flow for the given provider and stores credentials.")
 	fmt.Println("`fir login bedrock` configures an Amazon Bedrock account (IAM profile/keys or bearer).")
 	fmt.Println("Logging in to the same provider again ADDS a second account; both are kept and switchable.")
+	fmt.Println("`fir login use` switches which stored account serves the bare provider id.")
 	fmt.Println("Auth providers are contributed by extensions, which are loaded automatically.")
 }
 
@@ -217,17 +287,10 @@ func runLoginList(args *Args) error {
 	// Show currently stored accounts (per provider, including named slots).
 	agentDir := resolveAgentDir()
 	authStorage := auth.NewAuthStorage(filepath.Join(agentDir, "auth.json"))
-	accts := authStorage.AllAccounts()
-	if len(accts) > 0 {
-		fmt.Println("\nStored accounts:")
-		for _, a := range accts {
-			tag := ""
-			if a.AccountID == "" {
-				tag = " (default)"
-			}
-			fmt.Printf("  %s  [%s]  %s%s\n", a.SlotKey, a.Type, a.DisplayName(), tag)
-		}
-		fmt.Println("\nRemove one with: fir logout <provider[#account]>")
+	if len(authStorage.AllAccounts()) > 0 {
+		printStoredAccounts(authStorage)
+		fmt.Println("\nSwitch the default with: fir login use <provider#account>")
+		fmt.Println("Remove one with: fir logout <provider[#account]>")
 	}
 	return nil
 }
@@ -265,6 +328,18 @@ func runLogoutSubcommand() error {
 		return fmt.Errorf("logout %s: %w", slot, err)
 	}
 	fmt.Fprintf(os.Stderr, "Removed account %s.\n", slot)
+
+	// Removing the default strands the remaining named accounts: every lookup
+	// that does not name an account resolves the bare slot. Point at the fix.
+	provider, accountID := auth.SplitSlot(slot)
+	if accountID == "" && !authStorage.Has(provider) {
+		if rest := authStorage.AccountsForProvider(provider); len(rest) > 0 {
+			fmt.Fprintf(os.Stderr, "\n%s now has no default account. Promote one:\n", provider)
+			for _, a := range rest {
+				fmt.Fprintf(os.Stderr, "  fir login use %s\n", a.SlotKey)
+			}
+		}
+	}
 	return nil
 }
 

@@ -247,8 +247,12 @@ _fir_send() {
 _fir_login() {
     if (( CURRENT == 3 )); then
         _alternative \
-            'subcommand:subcommand:((list\:List\ available\ OAuth\ providers))' \
+            'subcommand:subcommand:((list\:List\ available\ OAuth\ providers use\:Make\ a\ stored\ account\ the\ default))' \
             'providers:provider:_fir_providers'
+        return
+    fi
+    if (( CURRENT == 4 )) && [[ ${words[3]} == use ]]; then
+        _fir_slots
     fi
 }
 
