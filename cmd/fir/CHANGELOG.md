@@ -2,7 +2,10 @@
 
 ## [Unreleased]
 
+## [1.18.0] - 2026-09-21
+
 ### Changed
+- **Model catalog regenerated**: added 4 aggregator model(s); removed 1 aggregator model(s); 18 model(s) with changed pricing/limits.
 - **A repeat login for a provider with no account identity now REPLACES the default instead of adding a slot nobody reads.** Slot assignment derives an account identity from the credential profile; OpenRouter's flow returns only an opaque key, so the identity is empty and every repeat `fir login openrouter` allocated `#account2`, `#account3`… The fresh key then sat in a named slot while the stale one kept serving every lookup, and removing the default stranded the rest. Policy now: an explicit `--account NAME` wins; an empty default slot is claimed; a matching identity refreshes that account in place; a *new* identity is still added alongside (two identities cannot collide, so multi-account Anthropic is unchanged); and an *absent* identity replaces the default. `fir login <provider> --add` opts out and keeps both. A login that lands in a named slot now says so and prints the `fir login use` line, instead of reporting success for a credential nothing will read.
 - **`fir logout <provider>` promotes the sole surviving account.** Removing the default left a single named account unreachable, because lookups that do not name an account read the bare slot. With exactly one account left it is promoted automatically; with two or more the choice stays the user's and the command prints the `fir login use` options.
 
