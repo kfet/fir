@@ -434,3 +434,125 @@ func TestSetDefaultAccountErrors(t *testing.T) {
 		t.Errorf("failed switch mutated storage: %q", got)
 	}
 }
+
+// An identity-less provider (OpenRouter returns only an opaque key) must
+// REPLACE the default on a repeat login. A new named slot would leave the
+// stale credential serving every lookup.
+func TestLoginIdentitylessReplacesDefault(t *testing.T) {
+	ai.ResetOAuthProviders()
+	t.Cleanup(ai.ResetOAuthProviders)
+	s := NewAuthStorage(filepath.Join(t.TempDir(), "auth.json"))
+
+	prov := &recordingProvider{id: "opaque-prov", loginCreds: &ai.OAuthCredentials{Access: "key1"}}
+	ai.RegisterOAuthProvider(prov)
+
+	slot, _, err := s.LoginAccount(context.Background(), "opaque-prov", pinoauth.LoginCallbacks{})
+	if err != nil || slot != "opaque-prov" {
+		t.Fatalf("first login slot=%q err=%v", slot, err)
+	}
+
+	prov.loginCreds = &ai.OAuthCredentials{Access: "key2"}
+	slot, _, err = s.LoginAccount(context.Background(), "opaque-prov", pinoauth.LoginCallbacks{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slot != "opaque-prov" {
+		t.Errorf("repeat login slot = %q want opaque-prov (replace)", slot)
+	}
+	if got := s.GetApiKey("opaque-prov"); got != "key2" {
+		t.Errorf("default key = %q want key2", got)
+	}
+	if n := len(s.AccountsForProvider("opaque-prov")); n != 1 {
+		t.Errorf("accounts = %d want 1", n)
+	}
+
+	// --add opts out and keeps both.
+	prov.loginCreds = &ai.OAuthCredentials{Access: "key3"}
+	slot, _, err = s.LoginAccountOpts(context.Background(), "opaque-prov", pinoauth.LoginCallbacks{}, LoginOptions{Add: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slot != "opaque-prov#account2" {
+		t.Errorf("--add slot = %q want opaque-prov#account2", slot)
+	}
+	if got := s.GetApiKey("opaque-prov"); got != "key2" {
+		t.Errorf("--add must not touch the default: %q", got)
+	}
+
+	// An explicit name wins over everything.
+	slot, _, err = s.LoginAccountOpts(context.Background(), "opaque-prov", pinoauth.LoginCallbacks{}, LoginOptions{AccountName: "work"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slot != "opaque-prov#work" {
+		t.Errorf("--account slot = %q want opaque-prov#work", slot)
+	}
+}
+
+// Identity-bearing providers must NOT regress: a different identity is still
+// added alongside, and the same identity still refreshes in place.
+func TestLoginIdentityBearingStillAdds(t *testing.T) {
+	ai.ResetOAuthProviders()
+	t.Cleanup(ai.ResetOAuthProviders)
+	s := NewAuthStorage(filepath.Join(t.TempDir(), "auth.json"))
+
+	prov := &recordingProvider{
+		id:         "id-prov",
+		loginCreds: &ai.OAuthCredentials{Access: "a1", Extra: map[string]any{"accountId": "alice"}},
+	}
+	ai.RegisterOAuthProvider(prov)
+	if slot, _, _ := s.LoginAccount(context.Background(), "id-prov", pinoauth.LoginCallbacks{}); slot != "id-prov" {
+		t.Fatalf("first slot = %q", slot)
+	}
+
+	prov.loginCreds = &ai.OAuthCredentials{Access: "b1", Extra: map[string]any{"accountId": "bob"}}
+	if slot, _, _ := s.LoginAccount(context.Background(), "id-prov", pinoauth.LoginCallbacks{}); slot != "id-prov#bob" {
+		t.Errorf("second identity slot = %q want id-prov#bob", slot)
+	}
+
+	prov.loginCreds = &ai.OAuthCredentials{Access: "a2", Extra: map[string]any{"accountId": "alice"}}
+	if slot, _, _ := s.LoginAccount(context.Background(), "id-prov", pinoauth.LoginCallbacks{}); slot != "id-prov" {
+		t.Errorf("same identity slot = %q want id-prov (refresh in place)", slot)
+	}
+	if got := s.GetApiKey("id-prov"); got != "a2" {
+		t.Errorf("refresh in place = %q want a2", got)
+	}
+	if n := len(s.AccountsForProvider("id-prov")); n != 2 {
+		t.Errorf("accounts = %d want 2", n)
+	}
+}
+
+// Removing the default must never strand a sole survivor.
+func TestLogoutPromotesSoleSurvivor(t *testing.T) {
+	s := NewInMemoryAuthStorage(AuthStorageData{
+		"openrouter":          {Type: CredentialTypeAPIKey, Key: "old"},
+		"openrouter#account2": {Type: CredentialTypeAPIKey, Key: "new"},
+	})
+	if err := s.Logout("openrouter"); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.GetApiKey("openrouter"); got != "new" {
+		t.Errorf("survivor not promoted: default = %q want new", got)
+	}
+	if s.Has("openrouter#account2") {
+		t.Error("named slot should be vacated by the promotion")
+	}
+}
+
+// With two accounts left, the choice is the user's — promote nothing.
+func TestLogoutDoesNotGuessBetweenSurvivors(t *testing.T) {
+	s := NewInMemoryAuthStorage(AuthStorageData{
+		"anthropic":       {Type: CredentialTypeAPIKey, Key: "d"},
+		"anthropic#bob":   {Type: CredentialTypeAPIKey, Key: "b"},
+		"anthropic#carol": {Type: CredentialTypeAPIKey, Key: "c"},
+	})
+	if err := s.Logout("anthropic"); err != nil {
+		t.Fatal(err)
+	}
+	if s.Has("anthropic") {
+		t.Error("default should stay empty when two accounts remain")
+	}
+	if n := len(s.AccountsForProvider("anthropic")); n != 2 {
+		t.Errorf("accounts = %d want 2", n)
+	}
+}

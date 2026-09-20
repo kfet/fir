@@ -27,7 +27,7 @@ import (
 //
 // It requires auth providers to be registered first (typically via extension
 // loading). Unknown providers print an available-provider list and fail.
-func runLogin(providerID string) error {
+func runLogin(providerID string, opts auth.LoginOptions) error {
 	provider := ai.GetOAuthProvider(providerID)
 	if provider == nil {
 		providers := ai.GetOAuthProviders()
@@ -78,7 +78,7 @@ func runLogin(providerID string) error {
 		},
 	}
 
-	slot, label, err := authStorage.LoginAccount(context.Background(), providerID, callbacks)
+	slot, label, err := authStorage.LoginAccountOpts(context.Background(), providerID, callbacks, opts)
 	if err != nil {
 		return fmt.Errorf("login failed: %w", err)
 	}
@@ -89,6 +89,7 @@ func runLogin(providerID string) error {
 			_, who = auth.SplitSlot(slot)
 		}
 		fmt.Fprintf(os.Stderr, "Added %s account %q. Credentials saved.\n", provider.Name(), who)
+		fmt.Fprintf(os.Stderr, "It is NOT the default. Make it so with: fir login use %s\n", slot)
 	} else if label != "" {
 		fmt.Fprintf(os.Stderr, "Logged in to %s as %s. Credentials saved.\n", provider.Name(), label)
 	} else {
@@ -125,12 +126,18 @@ func runLoginSubcommand() error {
 	// `-h`/`--help` is accepted at any position.
 	args := &Args{}
 	var positional []string
+	loginOpts := auth.LoginOptions{}
 	for i := 0; i < len(subArgs); i++ {
 		a := subArgs[i]
 		switch {
 		case a == "-h" || a == "--help":
 			printLoginHelp()
 			return nil
+		case a == "--add":
+			loginOpts.Add = true
+		case a == "--account" && i+1 < len(subArgs):
+			i++
+			loginOpts.AccountName = subArgs[i]
 		case a == "--no-extensions":
 			args.NoExtensions = true
 		case (a == "--extension" || a == "-e") && i+1 < len(subArgs):
@@ -186,7 +193,7 @@ func runLoginSubcommand() error {
 		return runBedrockSetup(subArgs)
 	}
 
-	return runLoginWithExtensions(args, positional[0])
+	return runLoginWithExtensions(args, positional[0], loginOpts)
 }
 
 // runLoginUse implements `fir login use <provider#account>`: it promotes a
@@ -254,14 +261,17 @@ func printStoredAccounts(authStorage *auth.AuthStorage) {
 
 // printLoginHelp prints the usage text for `fir login`.
 func printLoginHelp() {
-	fmt.Println("Usage: fir login <provider-id> [--no-extensions] [--extension name] [--disable-extension name] [--debug]")
+	fmt.Println("Usage: fir login <provider-id> [--add] [--account NAME] [--no-extensions] [--extension name] [--disable-extension name] [--debug]")
 	fmt.Println("       fir login bedrock [--mode iam-profile|iam-keys|bearer] [--account NAME] [--region REGION] ...")
 	fmt.Println("       fir login use <provider#account>")
 	fmt.Println("       fir login list")
 	fmt.Println()
 	fmt.Println("Runs the OAuth login flow for the given provider and stores credentials.")
 	fmt.Println("`fir login bedrock` configures an Amazon Bedrock account (IAM profile/keys or bearer).")
-	fmt.Println("Logging in to the same provider again ADDS a second account; both are kept and switchable.")
+	fmt.Println("Logging in again refreshes the SAME account in place. A login that the provider")
+	fmt.Println("reports as a different account is added and kept alongside the first.")
+	fmt.Println("Use --add (or --account NAME) to force a second account for a provider that")
+	fmt.Println("reports no account identity, such as OpenRouter.")
 	fmt.Println("`fir login use` switches which stored account serves the bare provider id.")
 	fmt.Println("Auth providers are contributed by extensions, which are loaded automatically.")
 }
@@ -330,10 +340,16 @@ func runLogoutSubcommand() error {
 	fmt.Fprintf(os.Stderr, "Removed account %s.\n", slot)
 
 	// Removing the default strands the remaining named accounts: every lookup
-	// that does not name an account resolves the bare slot. Point at the fix.
+	// that does not name an account resolves the bare slot. Storage promotes
+	// a sole survivor by itself; with several left, the choice is the user's.
 	provider, accountID := auth.SplitSlot(slot)
-	if accountID == "" && !authStorage.Has(provider) {
-		if rest := authStorage.AccountsForProvider(provider); len(rest) > 0 {
+	if accountID == "" {
+		rest := authStorage.AccountsForProvider(provider)
+		switch {
+		case len(rest) == 0:
+		case rest[0].AccountID == "":
+			fmt.Fprintf(os.Stderr, "One account remained, so it is now the default for %s.\n", provider)
+		default:
 			fmt.Fprintf(os.Stderr, "\n%s now has no default account. Promote one:\n", provider)
 			for _, a := range rest {
 				fmt.Fprintf(os.Stderr, "  fir login use %s\n", a.SlotKey)
@@ -345,13 +361,13 @@ func runLogoutSubcommand() error {
 
 // runLoginWithExtensions starts a throwaway session with extensions loaded,
 // then runs the OAuth flow for providerID.
-func runLoginWithExtensions(args *Args, providerID string) error {
+func runLoginWithExtensions(args *Args, providerID string, opts auth.LoginOptions) error {
 	cleanup, err := startLoginSession(args)
 	if err != nil {
 		return err
 	}
 	defer cleanup()
-	return runLogin(providerID)
+	return runLogin(providerID, opts)
 }
 
 // startLoginSession boots the minimum machinery needed for auth extensions to

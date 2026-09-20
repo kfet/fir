@@ -742,19 +742,44 @@ func (s *AuthStorage) Login(ctx context.Context, providerID string, callbacks pi
 	return err
 }
 
-// LoginAccount runs the OAuth login flow for a provider and stores the result
-// as a typed account, returning the slot key it was stored under and the
-// account's display label.
+// LoginOptions controls where a fresh login is stored. The zero value is the
+// default policy described on LoginAccount.
+type LoginOptions struct {
+	// Add forces the credential into a NEW named slot even when the policy
+	// would replace an existing one. This is the only way to keep two
+	// accounts of a provider that reports no account identity.
+	Add bool
+	// AccountName names the slot explicitly ("<provider>#<name>"). It wins
+	// over every other rule. An empty name means "decide by policy".
+	AccountName string
+}
+
+// LoginAccount runs the OAuth login flow for a provider with the default
+// policy. See LoginAccountOpts.
+func (s *AuthStorage) LoginAccount(ctx context.Context, providerID string, callbacks pinoauth.LoginCallbacks) (slotKey, label string, err error) {
+	return s.LoginAccountOpts(ctx, providerID, callbacks, LoginOptions{})
+}
+
+// LoginAccountOpts runs the OAuth login flow for a provider and stores the
+// result as a typed account, returning the slot key it was stored under and
+// the account's display label.
 //
 // Slot assignment:
+//   - An explicit opts.AccountName always wins.
 //   - If the provider has no default account yet, the credential is stored
 //     under the bare provider key (the default account).
 //   - If an existing account (default or named) has the same account identity
 //     (derived from the credential's profile), that account is overwritten —
 //     re-logging in refreshes it in place.
-//   - Otherwise a new named slot "<provider>#<accountId>" is created, so a
-//     second login ADDS an account rather than evicting the first.
-func (s *AuthStorage) LoginAccount(ctx context.Context, providerID string, callbacks pinoauth.LoginCallbacks) (slotKey, label string, err error) {
+//   - If the identity is new, a named slot "<provider>#<accountId>" is
+//     created, so a second login ADDS an account rather than evicting the
+//     first. Two identities cannot collide, so this is safe.
+//   - If the provider reports NO identity (it returns only an opaque key),
+//     a repeat login REPLACES the default. Such a provider cannot tell a
+//     second account from a re-login of the first, and a new slot would
+//     silently leave the stale credential serving every lookup. Use
+//     opts.Add (or opts.AccountName) to keep both.
+func (s *AuthStorage) LoginAccountOpts(ctx context.Context, providerID string, callbacks pinoauth.LoginCallbacks, opts LoginOptions) (slotKey, label string, err error) {
 	provider := ai.GetOAuthProvider(providerID)
 	if provider == nil {
 		return "", "", fmt.Errorf("unknown OAuth provider: %s", providerID)
@@ -767,7 +792,7 @@ func (s *AuthStorage) LoginAccount(ctx context.Context, providerID string, callb
 
 	cred := OAuthCredsToAuthCred(creds)
 	cred.Label = labelFromCreds(creds)
-	slot := s.assignSlot(providerID, creds)
+	slot := s.assignSlot(providerID, creds, opts)
 	if err := s.Set(slot, cred); err != nil {
 		return "", "", err
 	}
@@ -809,9 +834,23 @@ func sanitizeAccountID(v string) string {
 
 // assignSlot decides which storage slot a freshly-logged-in credential goes
 // to. See LoginAccount for the policy.
-func (s *AuthStorage) assignSlot(providerID string, creds *ai.OAuthCredentials) string {
+func (s *AuthStorage) assignSlot(providerID string, creds *ai.OAuthCredentials, opts LoginOptions) string {
 	acctID := accountIDFromCreds(creds)
 	existing := s.AccountsForProvider(providerID)
+
+	taken := func(slot string) bool {
+		for _, a := range existing {
+			if a.SlotKey == slot {
+				return true
+			}
+		}
+		return false
+	}
+
+	// An explicit account name wins over every rule.
+	if name := sanitizeAccountID(opts.AccountName); name != "" {
+		return SlotKey(providerID, name)
+	}
 
 	// No default yet -> claim the default (bare) slot.
 	hasDefault := false
@@ -836,28 +875,48 @@ func (s *AuthStorage) assignSlot(providerID string, creds *ai.OAuthCredentials) 
 				return a.SlotKey
 			}
 		}
+		// A new identity cannot collide with an existing one, so adding is
+		// safe and nothing is evicted.
 		return SlotKey(providerID, acctID)
 	}
 
-	// No stable identity available -> allocate a sequential named slot.
+	// No stable identity available. The provider cannot tell a second account
+	// from a re-login of the first, so the plain verb REPLACES the default —
+	// otherwise the fresh credential would sit in a named slot while the
+	// stale one keeps serving every lookup. --add opts out.
+	if !opts.Add {
+		return providerID
+	}
 	for i := 2; ; i++ {
 		candidate := SlotKey(providerID, fmt.Sprintf("account%d", i))
-		taken := false
-		for _, a := range existing {
-			if a.SlotKey == candidate {
-				taken = true
-				break
-			}
-		}
-		if !taken {
+		if !taken(candidate) {
 			return candidate
 		}
 	}
 }
 
-// Logout removes credentials for a provider.
+// Logout removes credentials for a slot.
+//
+// Invariant: a provider that still holds accounts must keep a default. When
+// the removed slot was the default and exactly ONE account remains, that
+// account is promoted automatically — leaving it in a named slot would strand
+// it, because every lookup that does not name an account reads the bare slot.
+// With two or more left the choice is the user's, so nothing is promoted and
+// the caller should offer `fir login use`.
 func (s *AuthStorage) Logout(provider string) error {
-	return s.Remove(provider)
+	if err := s.Remove(provider); err != nil {
+		return err
+	}
+	base, acctID := SplitSlot(provider)
+	if acctID != "" || IsMCPKey(provider) {
+		return nil
+	}
+	rest := s.AccountsForProvider(base)
+	if len(rest) != 1 || rest[0].AccountID == "" {
+		return nil
+	}
+	_, err := s.SetDefaultAccount(base, rest[0].AccountID)
+	return err
 }
 
 // StoreAccount stores a non-OAuth typed account (e.g. a Bedrock aws_iam or

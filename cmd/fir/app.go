@@ -596,7 +596,7 @@ func run() error {
 
 	// Handle --login: run interactive OAuth login and exit.
 	if args.Login != "" {
-		return runLoginWithExtensions(args, args.Login)
+		return runLoginWithExtensions(args, args.Login, auth.LoginOptions{})
 	}
 
 	// Slash invocation: `fir /<name> <args...>` resolves to a skill (rewritten

@@ -182,8 +182,12 @@ _fir_complete_subcommand() {
         login)
             if [[ $pos -eq 1 ]]; then
                 COMPREPLY=( $(compgen -W "list use $(_fir_providers)" -- "$cur") )
-            elif [[ $pos -eq 2 && ${words[2]} == "use" ]]; then
-                COMPREPLY=( $(compgen -W "$(_fir_slots)" -- "$cur") )
+            elif [[ ${words[2]} == "use" ]]; then
+                if [[ $pos -eq 2 ]]; then
+                    COMPREPLY=( $(compgen -W "$(_fir_slots)" -- "$cur") )
+                fi
+            else
+                COMPREPLY=( $(compgen -W "--add --account --no-extensions --debug" -- "$cur") )
             fi ;;
         auth)
             if [[ $pos -eq 1 ]]; then

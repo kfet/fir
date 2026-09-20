@@ -253,7 +253,13 @@ _fir_login() {
     fi
     if (( CURRENT == 4 )) && [[ ${words[3]} == use ]]; then
         _fir_slots
+        return
     fi
+    _arguments -s \
+        '--add[Keep the existing account and add a new one]' \
+        '--account=[Store under this account name]:name:' \
+        '--no-extensions[Do not load extensions]' \
+        '--debug[Enable debug logging]'
 }
 
 _fir_auth() {
