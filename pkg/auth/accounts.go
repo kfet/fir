@@ -215,6 +215,7 @@ func (s *AuthStorage) SetDefaultAccount(provider, accountID string) (demotedSlot
 	changes[provider] = &newDefault
 
 	s.persistChanges(order, changes)
+	s.audit.record(AuditActionRemove, from, &promoted, len(s.data))
 	s.audit.record(AuditActionSet, provider, &newDefault, len(s.data))
 	return demotedSlot, nil
 }

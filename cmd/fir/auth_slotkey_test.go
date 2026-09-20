@@ -277,3 +277,27 @@ func TestRefreshTarget_EmptyProviderHalf(t *testing.T) {
 		t.Errorf("stderr should quote the raw argument:\n%s", errBuf.String())
 	}
 }
+
+// A flag VALUE must never be mistaken for the bedrock alias, or
+// `fir login openrouter --account bedrock` would configure Bedrock.
+func TestFirstPositionalSkipsFlagValues(t *testing.T) {
+	cases := []struct {
+		args []string
+		want string
+	}{
+		{[]string{"openrouter"}, "openrouter"},
+		{[]string{"--add", "openrouter"}, "openrouter"},
+		{[]string{"openrouter", "--account", "bedrock"}, "openrouter"},
+		{[]string{"--account", "bedrock", "openrouter"}, "openrouter"},
+		{[]string{"-e", "bedrock", "anthropic"}, "anthropic"},
+		{[]string{"bedrock", "--mode", "bearer"}, "bedrock"},
+		{[]string{"use", "openrouter#account2"}, "use"},
+		{[]string{"--debug"}, ""},
+		{nil, ""},
+	}
+	for _, c := range cases {
+		if got := firstPositional(c.args); got != c.want {
+			t.Errorf("firstPositional(%v) = %q want %q", c.args, got, c.want)
+		}
+	}
+}

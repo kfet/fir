@@ -75,7 +75,8 @@ var subcommands = []subcommand{
 		Run:  runLoginSubcommand,
 		Help: [][2]string{
 			{"fir login <provider-id>", "OAuth login for a provider (auth extensions loaded)"},
-			{"fir login <provider-id> (again)", "Add a second account; both are kept and switchable"},
+			{"fir login <provider-id> (again)", "Refresh the same account; replaces the default if the provider has no identity"},
+			{"fir login <provider-id> --add", "Keep the existing account and store a second one"},
 			{"fir login use <provider#account>", "Make a stored account the provider default"},
 			{"fir login list", "List available providers and stored accounts"},
 		},

@@ -114,11 +114,11 @@ func runLoginSubcommand() error {
 
 	// Bedrock setup takes its own flag set (--mode/--profile/--token/…) which
 	// the generic OAuth flag parser below would reject. Detect it up front and
-	// hand the raw args to the Bedrock setup flow.
-	for _, a := range subArgs {
-		if isBedrockAlias(a) {
-			return runBedrockSetup(subArgs)
-		}
+	// hand the raw args to the Bedrock setup flow. Only the FIRST positional
+	// argument is examined: flag VALUES must never route here, or
+	// `fir login openrouter --account bedrock` would configure Bedrock.
+	if isBedrockAlias(firstPositional(subArgs)) {
+		return runBedrockSetup(subArgs)
 	}
 
 	// Parse flags that control extension loading and debug. Mirrors the
@@ -257,6 +257,26 @@ func printStoredAccounts(authStorage *auth.AuthStorage) {
 		}
 		fmt.Printf("  %s  [%s]  %s%s\n", a.SlotKey, a.Type, a.DisplayName(), tag)
 	}
+}
+
+// firstPositional returns the first non-flag argument, skipping the values of
+// the flags that take one. It returns "" when there is no positional argument.
+func firstPositional(args []string) string {
+	takesValue := map[string]bool{
+		"--account": true, "--extension": true, "-e": true,
+		"--disable-extension": true, "-d": true,
+	}
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if strings.HasPrefix(a, "-") {
+			if takesValue[a] {
+				i++
+			}
+			continue
+		}
+		return a
+	}
+	return ""
 }
 
 // printLoginHelp prints the usage text for `fir login`.
