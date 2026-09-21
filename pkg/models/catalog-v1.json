@@ -1,128 +1,84 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-09-20T01:01:36Z",
+  "generatedAt": "2026-09-21T01:01:50Z",
   "providers": {
     "openrouter": {
       "modelOverrides": {
         "deepseek/deepseek-v4-flash": {
           "cost": {
-            "input": 0.03724,
-            "output": 0.07448,
-            "cacheRead": 0.007448,
+            "input": 0.089866,
+            "output": 0.179732,
+            "cacheRead": 0.0179732,
             "cacheWrite": 0
           }
         },
-        "qwen/qwen3-vl-30b-a3b-instruct": {
+        "deepseek/deepseek-v4-pro": {
           "cost": {
-            "input": 0.13,
-            "output": 0.52,
+            "input": 0.9483,
+            "output": 1.8966,
+            "cacheRead": 0.079025,
+            "cacheWrite": 0
+          }
+        },
+        "deepseek/deepseek-v4-pro-0813": {
+          "cost": {
+            "input": 0.66,
+            "output": 1.98,
+            "cacheRead": 0.022,
+            "cacheWrite": 0
+          }
+        },
+        "ibm-granite/granite-4.2-8b": {
+          "cost": {
+            "input": 0.1,
+            "output": 0.15,
+            "cacheRead": 0.05,
+            "cacheWrite": 0
+          }
+        },
+        "meta-llama/llama-3.1-70b-instruct": {
+          "cost": {
+            "input": 0.72,
+            "output": 0.72,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          },
+          "maxTokens": 8192
+        },
+        "meta-llama/llama-4-maverick": {
+          "cost": {
+            "input": 0.2,
+            "output": 0.8,
             "cacheRead": 0,
             "cacheWrite": 0
           }
         },
-        "qwen/qwen3.5-35b-a3b": {
+        "tencent/hy3": {
           "cost": {
-            "input": 0.3125,
-            "output": 1.25,
-            "cacheRead": 0.15625,
-            "cacheWrite": 0
-          },
-          "maxTokens": 16384
-        },
-        "qwen/qwen3.5-9b": {
-          "maxTokens": 32768
-        },
-        "qwen/qwen3.8-27b": {
-          "cost": {
-            "input": 0.42,
-            "output": 3,
-            "cacheRead": 0.085,
+            "input": 0.132,
+            "output": 0.528,
+            "cacheRead": 0.033,
             "cacheWrite": 0
           }
         },
-        "z-ai/glm-4.6": {
+        "~deepseek/deepseek-pro-latest": {
           "cost": {
-            "input": 0.43,
-            "output": 1.75,
-            "cacheRead": 0.08,
-            "cacheWrite": 0
-          },
-          "maxTokens": 16384
-        },
-        "z-ai/glm-5.3": {
-          "cost": {
-            "input": 0.896,
-            "output": 2.816,
-            "cacheRead": 0.1664,
+            "input": 0.66,
+            "output": 1.98,
+            "cacheRead": 0.022,
             "cacheWrite": 0
           }
         },
         "~z-ai/glm-latest": {
           "cost": {
-            "input": 0.8442,
-            "output": 2.6532,
-            "cacheRead": 0.15678,
+            "input": 0.7735,
+            "output": 2.431,
+            "cacheRead": 0.127075,
             "cacheWrite": 0
-          }
+          },
+          "maxTokens": 943718
         }
       }
-    },
-    "vercel-ai-gateway": {
-      "models": [
-        {
-          "id": "mixedbread/toast-1",
-          "name": "Toast 1",
-          "api": "anthropic-messages",
-          "reasoning": false,
-          "input": [
-            "text"
-          ],
-          "cost": {
-            "input": 0.3,
-            "output": 0.72,
-            "cacheRead": 0.036,
-            "cacheWrite": 0
-          },
-          "contextWindow": 131000,
-          "maxTokens": 4000
-        },
-        {
-          "id": "quiverai/arrow-2",
-          "name": "Arrow 2",
-          "api": "anthropic-messages",
-          "reasoning": true,
-          "input": [
-            "text",
-            "image"
-          ],
-          "cost": {
-            "input": 4,
-            "output": 20,
-            "cacheRead": 0.4,
-            "cacheWrite": 5
-          },
-          "contextWindow": 131072,
-          "maxTokens": 131072
-        },
-        {
-          "id": "quiverai/arrow-2-telos",
-          "name": "Arrow 2 Telos",
-          "api": "anthropic-messages",
-          "reasoning": true,
-          "input": [
-            "text",
-            "image"
-          ],
-          "cost": {
-            "input": 6,
-            "output": 30,
-            "cacheRead": 0.6,
-            "cacheWrite": 7.5
-          },
-          "contextWindow": 131072,
-          "maxTokens": 131072
-        }
-      ]
     }
   }
 }
