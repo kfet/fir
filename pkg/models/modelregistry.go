@@ -13,6 +13,7 @@ import (
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/auth"
 	configpkg "github.com/kfet/fir/pkg/config"
+	firlog "github.com/kfet/fir/pkg/log"
 )
 
 // --- OpenAI Compatibility schemas (for JSON validation) ---
@@ -471,6 +472,9 @@ type ModelRegistry struct {
 	modelOrigins map[string]string
 	// providerDefaults holds the overlay's DefaultModelID overrides.
 	providerDefaults map[string]string
+	// clientVersions holds the loaded overlay's client version pins (nil
+	// when the document carries none); see ClientVersion for the floor.
+	clientVersions *CatalogClientVersions
 
 	// liveModels tracks which models are actually available per provider,
 	// populated by background API calls. Protected by liveModelsMu.
@@ -565,6 +569,7 @@ type modelSnapshot struct {
 	origins          map[string]string
 	providerDefaults map[string]string
 	catalogRaw       []byte
+	clientVersions   *CatalogClientVersions
 	loadError        string
 }
 
@@ -576,6 +581,7 @@ func (r *ModelRegistry) applySnapshot(s modelSnapshot) {
 	r.modelOrigins = s.origins
 	r.providerDefaults = s.providerDefaults
 	r.catalogRaw = s.catalogRaw
+	r.clientVersions = s.clientVersions
 	r.loadError = s.loadError
 }
 
@@ -618,6 +624,50 @@ func (r *ModelRegistry) DefaultModelForProvider(p ai.Provider) string {
 	return rec.DefaultModelID
 }
 
+// ClientVersion returns the EFFECTIVE pin for key: the newer of the loaded
+// overlay's value and the compiled-in floor (the embedded snapshot). Keys are
+// the JSON names ("claudeCode"); an unknown key returns "".
+//
+// The overlay may only ever ADVANCE a pin — a published document that names a
+// version older than the one this binary shipped with is ignored, which is
+// what makes a rollback-by-data accident impossible.
+func (r *ModelRegistry) ClientVersion(key string) string {
+	r.mu.RLock()
+	overlay := r.clientVersions.Get(key)
+	r.mu.RUnlock()
+	return maxClientVersion(overlay, DefaultClientVersions().Get(key))
+}
+
+// maxClientVersion picks the newer of an overlay value and the compiled-in
+// floor. Either may be empty.
+func maxClientVersion(overlay, floor string) string {
+	if overlay == "" {
+		return floor
+	}
+	if floor == "" {
+		return overlay
+	}
+	if CompareClientVersions(overlay, floor) < 0 {
+		return floor
+	}
+	return overlay
+}
+
+// logClientVersions records the effective pins at startup and on every
+// hot-apply, so "which Claude Code version are we advertising, and did it
+// come from the document or the binary?" is answerable from the debug log.
+func logClientVersions(overlay *CatalogClientVersions) {
+	for _, key := range []string{ClientVersionKeyClaudeCode} {
+		ov, floor := overlay.Get(key), DefaultClientVersions().Get(key)
+		eff := maxClientVersion(ov, floor)
+		source := "embedded-floor"
+		if eff != "" && eff == ov && ov != floor {
+			source = "overlay"
+		}
+		firlog.Debug("catalog overlay: client versions %s=%s (source=%s)", key, eff, source)
+	}
+}
+
 // buildModels computes the whole registry state. It must NOT be called with
 // r.mu held: it runs OAuth ModifyModels callbacks which may block on I/O.
 func (r *ModelRegistry) buildModels() modelSnapshot {
@@ -627,6 +677,24 @@ func (r *ModelRegistry) buildModels() modelSnapshot {
 
 	builtInModels := r.loadBuiltInModels(result.Overrides, result.ModelOverrides)
 	combined := r.mergeCustomModels(builtInModels, result.Models)
+
+	var clientVersions *CatalogClientVersions
+	if overlay != nil {
+		clientVersions = overlay.ClientVersions
+	}
+	logClientVersions(clientVersions)
+
+	// Publish the pins BEFORE the ModifyModels callbacks run. Those callbacks
+	// are where the extension-declared {clientVersion.<key>} header templates
+	// are expanded, and they read the value back through ClientVersion() —
+	// installing it only via applySnapshot (after this function returns) would
+	// expand against the PREVIOUS document, so a freshly published pin would
+	// not reach the gated messages-API headers until the rebuild after next.
+	// Rebuilds are serialised by refreshMu, so this early write cannot be
+	// interleaved by a competing build.
+	r.mu.Lock()
+	r.clientVersions = clientVersions
+	r.mu.Unlock()
 
 	// Let OAuth providers modify their models (e.g., update baseUrl)
 	for _, oauthProvider := range r.authStorage.GetOAuthProviders() {
@@ -652,6 +720,7 @@ func (r *ModelRegistry) buildModels() modelSnapshot {
 		origins:          result.Origins,
 		providerDefaults: defaults,
 		catalogRaw:       overlayRaw,
+		clientVersions:   clientVersions,
 		loadError:        result.Error, // built-ins are kept even if custom models failed
 	}
 }

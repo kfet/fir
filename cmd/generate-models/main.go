@@ -2483,6 +2483,16 @@ func main() {
 		failed = append(failed, "poe: "+err.Error())
 	}
 
+	// The Claude Code version pin (npm dist-tags.latest). Same contract as
+	// every other source: a failure is recorded in sources_failed and, under
+	// -strict, means no run at all — a flaky npm produces neither a PR nor a
+	// red badge. The committed pin is never touched on failure.
+	claudeCodeVersion, err := fetchClaudeCodeVersion()
+	if err != nil {
+		log.Printf("Warning: claude-code version fetch failed: %v", err)
+		failed = append(failed, claudeCodeSource+": "+err.Error())
+	}
+
 	if *strict && len(failed) > 0 {
 		// A flaky upstream must not produce a red badge every morning.
 		log.Printf("Upstream unavailable (%s); not generating", strings.Join(failed, "; "))
@@ -2542,12 +2552,13 @@ func main() {
 	reportCatalogDiff(all, failed, *changelog)
 
 	runWatch(watchOptions{
-		fresh:          all,
-		trigger:        *trigger,
-		reportPath:     *report,
-		summaryPath:    *summary,
-		overlayPath:    filepath.Join(root, "pkg", "models", "catalog-v1.json"),
-		proposeOverlay: *overlay,
+		fresh:             all,
+		trigger:           *trigger,
+		reportPath:        *report,
+		summaryPath:       *summary,
+		overlayPath:       filepath.Join(root, "pkg", "models", "catalog-v1.json"),
+		proposeOverlay:    *overlay,
+		claudeCodeVersion: claudeCodeVersion,
 	})
 
 	// Print statistics

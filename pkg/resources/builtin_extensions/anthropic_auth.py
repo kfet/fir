@@ -28,8 +28,14 @@ import fir_ext
 # ---------------------------------------------------------------------------
 
 _CLIENT_ID = base64.b64decode("OWQxYzI1MGEtZTYxYi00NGQ5LTg4ZWQtNTk0NGQxOTYyZjVl").decode()
-_CLAUDE_CODE_VERSION = "2.1.280"
-_USER_AGENT = f"claude-cli/{_CLAUDE_CODE_VERSION} (external, cli)"
+# The Claude Code version is NOT a literal here: Anthropic gates new models on
+# it, and a literal would make every gate bump a binary release. fir supplies
+# it from the catalog overlay (clientVersions.claudeCode) and expands the
+# {clientVersion.<key>} placeholder in header VALUES at call time — so a
+# published catalog moves the pin fleet-wide within one TTL, with no restart.
+# Hooks that make their own HTTP calls read the same scalar from
+# ctx.client_version("claudeCode").
+_USER_AGENT = "claude-cli/{clientVersion.claudeCode} (external, cli)"
 
 
 # ---------------------------------------------------------------------------
@@ -63,6 +69,7 @@ fir_ext.declare_oauth_provider(
     # substituted by fir with the per-session state value (currently
     # pkce.Verifier) before the token request is sent.
     token_body_extra={"state": "{state}"},
+    # Expanded by fir at every token exchange and refresh.
     token_headers={"User-Agent": _USER_AGENT},
     open_url_instructions=(
         "Complete login in your browser. If the browser is on another machine, "
@@ -206,6 +213,8 @@ def modify_models(params: dict, ctx: fir_ext.AuthContext) -> list[dict] | None:
     if not creds.get("access"):
         return None
 
+    # _USER_AGENT still carries its {clientVersion.claudeCode} placeholder
+    # here; fir expands the returned header VALUES after this hook returns.
     oauth_headers = {
         "user-agent": _USER_AGENT,
         "x-app": "cli",
@@ -244,11 +253,14 @@ def list_models(params: dict, ctx: fir_ext.AuthContext) -> list[str] | None:
     if not access:
         return None
 
+    # We issue this request ourselves, so fir cannot post-process the header:
+    # expand the placeholder here from the same catalog-supplied scalar.
+    user_agent = _USER_AGENT.replace("{clientVersion.claudeCode}", ctx.client_version("claudeCode"))
     headers = {
         "Authorization": f"Bearer {access}",
         "anthropic-version": "2023-06-01",
         "anthropic-beta": "oauth-2025-04-20",
-        "User-Agent": _USER_AGENT,
+        "User-Agent": user_agent,
     }
 
     ids: list[str] = []

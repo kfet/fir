@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Added
+- **The Claude Code version pin ships as catalog data, so v1.18.3 was the last release of its kind.** Anthropic gates new models on the `claude-cli/<version>` a request advertises, and that number was a literal in the `anthropic-auth` extension — every gate bump cost a binary release plus the fleet's update lag (v1.18.3 was exactly that, a one-line release). The catalog overlay gains one additive, tightly-typed key, `clientVersions.claudeCode`, and the extension now declares a template (`claude-cli/{clientVersion.claudeCode} (external, cli)`) with no version literal anywhere in the file. fir expands `{clientVersion.<key>}` in header **values only** — never a header name, never a URL — at token exchange/refresh and after `auth/modify_models`, so a published catalog moves the pin fleet-wide within one TTL with no restart, and the model that needs the pin travels in the same document. Values must match `^[0-9]+(\.[0-9]+){0,3}$` and be ≤ 32 bytes, making injection structurally impossible, and the version compiled into each binary is a **floor**: data can only ever advance the pin, never roll a host below what it shipped with. Hooks that issue their own HTTP requests (`auth/list_models`) receive the scalar as a `client_versions` param, exposed to the Python SDK as `ctx.client_version("claudeCode")`. The nightly `model-watch` job learns the value from npm `dist-tags.latest` for `@anthropic-ai/claude-code`, forward-only, on the same rolling PR as new models — and a moved pin alone now qualifies to open one.
+
 ## [1.18.4] - 2026-09-22
 
 ### Fixed

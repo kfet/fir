@@ -10,6 +10,7 @@ merges them with ``&``. If the params drift, the short link becomes
 stale — re-create it and update the frozen constants below."""
 
 import os
+import re
 import sys
 import unittest
 from unittest import mock
@@ -190,6 +191,93 @@ class TestPostExchangeAccountCapture(unittest.TestCase):
     def test_no_account_no_extra(self):
         out = self._call({"access_token": "a", "refresh_token": "r", "raw": {}})
         self.assertNotIn("extra", out)
+
+
+class TestClientVersionIsData(unittest.TestCase):
+    """The Claude Code version must NEVER be a literal in this extension.
+
+    Anthropic gates new models on the advertised client version. A literal
+    here means every gate bump is a one-line binary release — the exact
+    failure (v1.18.3) this whole mechanism exists to prevent. The value
+    arrives as catalog-overlay data instead: fir expands the
+    ``{clientVersion.claudeCode}`` placeholder in header VALUES, and hooks
+    that make their own HTTP calls read ``ctx.client_version("claudeCode")``.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        path = os.path.join(_ext_dir, "anthropic_auth.py")
+        with open(path, encoding="utf-8") as fh:
+            cls.source = fh.read()
+
+    def test_no_version_literal(self):
+        found = re.findall(r"claude-cli/[0-9]", self.source)
+        self.assertEqual(
+            found,
+            [],
+            "anthropic_auth.py must not hardcode a Claude Code version: use the "
+            "{clientVersion.claudeCode} placeholder so the pin ships as catalog data.",
+        )
+
+    def test_user_agent_is_a_template(self):
+        flow = _load_spec(_PROVIDER_ID)["flow"]
+        self.assertEqual(
+            flow.get("token_headers", {}).get("User-Agent"),
+            "claude-cli/{clientVersion.claudeCode} (external, cli)",
+        )
+
+    def test_modify_models_returns_the_template(self):
+        _load_spec(_PROVIDER_ID)
+        handler = fir_ext._auth_modify_models_handlers[_PROVIDER_ID]
+        out = handler(
+            {
+                "credentials": {"access": "tok"},
+                "models": [{"id": "m", "provider": "anthropic"}],
+            },
+            None,
+        )
+        # Unexpanded on purpose: fir expands the returned header VALUES, which
+        # is what keeps the pin hot across a catalog refresh.
+        self.assertEqual(
+            out[0]["headers"]["user-agent"],
+            "claude-cli/{clientVersion.claudeCode} (external, cli)",
+        )
+
+    def test_list_models_uses_ctx_client_version(self):
+        _load_spec(_PROVIDER_ID)
+        handler = fir_ext._auth_list_models_handlers[_PROVIDER_ID]
+
+        seen = {}
+
+        class FakeCtx:
+            def client_version(self, key):
+                seen["key"] = key
+                return "9.9.9"
+
+        captured = {}
+
+        class FakeResp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def read(self):
+                return b'{"data": [{"id": "claude-live"}], "has_more": false}'
+
+        def fake_urlopen(req, timeout=0):
+            captured["headers"] = dict(req.headers)
+            return FakeResp()
+
+        with mock.patch("urllib.request.urlopen", fake_urlopen):
+            ids = handler({"credentials": {"access": "tok"}}, FakeCtx())
+
+        self.assertEqual(ids, ["claude-live"])
+        self.assertEqual(seen["key"], "claudeCode")
+        # urllib title-cases header names.
+        ua = captured["headers"].get("User-agent") or captured["headers"].get("User-Agent")
+        self.assertEqual(ua, "claude-cli/9.9.9 (external, cli)")
 
 
 if __name__ == "__main__":

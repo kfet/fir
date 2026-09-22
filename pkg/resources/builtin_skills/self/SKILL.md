@@ -383,6 +383,30 @@ add models to providers fir already knows about.
   (`builtin` / `overlay` / `user:models.json` / `user:models.d/<file>`) so you
   can see which layer won.
 
+**Client version pins (`clientVersions`).** The overlay also carries a small,
+closed set of third-party client version scalars — currently just
+`clientVersions.claudeCode`, the Claude Code CLI version the `anthropic-auth`
+extension advertises as `claude-cli/<v> (external, cli)`. Anthropic gates new
+models on it, so shipping it as data means a gated model and the version pin it
+requires arrive together in one document, instead of costing a one-line binary
+release.
+
+- The extension holds **no version literal**: it declares the template
+  `claude-cli/{clientVersion.claudeCode} (external, cli)` and fir expands
+  `{clientVersion.<key>}` in header **values only** (never names, never URLs)
+  at token-request time and after `auth/modify_models`. Hot: a published
+  change takes effect within a TTL with no restart.
+- Values must match `^[0-9]+(\.[0-9]+){0,3}$` and be ≤ 32 bytes, so nothing
+  free-form can ride in.
+- The value compiled into the binary is a **floor**: a published document can
+  only ever *advance* the pin, never roll a host below what it shipped with.
+- To read what a session is advertising: `/reload` names it in its status line
+  (`… (claude-code 2.1.280)`); the committed value is
+  `clientVersions.claudeCode` in `pkg/models/catalog-v1.json`.
+- The nightly `model-watch` job reads npm `dist-tags.latest` for
+  `@anthropic-ai/claude-code` and proposes a forward-only bump on the same
+  rolling PR as new models; a moved pin alone is enough to open one.
+
 Escape hatches (env vars):
 
 | Variable | Effect |

@@ -10,6 +10,10 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
+	"sync"
 	"time"
 
 	firlog "github.com/kfet/fir/pkg/log"
@@ -55,6 +59,17 @@ import (
 // can never take effect on a binary whose embedded snapshot is newer. TO ROLL
 // BACK, RE-PUBLISH THE OLD CONTENT WITH A FRESH generatedAt. Reverting the
 // commit alone is not enough.
+//
+// Two consequences of the clientVersions floor (see DefaultClientVersions)
+// are worth stating here:
+//
+//   - Because the effective pin is max(overlay, embedded), published data can
+//     never roll the fleet BELOW what each binary shipped with. Going below
+//     that is a binary release, by design.
+//   - A too-high pin (a vendor rejecting an unknown version) rolls back the
+//     same way as anything else here — re-publish the previous number with a
+//     fresh generatedAt — and takes effect within a TTL with no restart,
+//     because placeholder expansion happens at call time.
 //
 // The wire format is ProviderConfig / ModelDefinition / ModelOverride from
 // modelregistry.go. Those types are now a PUBLISHED wire format, not just a
@@ -103,8 +118,133 @@ type CatalogOverlay struct {
 	// provider. Moving a provider's default is plainly data; the built-in
 	// value stays as the offline fallback.
 	ProviderDefaults map[string]string `json:"providerDefaults,omitempty"`
+	// ClientVersions carries third-party client version pins that builtin
+	// auth extensions interpolate into HARDCODED header templates via the
+	// {clientVersion.<key>} placeholder. Each key is a closed, named scalar
+	// validated by validateClientVersion; the set of keys is part of the
+	// schema and grows only additively. See the "spirit of the no-headers
+	// rule" note on validateCatalogProviders.
+	//
+	// A POINTER deliberately: `omitempty` on a struct VALUE does not omit,
+	// so a value field would force `"clientVersions": {}` into every
+	// canonical document. With a pointer, "field absent ⇒ old behaviour" is
+	// literally true on the wire.
+	ClientVersions *CatalogClientVersions `json:"clientVersions,omitempty"`
 	// Providers is a models.d-shaped fragment.
 	Providers map[string]ProviderConfig `json:"providers"`
+}
+
+// CatalogClientVersions is a CLOSED set. A struct, deliberately not a
+// map[string]string: every pin is an individually-named field, so an old
+// binary cannot be handed a key it never heard of and a new binary cannot
+// accept a key nobody validated. Adding a second pin is a code change —
+// the document floats, the vocabulary is versioned with the binary.
+type CatalogClientVersions struct {
+	// ClaudeCode is the Claude Code CLI version advertised by the
+	// anthropic-auth extension as `claude-cli/<v> (external, cli)`.
+	// Anthropic gates new models on it.
+	ClaudeCode string `json:"claudeCode,omitempty"`
+}
+
+// ClientVersionRE is the entire grammar: 1-4 dot-separated numeric
+// components. No pre-release tags, no build metadata, no whitespace. The
+// grammar is what makes header injection ("2.1.280; x-evil: 1", CRLF,
+// unicode) structurally impossible. Exported so cmd/generate-models
+// validates a proposed pin with exactly the code that will later load it.
+var ClientVersionRE = regexp.MustCompile(`^[0-9]+(\.[0-9]+){0,3}$`)
+
+// ClientVersionMaxLen caps the scalar so a runaway document is impossible.
+const ClientVersionMaxLen = 32
+
+// validateClientVersion enforces the grammar and the length cap.
+func validateClientVersion(where, v string) error {
+	if v == "" {
+		return nil // absent is fine: the compiled-in floor applies
+	}
+	if len(v) > ClientVersionMaxLen {
+		return fmt.Errorf("%s: client version too long (%d > %d)", where, len(v), ClientVersionMaxLen)
+	}
+	if !ClientVersionRE.MatchString(v) {
+		return fmt.Errorf("%s: %q is not a plain dotted version", where, v)
+	}
+	return nil
+}
+
+// validateCatalogClientVersions validates every named pin. Nil (field
+// absent) is valid and means "use the compiled-in floor".
+func validateCatalogClientVersions(cv *CatalogClientVersions) error {
+	if cv == nil {
+		return nil
+	}
+	return validateClientVersion("clientVersions.claudeCode", cv.ClaudeCode)
+}
+
+// ClientVersionKeyClaudeCode is the JSON name of the Claude Code pin, used
+// by the {clientVersion.<key>} placeholder.
+const ClientVersionKeyClaudeCode = "claudeCode"
+
+// Get returns the pin named by its JSON key, or "" for an unknown key.
+func (cv *CatalogClientVersions) Get(key string) string {
+	if cv == nil {
+		return ""
+	}
+	if key == ClientVersionKeyClaudeCode {
+		return cv.ClaudeCode
+	}
+	return ""
+}
+
+// DefaultClientVersions is the compiled-in FLOOR: the embedded snapshot's
+// clientVersions. Exported so callers that run before any registry exists
+// (`fir login` from the CLI, tests) get the same answer the registry would.
+//
+// The floor exists so a published document can only ever ADVANCE a pin:
+// data can never roll the fleet below what each binary shipped with and was
+// tested against. Rolling below that is a binary release, by design.
+func DefaultClientVersions() *CatalogClientVersions {
+	embeddedClientVersionsOnce.Do(func() {
+		o, err := ParseCatalogOverlay(embeddedCatalog)
+		if err != nil || o == nil || o.ClientVersions == nil {
+			embeddedClientVersions = &CatalogClientVersions{}
+			return
+		}
+		cv := *o.ClientVersions
+		embeddedClientVersions = &cv
+	})
+	return embeddedClientVersions
+}
+
+var (
+	embeddedClientVersionsOnce sync.Once
+	embeddedClientVersions     *CatalogClientVersions
+)
+
+// CompareClientVersions compares two strings matching ClientVersionRE
+// component-wise and numerically (so 2.1.90 < 2.1.280, which a string
+// compare gets wrong). Missing trailing components count as zero. Four
+// integers do not justify a semver dependency.
+func CompareClientVersions(a, b string) int {
+	as, bs := strings.Split(a, "."), strings.Split(b, ".")
+	n := len(as)
+	if len(bs) > n {
+		n = len(bs)
+	}
+	for i := 0; i < n; i++ {
+		av, bv := 0, 0
+		if i < len(as) {
+			av, _ = strconv.Atoi(as[i])
+		}
+		if i < len(bs) {
+			bv, _ = strconv.Atoi(bs[i])
+		}
+		if av != bv {
+			if av < bv {
+				return -1
+			}
+			return 1
+		}
+	}
+	return 0
 }
 
 // modelsConfig views the overlay as a plain models.d fragment.
@@ -133,6 +273,9 @@ func ParseCatalogOverlay(data []byte) (*CatalogOverlay, error) {
 	if err := validateCatalogProviders(o.Providers); err != nil {
 		return nil, err
 	}
+	if err := validateCatalogClientVersions(o.ClientVersions); err != nil {
+		return nil, err
+	}
 	if err := validateModelsConfig(o.modelsConfig()); err != nil {
 		return nil, err
 	}
@@ -151,6 +294,24 @@ func ParseCatalogOverlay(data []byte) (*CatalogOverlay, error) {
 //
 // Checked at every level the schema allows them: provider, model definition,
 // and per-model override.
+//
+// # Why clientVersions does not breach this rule
+//
+// The rejected fields are rejected because each is an OPEN-ENDED INSTRUCTION:
+// baseUrl redirects, apiKey/authHeader swap credentials, headers is a free map
+// that can carry either. A clientVersions scalar is none of those. It must
+// match ClientVersionRE and fit in ClientVersionMaxLen; it is substituted only
+// into a template whose entire text is compiled into an extension; it lands in
+// a header VALUE, never a header name and never a URL; and the compiled-in
+// value is a floor it can only advance. A wrong number produces a visible
+// vendor 400 on new models, recoverable within one TTL by re-publishing — the
+// same blast radius as a typo'd model entry, which is the accidental-typo
+// threat this function names. It is squarely on the "what a request LOOKS
+// LIKE" side of the invariant.
+//
+// The key set stays CLOSED IN THE BINARY (CatalogClientVersions is a struct,
+// not a map). Adding a second pin is a code change: the document floats, the
+// vocabulary is versioned with the binary.
 //
 // Consequence: since validateModelsConfig requires baseUrl+apiKey for a
 // non-built-in provider that defines models, the overlay can only add models

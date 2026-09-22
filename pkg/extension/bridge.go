@@ -40,6 +40,14 @@ type Bridge struct {
 	notifyFn    atomic.Pointer[NotifyFunc]
 	setStatusFn atomic.Pointer[SetStatusFunc]
 
+	// api is the host API this bridge was registered against, kept so
+	// non-tool paths (auth providers, client-version placeholder
+	// expansion) can reach the session without threading it through every
+	// call. Set by RegisterTools/SetAPI; nil for hosts that never
+	// registered one (bare test bridges), where the compiled-in floor
+	// applies.
+	api atomic.Pointer[BridgeAPI]
+
 	// nextID generates unique request IDs for outbound requests.
 	// Starts at 100 to avoid collision with handshake ID (1).
 	nextID atomic.Int64
@@ -941,8 +949,18 @@ func (b *Bridge) CallHook(ctx context.Context, name string, data any, timeout ti
 	}
 }
 
+// SetAPI records the host API for later non-tool use (see Bridge.api).
+// Safe to call from any goroutine; nil is ignored.
+func (b *Bridge) SetAPI(api BridgeAPI) {
+	if api == nil {
+		return
+	}
+	b.api.Store(&api)
+}
+
 // RegisterTools registers each tool from InitResult on the given API.
 func (b *Bridge) RegisterTools(api BridgeAPI) {
+	b.SetAPI(api)
 	for _, t := range b.caps.Tools {
 		tool := t // capture
 		// Resolve the declared per-tool timeout once at registration.

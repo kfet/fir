@@ -11,6 +11,7 @@ import (
 
 	"github.com/kfet/agent"
 	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/models"
 	"github.com/kfet/fir/pkg/session"
 	"github.com/kfet/fir/pkg/session/store"
 )
@@ -199,6 +200,18 @@ func (b *SessionBridge) GetAvailableModels() []*ai.Model {
 		return nil
 	}
 	return mr.GetAvailable()
+}
+
+// GetClientVersion resolves the pin through the session's model registry so
+// a hot-applied catalog overlay takes effect without a restart. Falls back to
+// the compiled-in floor when there is no registry.
+func (b *SessionBridge) GetClientVersion(key string) string {
+	if b.session != nil {
+		if mr := b.session.ModelRegistryRef(); mr != nil {
+			return mr.ClientVersion(key)
+		}
+	}
+	return models.DefaultClientVersions().Get(key)
 }
 
 func (b *SessionBridge) ContinueSession() error {

@@ -19,6 +19,7 @@ import (
 	"github.com/kfet/agent/tools"
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/mcp"
+	"github.com/kfet/fir/pkg/models"
 	"github.com/kfet/fir/pkg/modes/interactive/components"
 	itheme "github.com/kfet/fir/pkg/modes/interactive/theme"
 	"github.com/kfet/fir/pkg/resources"
@@ -1256,11 +1257,22 @@ func (m *InteractiveMode) handleReloadCommand() {
 	// Re-read provider credentials and the model catalog from disk (auth.json,
 	// models.json + models.d/ fragments) so providers authenticated after
 	// startup and newly added models appear without restarting.
-	m.session.ModelRegistryRef().Refresh()
+	if mr := m.session.ModelRegistryRef(); mr != nil {
+		mr.Refresh()
+	}
 
 	m.setupAutocomplete()
 	m.rebuildChatFromMessages()
-	m.showStatus("Reloaded extensions, skills, themes, MCP servers, provider auth, models")
+	status := "Reloaded extensions, skills, themes, MCP servers, provider auth, models"
+	// Name the client version pin the catalog overlay is currently supplying:
+	// it decides which gated vendor models work, and there is nowhere else a
+	// user can read it without grepping an extension.
+	if mr := m.session.ModelRegistryRef(); mr != nil {
+		if v := mr.ClientVersion(models.ClientVersionKeyClaudeCode); v != "" {
+			status += fmt.Sprintf(" (claude-code %s)", v)
+		}
+	}
+	m.showStatus(status)
 }
 
 // handleMCPReloadCommand performs an MCP-only reload without the full session reload.

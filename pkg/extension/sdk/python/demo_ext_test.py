@@ -13,6 +13,7 @@ import importlib.util
 import json
 import os
 import queue
+import re
 import sys
 import threading
 import time
@@ -55,6 +56,9 @@ def _load_demo() -> None:
     fir_ext._provider_stream_handlers.clear()
     fir_ext._provider_list_models_handlers.clear()
     fir_ext._provider_resolve_custom_id_handlers.clear()
+    fir_ext._auth_providers.clear()
+    fir_ext._auth_modify_models_handlers.clear()
+    fir_ext._auth_list_models_handlers.clear()
     _DEMO_EXT_NAME = None
 
     orig_run = fir_ext.run
@@ -1357,3 +1361,73 @@ class TestTypedSurface(unittest.TestCase):
         }
         missing = promised - set(fir_ext.__all__)
         self.assertSetEqual(missing, set(), f"missing from __all__: {sorted(missing)}")
+
+
+# ---------------------------------------------------------------------------
+# Client version placeholder (auth providers)
+# ---------------------------------------------------------------------------
+
+
+class TestDemoClientVersionPlaceholder(DemoTestCase):
+    """The vendor client version must travel as catalog DATA, never as a
+    literal in an extension — see the module docstring section
+    "CLIENT VERSION PLACEHOLDERS"."""
+
+    def _provider(self) -> dict:
+        for p in fir_ext._auth_providers:
+            if p["id"] == "demo-oauth":
+                return p
+        raise AssertionError("demo-oauth provider not registered")
+
+    def test_token_headers_carry_the_template(self) -> None:
+        flow = self._provider()["flow"]
+        self.assertEqual(
+            flow["token_headers"]["User-Agent"],
+            "demo-cli/{clientVersion.claudeCode} (external, cli)",
+        )
+
+    def test_no_version_literal_in_demo(self) -> None:
+        path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "..",
+            "..",
+            "..",
+            "resources",
+            "builtin_extensions",
+            "demo.py",
+        )
+        with open(path, encoding="utf-8") as fh:
+            source = fh.read()
+        self.assertEqual(re.findall(r"demo-cli/[0-9]", source), [])
+
+    def test_modify_models_returns_the_unexpanded_template(self) -> None:
+        handler = fir_ext._auth_modify_models_handlers["demo-oauth"]
+        out = handler({"models": [{"id": "m", "provider": "demo-oauth"}]}, None)
+        self.assertEqual(
+            out[0]["headers"]["user-agent"],
+            "demo-cli/{clientVersion.claudeCode} (external, cli)",
+        )
+
+    def test_list_models_reads_ctx_client_version(self) -> None:
+        handler = fir_ext._auth_list_models_handlers["demo-oauth"]
+        seen = {}
+
+        class FakeCtx:
+            def client_version(self, key):
+                seen["key"] = key
+                return "1.2.3"
+
+            def notify(self, message, level="info"):
+                seen["message"] = message
+
+        self.assertIsNone(handler({}, FakeCtx()))
+        self.assertEqual(seen["key"], "claudeCode")
+        self.assertIn("demo-cli/1.2.3 (external, cli)", seen["message"])
+
+    def test_auth_context_client_version_is_a_plain_lookup(self) -> None:
+        ctx = fir_ext.AuthContext()
+        # No RPC, and an unset/unknown key is simply empty.
+        self.assertEqual(ctx.client_version("claudeCode"), "")
+        ctx.client_versions = {"claudeCode": "2.1.280"}
+        self.assertEqual(ctx.client_version("claudeCode"), "2.1.280")
+        self.assertEqual(ctx.client_version("nope"), "")

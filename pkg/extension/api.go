@@ -34,6 +34,13 @@ type BridgeAPI interface {
 	// configured default has gone unavailable. Returns nil when no registry
 	// is reachable (e.g. the auth helper's nop bridge).
 	GetAvailableModels() []*ai.Model
+	// GetClientVersion returns the effective third-party client version pin
+	// for key (a catalog-overlay clientVersions JSON name, e.g.
+	// "claudeCode"): the newer of the published overlay's value and the
+	// compiled-in floor. Used to expand {clientVersion.<key>} placeholders
+	// in extension-declared header templates, and passed to hooks that make
+	// their own HTTP calls. Returns "" for an unknown key.
+	GetClientVersion(key string) string
 	ContinueSession() error
 	SideQuery(question string, opts *session.SideQueryOptions) (string, error)
 	// SideQueryStream is the streaming flavor of SideQuery. onDelta is

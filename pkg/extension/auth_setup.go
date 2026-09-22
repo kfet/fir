@@ -7,6 +7,7 @@ import (
 
 	"github.com/kfet/fir/pkg/ai"
 	firlog "github.com/kfet/fir/pkg/log"
+	"github.com/kfet/fir/pkg/models"
 	"github.com/kfet/fir/pkg/session"
 	"github.com/kfet/fir/pkg/session/store"
 )
@@ -180,7 +181,14 @@ func (n *nopBridgeAPI) SetLabel(_, _ string)                                   {
 func (n *nopBridgeAPI) ClearLabel(_ string)                                    {}
 func (n *nopBridgeAPI) SetModel(_ *ai.Model) bool                              { return false }
 func (n *nopBridgeAPI) GetAvailableModels() []*ai.Model                        { return nil }
-func (n *nopBridgeAPI) ContinueSession() error                                 { return nil }
+
+// GetClientVersion: no registry here (`fir login` runs before any session),
+// so the compiled-in floor is the answer — the same value the registry would
+// return against an overlay that sets nothing.
+func (n *nopBridgeAPI) GetClientVersion(key string) string {
+	return models.DefaultClientVersions().Get(key)
+}
+func (n *nopBridgeAPI) ContinueSession() error { return nil }
 func (n *nopBridgeAPI) SideQuery(_ string, _ *session.SideQueryOptions) (string, error) {
 	return "", fmt.Errorf("side query not available outside a session")
 }

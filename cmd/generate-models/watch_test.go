@@ -202,7 +202,7 @@ func TestUpdateOverlay(t *testing.T) {
 	unexpressible := spec("anthropic", "claude-watch-6")
 	unexpressible.Compat = &compatSpec{ZaiToolStream: boolPtr(true)}
 
-	added, skipped, err := updateOverlay(path, []modelSpec{newModel, unexpressible})
+	added, skipped, err := updateOverlay(path, []modelSpec{newModel, unexpressible}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -234,7 +234,7 @@ func TestUpdateOverlay(t *testing.T) {
 
 	// Re-running adds nothing and leaves the document alone.
 	before, _ := os.ReadFile(path)
-	added, _, err = updateOverlay(path, []modelSpec{newModel})
+	added, _, err = updateOverlay(path, []modelSpec{newModel}, "")
 	if err != nil || len(added) != 0 {
 		t.Fatalf("second run: added=%v err=%v", added, err)
 	}

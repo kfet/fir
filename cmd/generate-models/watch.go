@@ -64,15 +64,20 @@ func (k modelKey) String() string { return k.Provider + "/" + k.ID }
 
 // watchResult is the outcome of one nightly comparison.
 type watchResult struct {
-	Trigger    string      `json:"trigger"`
-	OpenPR     bool        `json:"open_pr"`
-	New        []string    `json:"new"`
-	Qualifying []string    `json:"qualifying"`
-	Removed    []string    `json:"removed"`
-	Changed    int         `json:"changed"`
-	Anomaly    string      `json:"anomaly,omitempty"`
-	Failed     []string    `json:"sources_failed,omitempty"`
-	specs      []modelSpec // qualifying specs, in report order
+	Trigger    string   `json:"trigger"`
+	OpenPR     bool     `json:"open_pr"`
+	New        []string `json:"new"`
+	Qualifying []string `json:"qualifying"`
+	Removed    []string `json:"removed"`
+	Changed    int      `json:"changed"`
+	Anomaly    string   `json:"anomaly,omitempty"`
+	// ClientVersionBump records a moved client version pin ("2.1.280 →
+	// 2.1.291"), which is a qualifying event in its own right: a vendor
+	// sometimes raises the gate on models fir already ships, and a night with
+	// no new model but a moved pin still matters.
+	ClientVersionBump string      `json:"client_version_bump,omitempty"`
+	Failed            []string    `json:"sources_failed,omitempty"`
+	specs             []modelSpec // qualifying specs, in report order
 }
 
 // compiledCatalog snapshots the models compiled into this binary.
@@ -480,6 +485,16 @@ func writeReport(path string, res *watchResult, overlayAdded []string) error {
 		b.WriteString("\n")
 	}
 
+	if res.ClientVersionBump != "" {
+		b.WriteString("## Client version pin\n\n")
+		fmt.Fprintf(&b, "`clientVersions.claudeCode`: %s (npm `dist-tags.latest` of "+
+			"`@anthropic-ai/claude-code`).\n\nAnthropic gates new models on the version the "+
+			"client advertises, so the pin rides the same PR as the models that need it. "+
+			"Merging publishes it to the fleet within the catalog TTL; the value compiled into "+
+			"each binary remains a floor, so this can only ever advance the pin.\n\n",
+			res.ClientVersionBump)
+	}
+
 	if len(overlayAdded) > 0 {
 		b.WriteString("## Catalog overlay\n\n")
 		fmt.Fprintf(&b, "`pkg/models/catalog-v1.json` gained %d entry(ies): %s.\n\n",
@@ -579,7 +594,10 @@ func overlayDefinition(m modelSpec) models.ModelDefinition {
 // failure this design avoids.
 //
 // Returns the ids added and the ids skipped-with-reason.
-func updateOverlay(path string, specs []modelSpec) (added, skipped []string, err error) {
+// claudeCodePin, when non-empty, is written as clientVersions.claudeCode in
+// the SAME write as the added models and the bumped generatedAt, validated by
+// ParseCatalogOverlay before the file lands.
+func updateOverlay(path string, specs []modelSpec, claudeCodePin string) (added, skipped []string, err error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, nil, err
@@ -603,7 +621,13 @@ func updateOverlay(path string, specs []modelSpec) (added, skipped []string, err
 		overlay.Providers[m.Provider] = pc
 		added = append(added, m.Provider+"/"+m.ID)
 	}
-	if len(added) == 0 {
+	if claudeCodePin != "" {
+		if overlay.ClientVersions == nil {
+			overlay.ClientVersions = &models.CatalogClientVersions{}
+		}
+		overlay.ClientVersions.ClaudeCode = claudeCodePin
+	}
+	if len(added) == 0 && claudeCodePin == "" {
 		return nil, skipped, nil
 	}
 
@@ -633,6 +657,10 @@ type watchOptions struct {
 	// "already known" baseline; it is only WRITTEN when proposeOverlay is set.
 	overlayPath    string
 	proposeOverlay bool
+	// claudeCodeVersion is dist-tags.latest from npm ("" when that source
+	// failed or was not fetched). Compared forward-only against the pin
+	// committed in the overlay.
+	claudeCodeVersion string
 }
 
 // runWatch compares the fresh fetch with the compiled-in catalog and writes
@@ -650,8 +678,23 @@ func runWatch(opts watchOptions) {
 	}
 
 	res := compareCatalogs(opts.fresh, opts.overlayPath, opts.trigger)
-	log.Printf("Model watch: %d new (%d qualifying), %d changed, %d removed; open_pr=%v %s",
-		len(res.New), len(res.Qualifying), res.Changed, len(res.Removed), res.OpenPR, res.Anomaly)
+
+	// The client version pin is part of a new model's requirements, so it
+	// rides the same PR — and moves on its own when nothing else changed.
+	bump, cvAnomaly := clientVersionBump(overlayClaudeCodeVersion(opts.overlayPath), opts.claudeCodeVersion)
+	newPin := ""
+	if bump != "" {
+		res.ClientVersionBump = bump
+		newPin = opts.claudeCodeVersion
+		if res.Anomaly == "" {
+			// A cap anomaly means "open nothing"; never override it.
+			res.OpenPR = true
+			res.Anomaly = cvAnomaly
+		}
+	}
+
+	log.Printf("Model watch: %d new (%d qualifying), %d changed, %d removed, pin %q; open_pr=%v %s",
+		len(res.New), len(res.Qualifying), res.Changed, len(res.Removed), res.ClientVersionBump, res.OpenPR, res.Anomaly)
 
 	// The overlay is only proposed for a run that is actually opening a PR:
 	// merging it publishes to the whole fleet within the catalog TTL, so it
@@ -660,7 +703,7 @@ func runWatch(opts watchOptions) {
 	if opts.proposeOverlay && res.OpenPR {
 		var skipped []string
 		var err error
-		added, skipped, err = updateOverlay(opts.overlayPath, res.specs)
+		added, skipped, err = updateOverlay(opts.overlayPath, res.specs, newPin)
 		if err != nil {
 			log.Fatalf("catalog overlay: %v", err)
 		}

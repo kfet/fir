@@ -123,8 +123,13 @@ func expandTokenBodyExtra(fl *OAuthFlowSpec, state string) url.Values {
 // body encoder).
 func (p *genericAuthProvider) tokenClient(fl *OAuthFlowSpec) *pinoauth.Client {
 	headers := http.Header{}
+	// Values only: a {clientVersion.<key>} placeholder may appear inside a
+	// header VALUE the extension hardcoded, never in a header name and never
+	// in the token URL. Expanded here (rather than once at declaration time)
+	// so every exchange and refresh picks up a hot-applied catalog overlay.
+	lookup := p.bridge.clientVersionLookup()
 	for k, v := range fl.TokenHeaders {
-		headers.Set(k, v)
+		headers.Set(k, expandClientVersions(v, lookup))
 	}
 	c := &pinoauth.Client{
 		TokenURL:     fl.TokenURL,
@@ -482,9 +487,13 @@ func (b *Bridge) callExtAPIKey(providerID string, creds *ai.OAuthCredentials) (s
 }
 
 func (b *Bridge) callExtListModels(ctx context.Context, providerID string, creds *ai.OAuthCredentials) ([]string, error) {
+	// The extension makes its own HTTP call here, so Go has nothing to
+	// post-process — hand it the effective pins as a hook param instead
+	// (ctx.client_version(key) in the Python SDK).
 	params := map[string]any{
-		"provider_id": providerID,
-		"credentials": creds,
+		"provider_id":     providerID,
+		"credentials":     creds,
+		"client_versions": b.clientVersionsParam(),
 	}
 	raw, err := b.CallHook(ctx, "auth/list_models", params, 30*time.Second)
 	if err != nil {
@@ -517,6 +526,17 @@ func (b *Bridge) callExtModifyModels(providerID string, creds *ai.OAuthCredentia
 	}
 	if err := json.Unmarshal(raw, &result); err != nil {
 		return nil
+	}
+	// Expand {clientVersion.<key>} in the header VALUES the extension just
+	// returned. buildModels() calls ModifyModels on every Refresh(), and a
+	// changed catalog document triggers a Refresh(), so the messages-API
+	// headers follow the published pin with no new scheduling.
+	lookup := b.clientVersionLookup()
+	for _, m := range result.Models {
+		if m == nil || len(m.Headers) == 0 {
+			continue
+		}
+		m.Headers = expandClientVersionHeaders(m.Headers, lookup)
 	}
 	return result.Models
 }

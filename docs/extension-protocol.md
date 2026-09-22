@@ -1146,7 +1146,7 @@ that integrate with fir's auth storage. Two flow models are supported:
         "auth_params_extra": {"code": "true"},
         "token_body_json": true,
         "token_body_extra": {"audience": "api", "state": "{state}"},
-        "token_headers": {"User-Agent": "claude-cli/2.1.112 ..."},
+        "token_headers": {"User-Agent": "claude-cli/{clientVersion.claudeCode} (external, cli)"},
         "open_url_instructions": "Complete login in your browser.",
         "has_post_exchange": true,
         "has_custom_refresh": false
@@ -1172,7 +1172,7 @@ that integrate with fir's auth storage. Two flow models are supported:
 | `auth_params_extra` | object | Extra query params on the authorize URL (provider-specific). |
 | `token_body_json` | bool | Encode the token request body as JSON instead of form. |
 | `token_body_extra` | object | Extra fields injected into the token-request body (Exchange + Refresh). Values may contain the literal `"{state}"` placeholder, substituted at request time with the per-session OAuth state (empty on Refresh). Reserved keys (`grant_type`, `client_id`, `client_secret`, `code`, `code_verifier`, `redirect_uri`, `refresh_token`, `scope`) are rejected. |
-| `token_headers` | object | Extra HTTP headers on token requests. |
+| `token_headers` | object | Extra HTTP headers on token requests. Values may contain a `{clientVersion.<key>}` placeholder (see [Client version placeholders](#client-version-placeholders)). |
 | `open_url_instructions` | string | Text shown alongside the authorize URL. |
 | `has_post_exchange` | bool | Extension implements `auth/post_exchange`. |
 | `has_custom_refresh` | bool | Extension implements `auth/refresh` (overrides default). |
@@ -1227,6 +1227,53 @@ the bare credential dict and it will be wrapped automatically):
   }
 }
 ```
+
+### Client version placeholders
+
+Some vendors gate new models on the version of their own client that the
+request advertises (Anthropic does this with `claude-cli/<version>`). Baking
+that number into an extension makes every gate bump a binary release, so fir
+ships it as **data** on the catalog-overlay channel instead
+(`clientVersions.<key>` in `catalog-v1.json`).
+
+An extension therefore declares a **template**, never a literal:
+
+```python
+_USER_AGENT = "claude-cli/{clientVersion.claudeCode} (external, cli)"
+```
+
+Grammar: `{clientVersion.<key>}` where `<key>` is `[A-Za-z0-9]+` and names a
+key fir knows (currently only `claudeCode`). fir substitutes it:
+
+- in `flow.token_headers` **values**, at every token exchange and refresh;
+- in the `headers` **values** of models returned from `auth/modify_models`,
+  every time the model registry rebuilds.
+
+Constraints, deliberately narrow:
+
+- **Header values only** — never a header name, never a URL, never a body.
+- The substituted value always matches `^[0-9]+(\.[0-9]+){0,3}$` and is at
+  most 32 bytes, so injection (`; x-evil: 1`, CRLF) is impossible.
+- The value published in the overlay can only ever **advance** the pin: the
+  version compiled into the running binary is a floor.
+- An unknown or empty key is left **literal** and warned about once — a
+  header reading `{clientVersion.foo}` is a loud, greppable failure.
+
+A hook that makes its **own** HTTP request cannot be post-processed by fir, so
+`auth/list_models` receives the pins as a param instead:
+
+```json
+{
+  "provider_id": "anthropic",
+  "credentials": {"access": "..."},
+  "client_versions": {"claudeCode": "2.1.280"}
+}
+```
+
+In the Python SDK, read it with `ctx.client_version("claudeCode")` (a plain
+dict lookup, no RPC) and apply it with `str.replace`. It is the same validated
+scalar from the same source — a convenience on top of the one mechanism, not a
+second source of truth.
 
 ### extension → fir helpers (imperative flow only)
 

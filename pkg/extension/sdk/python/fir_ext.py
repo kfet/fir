@@ -328,6 +328,33 @@ stops the process.  Write an ordinary event handler and ignore the distinction.
 +-------------------------+------------------------------------------------+
 
 -------------------------------------------------------------------------------
+CLIENT VERSION PLACEHOLDERS  (auth providers)
+--------------------------------------------------------------------------------
+
+Some vendors gate new models on the version of their own client that a request
+advertises (Anthropic: ``claude-cli/<version>``). Baking that number into an
+extension makes every gate bump a binary release, so fir ships it as DATA on
+the catalog-overlay channel and the extension declares a TEMPLATE::
+
+    _USER_AGENT = "claude-cli/{clientVersion.claudeCode} (external, cli)"
+
+    fir_ext.declare_oauth_provider(..., token_headers={"User-Agent": _USER_AGENT})
+
+Grammar: ``{clientVersion.<key>}`` where ``<key>`` is ``[A-Za-z0-9]+`` and
+names a key fir knows (currently only ``claudeCode``). fir substitutes it in
+HEADER VALUES ONLY — never a header name, never a URL — in
+``flow.token_headers`` (at every exchange and refresh) and in the ``headers``
+of models returned from ``auth/modify_models`` (on every registry rebuild), so
+a published catalog moves the pin with no restart. The substituted value always
+matches ``^[0-9]+(.[0-9]+){0,3}$`` (dotted numeric) and is at most 32 bytes; an unknown key is
+left literal and warned about once.
+
+A hook that makes its OWN HTTP request cannot be post-processed, so
+``auth/list_models`` receives ``{"client_versions": {"claudeCode": "2.1.280"}}``
+in its params; read it with :meth:`AuthContext.client_version` (a plain dict
+lookup, no RPC) and apply it with ``str.replace``.
+
+
 EXTENSION → FIR CALLS  (extension → fir, Request)
 -------------------------------------------------------------------------------
 
@@ -1832,8 +1859,13 @@ def auth_list_models(provider: str) -> Callable:
     """Register a model lister for an auth provider.
 
     The decorated function receives ``(params: dict, ctx: AuthContext)``
-    where *params* contains ``{"provider_id": "...", "credentials": {...}}``.
-    It should return a list of model ID strings, or None if not supported.
+    where *params* contains ``{"provider_id": "...", "credentials": {...},
+    "client_versions": {...}}``. It should return a list of model ID strings,
+    or None if not supported.
+
+    Because this handler issues its own HTTP request, fir cannot expand
+    ``{clientVersion.<key>}`` placeholders in its headers after the fact —
+    read the scalar with ``ctx.client_version("claudeCode")`` instead.
     """
 
     def decorator(fn: Callable) -> Callable:
@@ -1966,6 +1998,12 @@ def declare_oauth_provider(
     token_headers : dict[str, str], optional
         Extra HTTP headers on the token request (e.g. custom
         User-Agent). Content-Type is owned by the body encoder.
+        Values may contain a ``{clientVersion.<key>}`` placeholder
+        (e.g. ``"claude-cli/{clientVersion.claudeCode} (external, cli)"``),
+        which fir expands from the catalog overlay at request time —
+        so a vendor-gated client version ships as data, not as a
+        literal that would force a release. See the module docstring,
+        section "CLIENT VERSION PLACEHOLDERS".
     open_url_instructions : str, optional
         Human-readable text shown alongside the authorization URL.
     short_url_base : str, optional
@@ -3179,6 +3217,25 @@ class AuthContext(Context):
     that call back into fir's OAuth infrastructure.
     """
 
+    # client_versions carries the host's effective third-party client version
+    # pins for the lifetime of an auth/* handler; set by the SDK dispatcher
+    # from the hook's "client_versions" param, {} otherwise.
+    client_versions: dict[str, str]
+
+    def client_version(self, key: str) -> str:
+        """Return the host's effective client version pin for ``key``.
+
+        Pure dict lookup — no RPC. The value comes from fir's catalog overlay
+        (``clientVersions.<key>``, e.g. ``"claudeCode"``), floored by the value
+        the binary shipped with, and is a plain dotted version or ``""``.
+
+        Only hooks that issue their OWN HTTP requests need this: for headers
+        declared on the provider or returned from ``auth/modify_models``, write
+        the ``{clientVersion.<key>}`` placeholder into the header value and fir
+        expands it at call time.
+        """
+        return (getattr(self, "client_versions", None) or {}).get(key, "")
+
     def generate_pkce(self, timeout: float = 10.0) -> PKCEResult:
         """Generate a PKCE code verifier and challenge.
 
@@ -3497,12 +3554,15 @@ def run(
 
     # Auth context for auth handlers
     auth_ctx = AuthContext(output_stream=out, pending=pending, results=results)
+    auth_ctx.client_versions = {}
 
     def _handle_auth_request(
         method: str, msg_id: Any, params: dict[str, Any], out_stream: WriteStream
     ) -> None:
         """Handle auth/* RPC methods from fir."""
         provider_id = params.get("provider_id", "")
+        # Surface the host's client version pins on ctx for this handler.
+        auth_ctx.client_versions = params.get("client_versions") or {}
 
         try:
             if method == "auth/login":

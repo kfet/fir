@@ -24,6 +24,8 @@ Inbound surface demonstrated (fir → extension):
   • Tool registration: word_count, shell_run, list_tools, pin_tools,
     change_model, inject_message, restart_demo, batch_example
   • hook/tool_call: blocks tools whose name starts with "blocked:"
+  • Auth provider "demo-oauth": the {clientVersion.<key>} header-template
+    placeholder and ctx.client_version()
   • All eleven events: session_start, session_shutdown, agent_start, agent_end,
     turn_start, turn_end, message_start, message_end,
     tool_execution_start, tool_execution_end, provider_error
@@ -676,6 +678,55 @@ def echo_stream(params: fir_ext.ProviderStreamStartParams, ctx: fir_ext.Context)
 def echo_list_models(params: fir_ext.ProviderListModelsParams, ctx: fir_ext.Context):
     """Stub live-list — returns the same single model the static catalogue declares."""
     return ["echo-1"]
+
+
+# ---------------------------------------------------------------------------
+# Auth provider (demonstrates the {clientVersion.<key>} placeholder)
+# ---------------------------------------------------------------------------
+#
+# Some vendors gate new models on the version of their own client that a
+# request advertises. That number must NOT be a literal in an extension —
+# a literal makes every gate bump a binary release. Declare a template
+# instead: fir expands {clientVersion.<key>} in header VALUES from the
+# catalog overlay at call time, so a published catalog moves the pin
+# fleet-wide with no restart.
+
+_DEMO_USER_AGENT = "demo-cli/{clientVersion.claudeCode} (external, cli)"
+
+fir_ext.declare_oauth_provider(
+    provider_id="demo-oauth",
+    name="Demo OAuth (example only)",
+    client_id="demo-client",
+    authorize_url="https://example.invalid/oauth/authorize",
+    token_url="https://example.invalid/oauth/token",  # noqa: S106
+    scope="demo",
+    # Expanded by fir at every exchange and refresh — header VALUES only.
+    token_headers={"User-Agent": _DEMO_USER_AGENT},
+)
+
+
+@fir_ext.auth_modify_models(provider="demo-oauth")
+def demo_modify_models(params: dict, ctx: fir_ext.AuthContext) -> list | None:
+    """Return the UNEXPANDED template; fir expands the returned header values."""
+    models = params.get("models") or []
+    out = []
+    for m in models:
+        if isinstance(m, dict):
+            m = dict(m)
+            m["headers"] = {**(m.get("headers") or {}), "user-agent": _DEMO_USER_AGENT}
+        out.append(m)
+    return out
+
+
+@fir_ext.auth_list_models(provider="demo-oauth")
+def demo_list_models(params: dict, ctx: fir_ext.AuthContext) -> list | None:
+    """This hook would issue its OWN HTTP call, so fir cannot post-process the
+    header — read the same scalar from the client_versions hook param."""
+    user_agent = _DEMO_USER_AGENT.replace(
+        "{clientVersion.claudeCode}", ctx.client_version("claudeCode")
+    )
+    ctx.notify(f"demo-oauth would list models as {user_agent}", level="info")
+    return None
 
 
 fir_ext.run(name="demo")

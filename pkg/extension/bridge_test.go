@@ -43,6 +43,7 @@ type mockBridgeAPI struct {
 	reloadMCPResult ReloadMCPResult
 	reloadMCPErr    error
 	observableStore *store.ObservableStore
+	clientVersions  map[string]string
 	// captures of the most recent SideQuery call
 	sideQueryQuestion string
 	sideQueryOpts     *session.SideQueryOptions
@@ -50,6 +51,14 @@ type mockBridgeAPI struct {
 
 func newMockAPI() *mockBridgeAPI {
 	return &mockBridgeAPI{labels: make(map[string]string)}
+}
+
+// GetClientVersion answers from a literal map so tests can drive placeholder
+// expansion without a model registry.
+func (m *mockBridgeAPI) GetClientVersion(key string) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.clientVersions[key]
 }
 
 func (m *mockBridgeAPI) toolCount() int {
