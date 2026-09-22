@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+## [1.18.3] - 2026-09-22
+
+### Fixed
+- **Anthropic OAuth advertises Claude Code `2.1.280`.** The `anthropic-auth` builtin extension pin moves from `2.1.257` to `2.1.280`, so the newest Anthropic models (e.g. `claude-opus-5-5`) are not rejected with a version error.
+
+## [1.18.2] - 2026-09-22
+
+### Added
+- **Model catalog refresh.** 32 new models, including `anthropic/claude-opus-5-5` (direct, Bedrock, OpenRouter, opencode) and the GPT-6 `luna` / `sol` families.
+
 ### Fixed
 - **MCP server notices no longer flood the screen at startup.** Every `connecting…` / `connected` / `disconnected` event printed its own spaced line, so three servers plus one flapping server produced a screenful before the first prompt. Lifecycle events are now coalesced over a 750 ms quiet period and rendered as one `MCP: slack, atlassian, daisy-main` line; a reconnect cycle becomes a `(reconnected 4×)` suffix on that server instead of a new pair of lines each time. Failures still get their own warning line, so nothing is hidden.
 
