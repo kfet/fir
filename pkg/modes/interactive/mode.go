@@ -319,7 +319,7 @@ func (m *InteractiveMode) NotifyExtensionFailures(failures []extension.StartFail
 }
 
 // ConsumeMCPServerEvents drains MCP server lifecycle events from ch and
-// surfaces each as a TUI notice. The goroutine exits when the mode context is
+// surfaces them as collapsed TUI notices (see coalesceMCPServerEvents). The goroutine exits when the mode context is
 // cancelled. Because ch is buffered by the Manager, events emitted before this
 // consumer attaches — notably the initial "connecting" event fired while
 // session.Setup dials the servers, before this mode exists — are not lost.
@@ -379,7 +379,12 @@ func (m *InteractiveMode) coalesceMCPServerEvents(ch <-chan mcp.ServerEvent, qui
 			if timer == nil {
 				timer = time.NewTimer(quiet)
 			} else {
-				timer.Stop()
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
 				timer.Reset(quiet)
 			}
 			timerCh = timer.C
