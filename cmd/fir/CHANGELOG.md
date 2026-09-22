@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- **MCP server notices no longer flood the screen at startup.** Every `connecting…` / `connected` / `disconnected` event printed its own spaced line, so three servers plus one flapping server produced a screenful before the first prompt. Lifecycle events are now coalesced over a 750 ms quiet period and rendered as one `MCP: slack, atlassian, daisy-main` line; a reconnect cycle becomes a `(reconnected 4×)` suffix on that server instead of a new pair of lines each time. Failures still get their own warning line, so nothing is hidden.
+
 ## [1.18.1] - 2026-09-21
 
 ### Fixed
