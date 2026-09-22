@@ -328,50 +328,126 @@ func (m *InteractiveMode) ConsumeMCPServerEvents(ch <-chan mcp.ServerEvent) {
 	if ch == nil {
 		return
 	}
-	go func() {
-		for {
-			select {
-			case <-m.ctx.Done():
-				return
-			case ev := <-ch:
-				switch ev.Kind {
-				case mcp.ServerConnecting:
-					m.NotifyMCPServerConnecting(ev.Name)
-				case mcp.ServerReady:
-					m.NotifyMCPServerReady(ev.Name, ev.Err)
-				case mcp.ServerDisconnected:
-					m.NotifyMCPServerDisconnected(ev.Name, ev.Err)
-				}
+	go m.coalesceMCPServerEvents(ch, mcpNoticeQuietPeriod)
+}
+
+// mcpNoticeQuietPeriod is how long the consumer waits for the event stream to
+// go quiet before it prints one summary line.
+const mcpNoticeQuietPeriod = 750 * time.Millisecond
+
+// mcpServerState is the last known state of one MCP server, plus how many
+// times it reconnected in this session.
+type mcpServerState struct {
+	seen       bool
+	kind       mcp.ServerEventKind
+	err        error
+	reconnects int
+}
+
+// coalesceMCPServerEvents collects lifecycle events and prints ONE line per
+// quiet period instead of one line per event. A connecting→connected pair
+// collapses into "connected", and a flapping server reports a reconnect count
+// instead of a new pair of lines each cycle.
+func (m *InteractiveMode) coalesceMCPServerEvents(ch <-chan mcp.ServerEvent, quiet time.Duration) {
+	var (
+		order   []string
+		states  = map[string]*mcpServerState{}
+		timer   *time.Timer
+		timerCh <-chan time.Time
+	)
+	for {
+		select {
+		case <-m.ctx.Done():
+			if timer != nil {
+				timer.Stop()
 			}
+			return
+		case ev := <-ch:
+			st, ok := states[ev.Name]
+			if !ok {
+				st = &mcpServerState{}
+				states[ev.Name] = st
+				order = append(order, ev.Name)
+			}
+			// A second connect, after an earlier one, is a reconnect.
+			if ev.Kind == mcp.ServerConnecting && st.seen {
+				st.reconnects++
+			}
+			st.seen = true
+			st.kind = ev.Kind
+			st.err = ev.Err
+			if timer == nil {
+				timer = time.NewTimer(quiet)
+			} else {
+				timer.Stop()
+				timer.Reset(quiet)
+			}
+			timerCh = timer.C
+		case <-timerCh:
+			timerCh = nil
+			m.flushMCPNotice(order, states)
+			order = order[:0]
 		}
-	}()
-}
-
-// NotifyMCPServerReady shows UI feedback when an MCP server finishes its
-// initial connection attempt. Safe to call from any goroutine.
-func (m *InteractiveMode) NotifyMCPServerReady(name string, err error) {
-	if err != nil {
-		m.showWarning(fmt.Sprintf("MCP server %q failed to connect: %v", name, err))
-	} else {
-		m.showMessage(fmt.Sprintf("MCP server %q connected", name))
 	}
 }
 
-// NotifyMCPServerConnecting shows UI feedback when an MCP server begins a
-// connection attempt (initial dial, or first attempt of a reconnect cycle
-// after a disconnect). Safe to call from any goroutine.
-func (m *InteractiveMode) NotifyMCPServerConnecting(name string) {
-	m.showMessage(fmt.Sprintf("MCP server %q connecting…", name))
+// flushMCPNotice prints one muted summary line for all servers seen since the
+// last flush, and one warning line per server that is in an error state.
+func (m *InteractiveMode) flushMCPNotice(order []string, states map[string]*mcpServerState) {
+	summary, warnings := buildMCPNotice(order, states)
+	for _, w := range warnings {
+		m.showWarning(w)
+	}
+	if summary != "" {
+		m.showMessage(summary)
+	}
 }
 
-// NotifyMCPServerDisconnected shows UI feedback when an active MCP server
-// session terminates unexpectedly. Safe to call from any goroutine.
-func (m *InteractiveMode) NotifyMCPServerDisconnected(name string, err error) {
-	if err != nil {
-		m.showWarning(fmt.Sprintf("MCP server %q disconnected: %v", name, err))
-	} else {
-		m.showMessage(fmt.Sprintf("MCP server %q disconnected", name))
+// buildMCPNotice renders the collapsed notice text. It is pure, so the
+// collapsing rules are testable without a TUI.
+func buildMCPNotice(order []string, states map[string]*mcpServerState) (summary string, warnings []string) {
+	var good []string
+	for _, name := range order {
+		st := states[name]
+		if st == nil {
+			continue
+		}
+		if st.err != nil {
+			warnings = append(warnings, fmt.Sprintf("MCP server %q %s: %v", name, mcpStateWord(st.kind), st.err))
+			continue
+		}
+		good = append(good, name+mcpSuffix(st))
 	}
+	if len(good) > 0 {
+		summary = "MCP: " + strings.Join(good, ", ")
+	}
+	return summary, warnings
+}
+
+// mcpSuffix describes a server's state compactly, e.g. "atlassian (reconnected
+// 4×)". A plain connected server gets no suffix.
+func mcpSuffix(st *mcpServerState) string {
+	word := mcpStateWord(st.kind)
+	if st.kind == mcp.ServerReady && st.reconnects > 0 {
+		return fmt.Sprintf(" (reconnected %d×)", st.reconnects)
+	}
+	if st.kind == mcp.ServerReady {
+		return ""
+	}
+	return " (" + word + ")"
+}
+
+// mcpStateWord maps an event kind to a human word.
+func mcpStateWord(k mcp.ServerEventKind) string {
+	switch k {
+	case mcp.ServerReady:
+		return "connected"
+	case mcp.ServerConnecting:
+		return "connecting"
+	case mcp.ServerDisconnected:
+		return "disconnected"
+	}
+	return "unknown"
 }
 
 // SetUpdateChannel supplies a channel that delivers a single version string
