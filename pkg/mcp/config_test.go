@@ -273,6 +273,29 @@ func TestLoadConfigDir_InvalidJSON(t *testing.T) {
 	assert.Contains(t, err.Error(), "parse")
 }
 
+func TestLoadDefaultConfigsReport_BrokenFileSkipped(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("FIR_AGENT_DIR", dir)
+	proj := t.TempDir()
+
+	// Broken user base, one broken and one good drop-in, good project config.
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "mcp.json"), []byte(`{broken`), 0o600))
+	mcpDDir := filepath.Join(dir, "mcp.d")
+	require.NoError(t, os.Mkdir(mcpDDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(mcpDDir, "a-bad.json"), []byte(`nope`), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(mcpDDir, "b-good.json"), []byte(`{"mcpServers":{"dropin":{"command":"dropin-cmd"}}}`), 0o600))
+	require.NoError(t, os.Mkdir(filepath.Join(proj, ".fir"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(proj, ".fir", "mcp.json"), []byte(`{"mcpServers":{"proj":{"command":"proj-cmd"}}}`), 0o600))
+
+	cfg, _, err := LoadDefaultConfigsReport(proj)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "user MCP config")
+	assert.Contains(t, err.Error(), "a-bad.json")
+	require.NotNil(t, cfg)
+	assert.Equal(t, "dropin-cmd", cfg.MCPServers["dropin"].Command)
+	assert.Equal(t, "proj-cmd", cfg.MCPServers["proj"].Command)
+}
+
 func TestLoadDefaultConfigsReport_MergesUserDDropins(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("FIR_AGENT_DIR", dir)

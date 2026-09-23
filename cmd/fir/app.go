@@ -140,18 +140,18 @@ func setupSession(args *Args, deferExtensions bool) (*sessionSetup, error) {
 	var mcpConfigs map[string]mcp.ServerConfig
 	if !args.NoMCP {
 		mcpCfg, mcpErr := mcp.LoadDefaultConfigs(cwd)
-		if mcpErr == nil && args.MCPConfig != "" {
+		if mcpErr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: skipped broken MCP config: %v\n", mcpErr)
+		}
+		if args.MCPConfig != "" {
 			extra, extraErr := mcp.LoadConfigFile(args.MCPConfig)
 			if extraErr != nil {
 				fmt.Fprintf(os.Stderr, "Warning: failed to load --mcp-config %s: %v\n", args.MCPConfig, extraErr)
-				mcpErr = extraErr
 			} else {
 				mcpCfg = mcp.MergeConfigs(mcpCfg, extra)
 			}
 		}
-		if mcpErr != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to load MCP config: %v\n", mcpErr)
-		} else if len(mcpCfg.MCPServers) > 0 {
+		if len(mcpCfg.MCPServers) > 0 {
 			mcpConfigs = mcpCfg.MCPServers
 		}
 	}
@@ -409,11 +409,6 @@ func reloadMCPCallback(mgrPtr **mcp.Manager, sess *session.AgentSession, cwd str
 	return func() (extension.ReloadMCPResult, error) {
 		// Load config with collision reporting.
 		_, collisions, err := mcp.LoadDefaultConfigsReport(cwd)
-		if err != nil {
-			return extension.ReloadMCPResult{
-				Errors: []extension.MCPServerError{{Message: err.Error()}},
-			}, nil
-		}
 
 		// Convert mcp.Collision to extension.MCPCollision.
 		extCollisions := make([]extension.MCPCollision, len(collisions))
@@ -425,6 +420,10 @@ func reloadMCPCallback(mgrPtr **mcp.Manager, sess *session.AgentSession, cwd str
 		reloadErr := session.ReloadMCP(context.Background(), mgrPtr, sess, cwd, args.MCPConfig, nil)
 
 		result := extension.ReloadMCPResult{Collisions: extCollisions}
+		if err != nil {
+			// Broken files were skipped; the rest reloaded. Report them.
+			result.Errors = append(result.Errors, extension.MCPServerError{Message: err.Error()})
+		}
 		if reloadErr != nil {
 			result.Errors = append(result.Errors, extension.MCPServerError{
 				Message: reloadErr.Error(),

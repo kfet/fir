@@ -424,11 +424,6 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mc
 				extSetup.Bridge.SetReloadMCPFn(func() (extension.ReloadMCPResult, error) {
 					// Load config with collision reporting.
 					_, collisions, err := mcp.LoadDefaultConfigsReport(entry.cwd)
-					if err != nil {
-						return extension.ReloadMCPResult{
-							Errors: []extension.MCPServerError{{Message: err.Error()}},
-						}, nil
-					}
 					// Convert mcp.Collision to extension.MCPCollision.
 					extCollisions := make([]extension.MCPCollision, len(collisions))
 					for i, c := range collisions {
@@ -437,6 +432,10 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mc
 					// Perform the actual reload, including client-provided MCP configs.
 					reloadErr := session.ReloadMCP(context.Background(), &entry.mcpManager, entry.session, entry.cwd, "", entry.clientMCPConfigs)
 					result := extension.ReloadMCPResult{Collisions: extCollisions}
+					if err != nil {
+						// Broken files were skipped; the rest reloaded. Report them.
+						result.Errors = append(result.Errors, extension.MCPServerError{Message: err.Error()})
+					}
 					if reloadErr != nil {
 						result.Errors = append(result.Errors, extension.MCPServerError{
 							Message: reloadErr.Error(),
@@ -479,8 +478,9 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mc
 func loadProjectMCPConfigs(cwd, extraConfigPath string) map[string]mcp.ServerConfig {
 	cfg, err := mcp.LoadDefaultConfigs(cwd)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "fir: warning: %v — no MCP servers will be started\n", err)
-		return nil
+		// Partial load: the broken files are skipped, the rest still start.
+		fmt.Fprintf(os.Stderr, "fir: warning: skipped broken MCP config: %v\n", err)
+		firlog.Warn("acp: skipped broken MCP config", "err", err)
 	}
 	if extraConfigPath != "" {
 		extra, extraErr := mcp.LoadConfigFile(extraConfigPath)

@@ -247,12 +247,15 @@ func loadConfigDir(dir string) (*ConfigFile, []Collision, map[string]string, err
 	serverSource := make(map[string]string) // server name -> file path
 	var collisions []Collision
 	merged := &ConfigFile{MCPServers: make(map[string]ServerConfig)}
+	var errs []error
 
 	for _, name := range names {
 		path := filepath.Join(dir, name)
 		cfg, loadErr := LoadConfigFile(path)
 		if loadErr != nil {
-			return nil, nil, nil, loadErr
+			// One broken drop-in must not hide the others.
+			errs = append(errs, loadErr)
+			continue
 		}
 		for serverName, serverCfg := range cfg.MCPServers {
 			if prevFile, exists := serverSource[serverName]; exists {
@@ -278,7 +281,7 @@ func loadConfigDir(dir string) (*ConfigFile, []Collision, map[string]string, err
 			serverSource[serverName] = path
 		}
 	}
-	return merged, collisions, serverSource, nil
+	return merged, collisions, serverSource, errors.Join(errs...)
 }
 
 // DefaultConfigPaths returns the canonical config file paths that LoadDefaultConfigs reads:
@@ -325,8 +328,13 @@ func LoadDefaultConfigs(projectDir string) (*ConfigFile, error) {
 //  1. ~/.config/fir/mcp.json           (user base)
 //  2. ~/.config/fir/mcp.d/*.json       (user drop-ins, lexically sorted)
 //  3. <projectDir>/.fir/mcp.json       (project base)
+//
+// Loading is best-effort: a file that cannot be read or parsed is skipped and
+// the rest still load. The returned config is never nil; err (if non-nil)
+// joins one error per skipped file and callers should surface it as a warning.
 func LoadDefaultConfigsReport(projectDir string) (*ConfigFile, []Collision, error) {
 	configDir := defaultConfigDir()
+	var errs []error
 	userPath, projectPath := DefaultConfigPaths(projectDir)
 
 	// Track sources for collision detection across merge steps.
@@ -352,7 +360,8 @@ func LoadDefaultConfigsReport(projectDir string) (*ConfigFile, []Collision, erro
 	if userPath != "" {
 		userCfg, err := LoadConfigFile(userPath)
 		if err != nil {
-			return nil, nil, fmt.Errorf("user MCP config: %w", err)
+			errs = append(errs, fmt.Errorf("user MCP config: %w", err))
+			userCfg = &ConfigFile{}
 		}
 		for name, cfg := range userCfg.MCPServers {
 			merged.MCPServers[name] = cfg
@@ -364,7 +373,10 @@ func LoadDefaultConfigsReport(projectDir string) (*ConfigFile, []Collision, erro
 	mcpDDir := filepath.Join(configDir, "mcp.d")
 	dirCfg, dirCollisions, dirSources, err := loadConfigDir(mcpDDir)
 	if err != nil {
-		return nil, nil, fmt.Errorf("user MCP drop-ins: %w", err)
+		errs = append(errs, fmt.Errorf("user MCP drop-ins: %w", err))
+	}
+	if dirCfg == nil {
+		dirCfg = &ConfigFile{}
 	}
 
 	// Merge drop-ins into our tracking, detecting collisions with base config.
@@ -397,7 +409,8 @@ func LoadDefaultConfigsReport(projectDir string) (*ConfigFile, []Collision, erro
 	if projectPath != "" {
 		projCfg, err := LoadConfigFile(projectPath)
 		if err != nil {
-			return nil, nil, fmt.Errorf("project MCP config: %w", err)
+			errs = append(errs, fmt.Errorf("project MCP config: %w", err))
+			projCfg = &ConfigFile{}
 		}
 		for name, cfg := range projCfg.MCPServers {
 			merged.MCPServers[name] = cfg
@@ -410,5 +423,5 @@ func LoadDefaultConfigsReport(projectDir string) (*ConfigFile, []Collision, erro
 		collisions = append(collisions, *c)
 	}
 
-	return merged, collisions, nil
+	return merged, collisions, errors.Join(errs...)
 }

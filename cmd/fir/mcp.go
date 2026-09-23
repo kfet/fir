@@ -67,7 +67,7 @@ func mcpContext() (map[string]mcp.ServerConfig, *auth.AuthStorage, error) {
 	}
 	cfg, err := mcp.LoadDefaultConfigs(cwd)
 	if err != nil {
-		return nil, nil, err
+		fmt.Fprintf(os.Stderr, "Warning: skipped broken MCP config: %v\n", err)
 	}
 	storage := auth.NewAuthStorage(filepath.Join(resolveAgentDir(), "auth.json"))
 	return cfg.MCPServers, storage, nil

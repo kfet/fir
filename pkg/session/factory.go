@@ -324,10 +324,9 @@ func StartMCPManager(ctx context.Context, sess *AgentSession, configs map[string
 // bridge are the two call sites; concurrent invocations are rare but could
 // create two managers and leak one if they race on a nil manager.
 func ReloadMCP(ctx context.Context, mgrPtr **mcp.Manager, sess *AgentSession, cwd, extraConfigPath string, extraConfigs map[string]mcp.ServerConfig) error {
-	cfg, err := mcp.LoadDefaultConfigs(cwd)
-	if err != nil {
-		return fmt.Errorf("load MCP config: %w", err)
-	}
+	// A broken file is skipped, not fatal; the caller reports it via
+	// LoadDefaultConfigsReport. Reload what did parse.
+	cfg, _ := mcp.LoadDefaultConfigs(cwd)
 	if extraConfigPath != "" {
 		extra, extraErr := mcp.LoadConfigFile(extraConfigPath)
 		if extraErr != nil {
@@ -344,7 +343,7 @@ func ReloadMCP(ctx context.Context, mgrPtr **mcp.Manager, sess *AgentSession, cw
 		servers[name] = sc
 	}
 	if *mgrPtr != nil {
-		_, err = (*mgrPtr).Reload(ctx, servers)
+		_, err := (*mgrPtr).Reload(ctx, servers)
 		return err
 	}
 	// No manager yet — create one if configs appeared. Re-read credentials
