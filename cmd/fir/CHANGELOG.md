@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+## [1.20.1] - 2026-09-23
+
+### Fixed
+- **One broken MCP config file no longer disables every MCP server.** A parse error in `~/.config/fir/mcp.json`, any `mcp.d/*.json` drop-in, or a project `.fir/mcp.json` made fir start no MCP servers at all — in ACP, CLI, `/reload` and `reload_mcp` alike — and the only trace was a stderr line an ACP client never shows. Loading is now best-effort: the broken file is skipped, the rest start, and the error names each skipped file (also written to the fir log in ACP mode, and returned by `reload_mcp`).
+
+### Changed
+- **Model catalog regenerated**: added Bedrock `kimi-k3` and `gpt-6-luna`/`gpt-6-sol`, `github-copilot/claude-opus-5.5` and `gpt-6-luna`, +4 more (+5 on aggregators); removed 3 aggregator model(s); 17 model(s) with changed pricing/limits.
+
 ## [1.20.0] - 2026-09-23
 
 ### Added
