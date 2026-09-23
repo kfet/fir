@@ -2,8 +2,13 @@
 
 ## [Unreleased]
 
+## [1.20.0] - 2026-09-23
+
 ### Added
 - **A Claude Code version-gate rejection is now detected, recorded, and nagged about until the pin moves.** v1.19.0 made the claude-cli pin deliverable as data, but nothing told anyone a bump was *needed*: a gate rejection surfaced as an opaque provider error and the only detector was a human recognising it. Now, on an OAuth-mode Anthropic request, fir matches the vendor's exact gate sentence — `Claude Code <advertised> does not support this model; version <required> or newer is required`, the one signature ever observed, with `required > advertised` enforced — and nothing looser: ordinary 400s, 401/403, quota, overload and network errors are never classified, because a false positive teaches people to ignore the warning. The error is rewritten to name the pin, its source (catalog overlay vs. embedded floor), the required version and the remedy, and a `client-version-gate` record (pin, pinSource, effectivePin, required, model, host, ts, vendor error) goes to `~/.config/fir/doctor.jsonl`, once per pin/model per session, with no network call — so `doctor_query pattern=client-version-gate` answers "is this happening, and since when". Every session start warns in one line while an unresolved record exists, and the warning clears itself the moment the effective pin moves strictly past the rejected one — no acknowledge step. New `fir doctor client-version-gates` prints the unresolved records (nothing when clear) for fleet aggregation; `fir-converge` in `kfet/fir-exts` publishes it as `~/sync/shared/fleet/status/<host>.gates`. The nightly `model-watch` PR does **not** yet say "a host hit the gate": it runs on GitHub Actions, which cannot see the Syncthing-shared fleet status, and bridging that would be new infrastructure — read `status/*.gates` when reviewing the PR instead.
+
+### Changed
+- **Model catalog regenerated**: added `opencode/grok-4.7` (+1 on aggregators); 16 model(s) with changed pricing/limits.
 
 ## [1.19.0] - 2026-09-22
 
