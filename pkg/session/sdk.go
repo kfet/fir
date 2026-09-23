@@ -333,6 +333,7 @@ func CreateAgentSession(ctx context.Context, opts CreateAgentSessionOptions) (*C
 		Cwd:              cwd,
 		ExtReady:         opts.ExtReady,
 		MCPConfigured:    opts.MCPConfigured,
+		DoctorLogPath:    models.DoctorLogPath(agentDir),
 	})
 
 	// Register session-aware tools (plan tool needs a session reference).

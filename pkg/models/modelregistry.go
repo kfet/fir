@@ -638,6 +638,31 @@ func (r *ModelRegistry) ClientVersion(key string) string {
 	return maxClientVersion(overlay, DefaultClientVersions().Get(key))
 }
 
+// ClientVersionSource reports where ClientVersion(key) came from:
+// PinSourceOverlay when the loaded overlay advanced the pin past the
+// compiled-in floor, PinSourceEmbeddedFloor otherwise.
+func (r *ModelRegistry) ClientVersionSource(key string) string {
+	r.mu.RLock()
+	overlay := r.clientVersions.Get(key)
+	r.mu.RUnlock()
+	return clientVersionSource(overlay, DefaultClientVersions().Get(key))
+}
+
+// Pin sources, as recorded in doctor client-version-gate records.
+const (
+	PinSourceOverlay       = "overlay"
+	PinSourceEmbeddedFloor = "embedded-floor"
+)
+
+// clientVersionSource names the source of maxClientVersion(overlay, floor).
+func clientVersionSource(overlay, floor string) string {
+	eff := maxClientVersion(overlay, floor)
+	if eff != "" && eff == overlay && overlay != floor {
+		return PinSourceOverlay
+	}
+	return PinSourceEmbeddedFloor
+}
+
 // maxClientVersion picks the newer of an overlay value and the compiled-in
 // floor. Either may be empty.
 func maxClientVersion(overlay, floor string) string {
@@ -659,12 +684,7 @@ func maxClientVersion(overlay, floor string) string {
 func logClientVersions(overlay *CatalogClientVersions) {
 	for _, key := range []string{ClientVersionKeyClaudeCode} {
 		ov, floor := overlay.Get(key), DefaultClientVersions().Get(key)
-		eff := maxClientVersion(ov, floor)
-		source := "embedded-floor"
-		if eff != "" && eff == ov && ov != floor {
-			source = "overlay"
-		}
-		firlog.Debug("catalog overlay: client versions %s=%s (source=%s)", key, eff, source)
+		firlog.Debug("catalog overlay: client versions %s=%s (source=%s)", key, maxClientVersion(ov, floor), clientVersionSource(ov, floor))
 	}
 }
 

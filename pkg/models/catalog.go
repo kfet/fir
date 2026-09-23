@@ -382,6 +382,12 @@ func (r *ModelRegistry) catalogCachePath() string {
 // Returns nil only if neither source is usable, which degrades to exactly
 // today's built-ins-only behaviour.
 func (r *ModelRegistry) loadCatalogOverlay() (*CatalogOverlay, []byte) {
+	return bestLocalOverlay(r.catalogCachePath())
+}
+
+// bestLocalOverlay is loadCatalogOverlay without a registry: the newer of the
+// embedded snapshot and the cache file at path ("" = no cache).
+func bestLocalOverlay(path string) (*CatalogOverlay, []byte) {
 	best, bestRaw := (*CatalogOverlay)(nil), []byte(nil)
 	consider := func(data []byte, src string) {
 		if len(data) == 0 {
@@ -398,7 +404,7 @@ func (r *ModelRegistry) loadCatalogOverlay() (*CatalogOverlay, []byte) {
 	}
 
 	consider(embeddedCatalog, "embedded snapshot")
-	if path := r.catalogCachePath(); path != "" {
+	if path != "" {
 		if data, err := os.ReadFile(path); err == nil {
 			consider(data, "cache "+path)
 		}

@@ -406,6 +406,18 @@ release.
 - The nightly `model-watch` job reads npm `dist-tags.latest` for
   `@anthropic-ai/claude-code` and proposes a forward-only bump on the same
   rolling PR as new models; a moved pin alone is enough to open one.
+- **Detecting that a bump is needed.** When an OAuth Anthropic request is
+  rejected with the vendor's gate sentence (`Claude Code X does not support
+  this model; version Y or newer is required`), the error is rewritten to name
+  the pin, its source (overlay vs embedded floor) and the remedy, and a
+  `client-version-gate` record (pin, pinSource, required, model, host, ts,
+  vendor error) is appended to `~/.config/fir/doctor.jsonl` —
+  `doctor_query pattern=client-version-gate` lists them. Every session start
+  prints a one-line warning while any record is unresolved; it clears itself
+  once the effective pin moves strictly past the rejected one (no manual
+  step). `fir doctor client-version-gates` prints the unresolved ones (nothing
+  when clear); fleet converge publishes that as
+  `~/sync/shared/fleet/status/<host>.gates`.
 
 Escape hatches (env vars):
 

@@ -8,6 +8,13 @@
 
 Records tool errors and session failures to ~/.config/fir/doctor.jsonl.
 Exposes query tools so any session can inspect past failures.
+
+Core (Go) also appends ``client-version-gate`` records to the same log when
+Anthropic rejects an OAuth request because the advertised claude-cli version
+is gated out. Whether such a record is still unresolved is decided in Go (it
+needs the effective pin) and arrives here as an ``agent.info`` diagnostic with
+code ``client_version_gate``; this extension warns about it at every session
+start until the pin moves past the rejected version.
 """
 
 from __future__ import annotations
@@ -114,6 +121,28 @@ def on_session_start(params, ctx: fir_ext.Context) -> None:
     )
     _tool_errors.clear()
     _session_end_fired = False
+    _warn_client_version_gates(ctx)
+
+
+# Diagnostic code core uses for an unresolved client-version-gate record.
+_GATE_DIAGNOSTIC = "client_version_gate"
+_GATE_RECORD = "client-version-gate"
+
+
+def _warn_client_version_gates(ctx: fir_ext.Context) -> None:
+    """One line per unresolved gate, on every session start. Self-clearing:
+    core stops reporting the diagnostic once the effective pin moves past
+    the rejected one, so there is nothing to acknowledge here."""
+    try:
+        info = ctx.agent_info()
+    except Exception:
+        return
+    for d in (info or {}).get("diagnostics") or []:
+        if d.get("code") == _GATE_DIAGNOSTIC and d.get("summary"):
+            try:
+                ctx.notify(str(d["summary"]), "warning")
+            except Exception:
+                return
 
 
 @fir_ext.on("tool_execution_end")
@@ -182,6 +211,8 @@ def on_session_shutdown(params: dict, ctx: fir_ext.Context) -> None:
     description=(
         "Search past session failures recorded by fir doctor. "
         "Filter by tool name, error pattern, or date range. "
+        "pattern=client-version-gate lists Anthropic claude-cli version-gate rejections "
+        "(pin, pinSource, required, model, host, ts). "
         "Returns matching failure records as JSON."
     ),
     parameters={
@@ -241,7 +272,9 @@ def doctor_summary(params: dict, ctx: fir_ext.Context) -> str:
 
 
 def _failure_summary() -> str:
-    records = _read_records(200)
+    # Gate records are configuration drift, not session failures; they are
+    # reported (and self-cleared) through the diagnostics section.
+    records = [r for r in _read_records(200) if r.get("type") != _GATE_RECORD]
     if not records:
         return "No failures recorded."
 

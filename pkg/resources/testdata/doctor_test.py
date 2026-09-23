@@ -34,6 +34,19 @@ with _mock.patch.object(fir_ext, "run"):
     import doctor
 
 
+_GATE = {
+    "type": "client-version-gate",
+    "key": "claudeCode",
+    "pin": "2.1.280",
+    "pinSource": "overlay",
+    "required": "2.1.300",
+    "model": "claude-opus-5-5",
+    "host": "zbox",
+    "ts": 1790000000.0,
+    "vendorError": "Claude Code 2.1.280 does not support this model",
+}
+
+
 class TestDoctor(unittest.TestCase):
     def setUp(self):
         """Reset state between tests."""
@@ -201,6 +214,39 @@ class TestDoctor(unittest.TestCase):
             [{"severity": "warning", "summary": "pinned", "remediation": "edit it"}]
         )
         self.assertIn("edit it", doctor.cmd_doctor([], self.ctx)["message"])
+
+    # --- client-version-gate (records written by core) ---
+
+    def test_session_start_warns_on_unresolved_gate(self):
+        self._with_diagnostics(
+            [
+                {"code": "stale_default_model", "summary": "other"},
+                {"code": "client_version_gate", "summary": "claude-cli 2.1.280 was gated out"},
+            ]
+        )
+        doctor.on_session_start({"session_id": "s"}, self.ctx)
+        self.ctx.notify.assert_called_once_with("claude-cli 2.1.280 was gated out", "warning")
+
+    def test_session_start_silent_when_resolved(self):
+        self._with_diagnostics([])
+        doctor.on_session_start({"session_id": "s"}, self.ctx)
+        self.ctx.notify.assert_not_called()
+
+    def test_session_start_survives_unavailable_info(self):
+        self.ctx.agent_info.side_effect = RuntimeError("no session")
+        doctor.on_session_start({"session_id": "s"}, self.ctx)
+        self.ctx.notify.assert_not_called()
+        self.ctx.agent_info.side_effect = None
+        self._with_diagnostics([{"code": "client_version_gate", "summary": "x"}])
+        self.ctx.notify.side_effect = RuntimeError("no ui")
+        doctor.on_session_start({"session_id": "s"}, self.ctx)  # must not raise
+
+    def test_query_finds_gate_records_and_summary_ignores_them(self):
+        doctor._append_record(_GATE)
+        found = json.loads(doctor.doctor_query({"pattern": "client-version-gate"}, self.ctx))
+        self.assertEqual(found[0]["pin"], "2.1.280")
+        self.assertEqual(found[0]["pinSource"], "overlay")
+        self.assertIn("No failures", doctor._failure_summary())
 
 
 if __name__ == "__main__":

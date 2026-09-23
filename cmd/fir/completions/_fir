@@ -28,6 +28,7 @@ _fir() {
         'logout:Remove a stored account slot'
         'auth:Refresh stored OAuth tokens without running a turn'
         'mcp:Inspect MCP servers or manage their credentials'
+        'doctor:Report recorded failures (client-version-gates)'
         'completion:Print shell completion script'
     )
 
@@ -41,6 +42,7 @@ _fir() {
             uninstall)   _fir_uninstall; return ;;
             packages)    _fir_packages; return ;;
             sessions)    _fir_sessions; return ;;
+            doctor)      _fir_doctor; return ;;
             observe)     _fir_observe; return ;;
             send)        _fir_send; return ;;
             login)       _fir_login; return ;;
@@ -122,6 +124,7 @@ _fir_first_arg() {
         'login:OAuth login'
         'logout:Remove a stored account'
         'mcp:Manage MCP servers'
+        'doctor:Report recorded failures'
         'completion:Print shell completion script'
     )
     # Slash-prefixed skill invocation: `fir /<skill> ...` (cached per shell).
@@ -219,6 +222,12 @@ _fir_packages() {
     case ${words[3]} in
         update) _fir_installed_packages ;;
     esac
+}
+
+_fir_doctor() {
+    if (( CURRENT == 3 )); then
+        _values 'doctor subcommand' 'client-version-gates[Report unresolved claude-cli version-gate rejections]'
+    fi
 }
 
 _fir_sessions() {

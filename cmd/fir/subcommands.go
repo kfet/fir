@@ -107,6 +107,13 @@ var subcommands = []subcommand{
 		},
 	},
 	{
+		Name: "doctor",
+		Run:  runDoctor,
+		Help: [][2]string{
+			{"fir doctor client-version-gates", "Report unresolved Anthropic claude-cli version-gate rejections (silent if none; for fleet converge)"},
+		},
+	},
+	{
 		Name: "completion",
 		Run:  runCompletion,
 		Help: [][2]string{{"fir completion <bash|zsh>", "Print shell completion script"}},

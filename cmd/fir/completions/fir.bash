@@ -24,7 +24,7 @@ _fir_complete() {
     local subcommand=""
     if [[ $cword -ge 2 ]]; then
         case ${words[1]} in
-            update|skills|extensions|install|uninstall|packages|sessions|observe|htop|send|login|logout|auth|mcp|completion)
+            update|skills|extensions|install|uninstall|packages|sessions|observe|htop|send|login|logout|auth|mcp|doctor|completion)
                 subcommand=${words[1]}
                 ;;
         esac
@@ -100,7 +100,7 @@ _fir_complete() {
 
     # First positional: subcommand or @file or message
     if [[ $cword -eq 1 ]]; then
-        local subs="update skills extensions install uninstall packages sessions observe htop send login logout auth mcp completion"
+        local subs="update skills extensions install uninstall packages sessions observe htop send login logout auth mcp doctor completion"
         if [[ $cur == @* ]]; then
             local stripped=${cur#@}
             local files=( $(compgen -f -- "$stripped") )
@@ -174,6 +174,10 @@ _fir_complete_subcommand() {
         sessions)
             if [[ $pos -eq 1 ]]; then
                 COMPREPLY=( $(compgen -W "list" -- "$cur") )
+            fi ;;
+        doctor)
+            if [[ $pos -eq 1 ]]; then
+                COMPREPLY=( $(compgen -W "client-version-gates" -- "$cur") )
             fi ;;
         observe)
             COMPREPLY=( $(compgen -W "--json --full --cwd --interact" -- "$cur") ) ;;

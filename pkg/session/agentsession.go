@@ -207,6 +207,11 @@ type AgentSessionOptions struct {
 	// system prompt (MCP tools arrive asynchronously, so this build-time
 	// signal is race-free where a live tool-set scan is not).
 	MCPConfigured bool
+
+	// DoctorLogPath is the doctor log (~/.config/fir/doctor.jsonl) that
+	// client-version-gate records are appended to and read back from.
+	// Empty disables gate recording and the gate diagnostic.
+	DoctorLogPath string
 }
 
 // ============================================================================
@@ -224,6 +229,11 @@ type AgentSession struct {
 	modelRegistry    *models.ModelRegistry
 	compactionRunner CompactionRunner
 	cwd              string
+
+	// doctorLogPath receives client-version-gate records ("" = off);
+	// gateRecorded dedups them per session.
+	doctorLogPath string
+	gateRecorded  sync.Map
 
 	// Event subscription
 	mu             sync.RWMutex
@@ -293,6 +303,7 @@ func NewAgentSession(opts AgentSessionOptions) *AgentSession {
 		modelRegistry:    opts.ModelRegistry,
 		compactionRunner: opts.CompactionRunner,
 		cwd:              opts.Cwd,
+		doctorLogPath:    opts.DoctorLogPath,
 		hooks:            opts.Hooks,
 		usageTracker:     opts.UsageTracker,
 		sessionDate:      time.Now().Format("2006-01-02"),
@@ -496,6 +507,12 @@ func (s *AgentSession) PublishEvent(event AgentSessionEvent) {
 // ============================================================================
 
 func (s *AgentSession) handleAgentEvent(event agent.AgentEvent) {
+	// Name a client-version gate rejection before anyone displays or
+	// persists the raw vendor error.
+	if event.Type == agent.EventMessageEnd && event.Message != nil {
+		s.classifyClientVersionGate(event.Message.AsAssistant())
+	}
+
 	// Wrap and emit
 	sessionEvent := AgentSessionEvent{
 		AgentEvent: &event,
@@ -2107,7 +2124,7 @@ func (s *AgentSession) diagnostics() []Diagnostic {
 			File:        pin.Path,
 		})
 	}
-	return out
+	return append(out, s.clientVersionGateDiagnostics()...)
 }
 
 // CompactMode reports the current auto-compaction mode for user-facing
