@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- **`/mcp reload` in the TUI now shows servers added after startup.** When fir started with no MCP servers, the `/mcp` view and the connection notices stayed bound to that empty startup state. A server added later in `mcp.d/` or `mcp.json` did start on reload, but `/mcp` never listed it. Both now follow the manager that the reload creates.
+
 ## [1.20.1] - 2026-09-23
 
 ### Fixed

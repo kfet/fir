@@ -374,9 +374,36 @@ func reportSettingsErrors(settingsManager *config.SettingsManager, context strin
 // applies the diff to the running manager.  When the manager is nil (no MCP
 // servers were configured at startup) and configs are now present on disk, a
 // new manager is created, wired to the session, and started.
-func mcpReloadFunc(mgrPtr **mcp.Manager, sess *session.AgentSession, cwd string, args *Args) func() error {
+// onNew (optional) is called with a manager that this reload created.
+func mcpReloadFunc(mgrPtr **mcp.Manager, sess *session.AgentSession, cwd string, args *Args, onNew *func(*mcp.Manager)) func() error {
 	return func() error {
-		return session.ReloadMCP(context.Background(), mgrPtr, sess, cwd, args.MCPConfig, nil)
+		before := *mgrPtr
+		err := session.ReloadMCP(context.Background(), mgrPtr, sess, cwd, args.MCPConfig, nil)
+		if after := *mgrPtr; after != nil && after != before && onNew != nil && *onNew != nil {
+			(*onNew)(after)
+		}
+		return err
+	}
+}
+
+// mcpStatusFunc returns a status callback that dereferences mgrPtr on each
+// call, so it sees a manager created after startup by /mcp reload.
+func mcpStatusFunc(mgrPtr **mcp.Manager) func() []mcp.ServerStatus {
+	return func() []mcp.ServerStatus {
+		if *mgrPtr == nil {
+			return nil
+		}
+		return (*mgrPtr).Status()
+	}
+}
+
+// mcpDetailsFunc is the late-bound counterpart of mcp.DetailsFunc.
+func mcpDetailsFunc(mgrPtr **mcp.Manager) func() []mcp.ServerDetail {
+	return func() []mcp.ServerDetail {
+		if *mgrPtr == nil {
+			return nil
+		}
+		return (*mgrPtr).Details()
 	}
 }
 
@@ -1150,6 +1177,9 @@ func runInteractiveMode(args *Args, noticeCh <-chan string) error {
 
 	// mode is the concrete type; used for extension-specific calls that are
 	// not part of the tui.UI interface (SetExtensionSetup, ReexecExtData, etc.).
+	// onNewMCPManager is set once mode exists; it wires lifecycle events
+	// for a manager created by a later /mcp reload.
+	var onNewMCPManager func(*mcp.Manager)
 	mode := interactive.NewInteractiveMode(
 		setup.result.Session,
 		keybindings,
@@ -1159,9 +1189,11 @@ func runInteractiveMode(args *Args, noticeCh <-chan string) error {
 			ThemeName:       themeName,
 			ThemeSearchDirs: themeSearchDirs,
 			AgentDir:        setup.agentDir,
-			MCPStatus:       mcp.StatusFunc(setup.mcpManager),
-			MCPDetails:      mcp.DetailsFunc(setup.mcpManager),
-			MCPReload:       mcpReloadFunc(&setup.mcpManager, setup.result.Session, setup.cwd, args),
+			// Late-bound: /mcp reload may create the manager when none
+			// existed at startup, so never capture the pointer's value here.
+			MCPStatus:       mcpStatusFunc(&setup.mcpManager),
+			MCPDetails:      mcpDetailsFunc(&setup.mcpManager),
+			MCPReload:       mcpReloadFunc(&setup.mcpManager, setup.result.Session, setup.cwd, args, &onNewMCPManager),
 			MCPLogin:        mcpLoginFunc(&setup.mcpManager),
 			MCPLogout:       mcpLogoutFunc(&setup.mcpManager),
 		},
@@ -1175,6 +1207,7 @@ func runInteractiveMode(args *Args, noticeCh <-chan string) error {
 	if setup.mcpManager != nil {
 		mode.ConsumeMCPServerEvents(setup.mcpManager.ServerEvents())
 	}
+	onNewMCPManager = func(m *mcp.Manager) { mode.ConsumeMCPServerEvents(m.ServerEvents()) }
 
 	// ui is the stable interface contract used for all lifecycle calls.
 	var ui tui.UI = mode
