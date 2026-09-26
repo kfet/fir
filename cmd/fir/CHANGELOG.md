@@ -2,8 +2,13 @@
 
 ## [Unreleased]
 
+## [1.21.0] - 2026-09-26
+
 ### Added
 - **`unix://` provider base URLs.** `baseUrl: "unix:///run/x.sock/path"` sends HTTP (incl. SSE streaming) over the unix socket; custom providers whose baseUrl is `unix://` may omit `apiKey` and send no auth header.
+
+### Changed
+- **Model catalog regenerated**: removed 1 aggregator model(s); 7 model(s) with changed pricing/limits.
 
 ## [1.20.2] - 2026-09-26
 
