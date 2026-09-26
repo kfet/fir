@@ -1191,11 +1191,11 @@ func runInteractiveMode(args *Args, noticeCh <-chan string) error {
 			AgentDir:        setup.agentDir,
 			// Late-bound: /mcp reload may create the manager when none
 			// existed at startup, so never capture the pointer's value here.
-			MCPStatus:       mcpStatusFunc(&setup.mcpManager),
-			MCPDetails:      mcpDetailsFunc(&setup.mcpManager),
-			MCPReload:       mcpReloadFunc(&setup.mcpManager, setup.result.Session, setup.cwd, args, &onNewMCPManager),
-			MCPLogin:        mcpLoginFunc(&setup.mcpManager),
-			MCPLogout:       mcpLogoutFunc(&setup.mcpManager),
+			MCPStatus:  mcpStatusFunc(&setup.mcpManager),
+			MCPDetails: mcpDetailsFunc(&setup.mcpManager),
+			MCPReload:  mcpReloadFunc(&setup.mcpManager, setup.result.Session, setup.cwd, args, &onNewMCPManager),
+			MCPLogin:   mcpLoginFunc(&setup.mcpManager),
+			MCPLogout:  mcpLogoutFunc(&setup.mcpManager),
 		},
 	)
 	interactive.SetVersion(version)

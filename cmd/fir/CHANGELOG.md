@@ -2,8 +2,13 @@
 
 ## [Unreleased]
 
+## [1.20.2] - 2026-09-26
+
 ### Fixed
 - **`/mcp reload` in the TUI now shows servers added after startup.** When fir started with no MCP servers, the `/mcp` view and the connection notices stayed bound to that empty startup state. A server added later in `mcp.d/` or `mcp.json` did start on reload, but `/mcp` never listed it. Both now follow the manager that the reload creates.
+
+### Changed
+- **Model catalog regenerated**: added `amazon-bedrock/openai.gpt-6-luna`, `amazon-bedrock/openai.gpt-6-sol`, `opencode/qwen3.8-max` (+11 on aggregators); removed `opencode/muse-spark-1.2-contributor-free` (+8 on aggregators); 58 model(s) with changed pricing/limits.
 
 ## [1.20.1] - 2026-09-23
 
