@@ -1206,3 +1206,39 @@ func TestMergeCompat_RoutingOverrideDoesNotMutateBase(t *testing.T) {
 		t.Fatalf("base vercelGatewayRouting.only was mutated: %#v", got)
 	}
 }
+
+func TestModelRegistry_KeylessUnixProvider(t *testing.T) {
+	modelsPath := filepath.Join(t.TempDir(), "models.json")
+	os.WriteFile(modelsPath, []byte(`{"providers":{
+		"bifrost-unix":{"baseUrl":"unix:///run/boxres/bifrost.sock/anthropic","api":"anthropic-messages",
+			"models":[{"id":"claude-x"}]},
+		"tcp-nokey":{"baseUrl":"http://localhost:1","api":"openai-completions","models":[{"id":"m"}]}}}`), 0644)
+	registry, _ := setupTestModelRegistry(t, modelsPath)
+	if registry.GetError() == "" {
+		t.Fatal("expected error for keyless non-unix provider")
+	}
+
+	os.WriteFile(modelsPath, []byte(`{"providers":{
+		"bifrost-unix":{"baseUrl":"unix:///run/boxres/bifrost.sock/anthropic","api":"anthropic-messages",
+			"models":[{"id":"claude-x"}]}}}`), 0644)
+	registry, _ = setupTestModelRegistry(t, modelsPath)
+	if err := registry.GetError(); err != "" {
+		t.Fatal(err)
+	}
+	m := registry.Find("bifrost-unix", "claude-x")
+	if m == nil {
+		t.Fatal("keyless unix provider dropped")
+	}
+	if !registry.IsKeyless("bifrost-unix") || !registry.HasConfiguredAuth(m) {
+		t.Error("expected keyless provider to count as configured")
+	}
+	found := false
+	for _, a := range registry.GetAvailable() {
+		if a.Provider == "bifrost-unix" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("keyless unix model not available")
+	}
+}

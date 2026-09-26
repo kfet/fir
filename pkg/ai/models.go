@@ -147,3 +147,7 @@ func ModelsAreEqual(a, b *Model) bool {
 
 // boolRef returns a pointer to b. Used in model registration for Compat fields.
 func boolRef(b bool) *bool { return &b }
+
+// IsUnixURL reports whether a base URL uses the unix:// scheme (HTTP over a
+// unix domain socket; no API key required).
+func IsUnixURL(u string) bool { return strings.HasPrefix(u, "unix://") }

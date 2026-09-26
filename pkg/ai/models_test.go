@@ -391,3 +391,9 @@ func TestUnregisterProviderModels(t *testing.T) {
 	// Idempotent.
 	UnregisterProviderModels(provider)
 }
+
+func TestIsUnixURL(t *testing.T) {
+	if !IsUnixURL("unix:///run/a.sock/x") || IsUnixURL("http://localhost") {
+		t.Error("IsUnixURL wrong")
+	}
+}

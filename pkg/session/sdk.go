@@ -260,7 +260,7 @@ func CreateAgentSession(ctx context.Context, opts CreateAgentSessionOptions) (*C
 			// that just failed, so the provider retries and the session
 			// survives the rotation instead of wedging on a permanent 401.
 			key := modelRegistry.RefreshApiKeyForProvider(resolvedProvider)
-			if key == "" {
+			if key == "" && !modelRegistry.IsKeyless(resolvedProvider) {
 				if keyErr := modelRegistry.GetApiKeyError(resolvedProvider); keyErr != nil {
 					return "", fmt.Errorf(
 						"authentication failed for %q: %v. Run '/login %s' to re-authenticate",

@@ -222,7 +222,7 @@ func streamVertexHTTP(
 	hdrs := BuildRequestHeaders(authHdrs, model, options)
 	ApplyHeaders(req, hdrs)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := defaultHTTPClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("Vertex AI request failed (model=%s): connection error", model.ID)
 	}

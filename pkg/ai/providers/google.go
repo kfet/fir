@@ -201,7 +201,7 @@ func streamGoogleHTTP(
 	)
 	ApplyHeaders(req, hdrs)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := defaultHTTPClient.Do(req)
 	if err != nil {
 		firlog.Warn("google HTTP error", "model", model.ID, "err", "connection error")
 		// Don't wrap the original error — it may contain the full URL with the API key.

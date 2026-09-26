@@ -52,7 +52,7 @@ func (r *DefaultRunner) RunCompaction(ctx context.Context, sess *session.AgentSe
 	}
 
 	apiKey := r.ModelRegistry.GetApiKey(model)
-	if apiKey == "" {
+	if apiKey == "" && !r.ModelRegistry.IsKeyless(model.Provider) {
 		detail := ""
 		if err := r.ModelRegistry.GetApiKeyError(model.Provider); err != nil {
 			detail = err.Error()

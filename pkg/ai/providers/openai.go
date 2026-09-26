@@ -373,7 +373,7 @@ func streamOpenAIHTTP(
 	if apiKey == "" {
 		apiKey = envkeys.GetEnvApiKey(model.Provider)
 	}
-	if apiKey == "" {
+	if apiKey == "" && !ai.IsUnixURL(model.BaseURL) {
 		return errors.New(noAPIKeyError(model.Provider, apiKeyErrorFromOpts(options)))
 	}
 
@@ -406,7 +406,10 @@ func streamOpenAIHTTP(
 	req.Header.Set("Accept", "text/event-stream")
 
 	// Build auth + model headers (options merged after provider-specific logic below)
-	authHeaders := map[string]string{"Authorization": "Bearer " + apiKey}
+	authHeaders := map[string]string{}
+	if apiKey != "" {
+		authHeaders["Authorization"] = "Bearer " + apiKey
+	}
 	applyCloudflareAuthHeaders(model.Provider, authHeaders, apiKey)
 	baseHeaders := BuildRequestHeaders(authHeaders, model, nil)
 	ApplyHeaders(req, baseHeaders)
@@ -451,7 +454,7 @@ func streamOpenAIHTTP(
 		}
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := defaultHTTPClient.Do(req)
 	if err != nil {
 		firlog.Warn("openai HTTP error", "model", model.ID, "err", err)
 		return fmt.Errorf("HTTP request failed: %w", err)
@@ -1316,7 +1319,7 @@ func StreamSimpleOpenAICompletions(ctx context.Context, model *ai.Model, prompt 
 	if apiKey == "" {
 		apiKey = envkeys.GetEnvApiKey(model.Provider)
 	}
-	if apiKey == "" {
+	if apiKey == "" && !ai.IsUnixURL(model.BaseURL) {
 		return errorStreamProvider(model, noAPIKeyError(model.Provider, apiKeyErrorFromSimpleOpts(options)))
 	}
 

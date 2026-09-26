@@ -1098,8 +1098,8 @@ func validateModelsConfig(config *ModelsConfig) error {
 			if providerConfig.BaseURL == "" {
 				return fmt.Errorf("Provider %s: \"baseUrl\" is required when defining custom models", providerName)
 			}
-			if providerConfig.ApiKey == "" {
-				return fmt.Errorf("Provider %s: \"apiKey\" is required when defining custom models", providerName)
+			if providerConfig.ApiKey == "" && !isKeylessProvider(providerConfig) {
+				return fmt.Errorf("Provider %s: \"apiKey\" is required when defining custom models (unless every model's baseUrl is unix://)", providerName)
 			}
 		}
 		// Built-in providers with custom models: baseUrl/apiKey/api are optional,
@@ -1168,8 +1168,10 @@ func (r *ModelRegistry) parseModels(config *ModelsConfig, apiKeys map[string]str
 			continue // Override-only, no custom models
 		}
 
-		// Store API key config for fallback resolver
-		if providerConfig.ApiKey != "" {
+		// Store API key config for fallback resolver. A keyless unix-socket
+		// provider is recorded with an empty key so it still counts as
+		// configured (see hasAuthLocked).
+		if providerConfig.ApiKey != "" || isKeylessProvider(providerConfig) {
 			apiKeys[providerName] = providerConfig.ApiKey
 		}
 
@@ -1325,7 +1327,7 @@ func (r *ModelRegistry) GetAvailable() []*ai.Model {
 	r.mu.RLock()
 	var result []*ai.Model
 	for _, m := range r.models {
-		if r.authStorage.HasAuth(m.Provider) && r.isModelLive(m.Provider, m.ID) {
+		if r.hasAuthLocked(m.Provider) && r.isModelLive(m.Provider, m.ID) {
 			result = append(result, m)
 		}
 	}
@@ -1392,6 +1394,40 @@ func (r *ModelRegistry) Find(provider, modelID string) *ai.Model {
 // GetApiKey returns the API key for a model's provider.
 func (r *ModelRegistry) GetApiKey(model *ai.Model) string {
 	return r.authStorage.GetApiKey(model.Provider)
+}
+
+// isKeylessProvider reports whether a models.json provider may omit apiKey:
+// it has no apiKey and every model's effective baseUrl is a unix:// socket
+// (access is then controlled by socket permissions / peer credentials).
+func isKeylessProvider(pc ProviderConfig) bool {
+	if pc.ApiKey != "" || len(pc.Models) == 0 {
+		return false
+	}
+	for _, m := range pc.Models {
+		if !ai.IsUnixURL(firstNonEmpty(m.BaseURL, pc.BaseURL)) {
+			return false
+		}
+	}
+	return true
+}
+
+// hasAuthLocked reports whether provider has credentials or is a configured
+// keyless custom provider. Caller must hold r.mu (read).
+func (r *ModelRegistry) hasAuthLocked(provider string) bool {
+	if r.authStorage.HasAuth(provider) {
+		return true
+	}
+	key, ok := r.customProviderApiKeys[provider]
+	return ok && key == ""
+}
+
+// IsKeyless reports whether provider is a models.json custom provider that
+// legitimately has no API key (unix:// socket baseUrl).
+func (r *ModelRegistry) IsKeyless(provider string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	key, ok := r.customProviderApiKeys[provider]
+	return ok && key == ""
 }
 
 // HasConfiguredAuth returns true if the model has any configured authentication

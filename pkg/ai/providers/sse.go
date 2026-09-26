@@ -109,7 +109,7 @@ var sharedTransport = func() *http.Transport {
 var DefaultSSEClient = &SSEClient{
 	HTTPClient: &http.Client{
 		Timeout:   0, // No timeout for streaming
-		Transport: sharedTransport,
+		Transport: httpTransport,
 	},
 }
 
@@ -251,7 +251,7 @@ func errorStreamProvider(model *ai.Model, errMsg string) *ai.AssistantMessageEve
 // DoJSONRequest sends a POST request and reads the full response body.
 // Used for non-streaming API calls and error inspection.
 func DoJSONRequest(ctx context.Context, url string, headers map[string]string, body io.Reader) ([]byte, int, error) {
-	client := &http.Client{Timeout: 60 * time.Second, Transport: sharedTransport}
+	client := &http.Client{Timeout: 60 * time.Second, Transport: httpTransport}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, body)
 	if err != nil {
 		return nil, 0, fmt.Errorf("create request: %w", err)

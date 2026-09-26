@@ -1,7 +1,6 @@
 package providers
 
 import (
-	"net/http"
 	"testing"
 	"time"
 )
@@ -25,8 +24,11 @@ func TestSharedTransportTLSHandshakeTimeout(t *testing.T) {
 	}
 	// DefaultSSEClient and DoJSONRequest must use the shared transport so
 	// the bumped timeout actually applies.
-	c, ok := DefaultSSEClient.HTTPClient.Transport.(*http.Transport)
-	if !ok || c != sharedTransport {
-		t.Error("DefaultSSEClient does not use sharedTransport")
+	// (via providerTransport, which delegates non-unix requests to it).
+	if _, ok := DefaultSSEClient.HTTPClient.Transport.(providerTransport); !ok {
+		t.Error("DefaultSSEClient does not use providerTransport")
+	}
+	if defaultHTTPClient.Transport != httpTransport {
+		t.Error("defaultHTTPClient does not use providerTransport")
 	}
 }

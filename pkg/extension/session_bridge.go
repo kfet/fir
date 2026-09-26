@@ -180,7 +180,7 @@ func (b *SessionBridge) ClearLabel(entryID string) {
 
 func (b *SessionBridge) SetModel(model *ai.Model) bool {
 	mr := b.session.ModelRegistryRef()
-	if mr != nil && mr.GetApiKey(model) == "" {
+	if mr != nil && mr.GetApiKey(model) == "" && !mr.IsKeyless(model.Provider) {
 		return false
 	}
 	if err := b.session.SetModel(model); err != nil {

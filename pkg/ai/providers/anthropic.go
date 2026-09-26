@@ -349,7 +349,7 @@ func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, op
 		if apiKey == "" {
 			apiKey = envkeys.GetEnvApiKey(model.Provider)
 		}
-		if apiKey == "" {
+		if apiKey == "" && !ai.IsUnixURL(model.BaseURL) {
 			out := &ai.AssistantMessage{
 				Role:         ai.RoleAssistant,
 				Content:      []ai.AssistantContent{},
@@ -957,7 +957,9 @@ func buildAnthropicHeaders(model *ai.Model, apiKey string, oauthToken bool, opti
 		if betaStr != "" {
 			authHeaders["anthropic-beta"] = betaStr
 		}
-		authHeaders["x-api-key"] = apiKey
+		if apiKey != "" {
+			authHeaders["x-api-key"] = apiKey
+		}
 	}
 
 	// Cloudflare AI Gateway: replace x-api-key/Authorization with cf-aig-authorization.

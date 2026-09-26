@@ -246,6 +246,28 @@ provider-level, then — for built-in providers only — the API of that provide
 first built-in model. So a custom model on a built-in provider may omit `api`; a
 model on a brand-new provider may not.
 
+#### Unix-socket endpoints (`unix://`)
+
+A `baseUrl` may use the `unix://` scheme to reach an HTTP endpoint over a unix
+domain socket, e.g. `unix:///run/boxres/bifrost.sock/anthropic`. Rule: the
+socket path is the URL path up to and including the **first** path segment
+ending in `.sock` (`/run/boxres/bifrost.sock`); the rest (`/anthropic`) is the
+HTTP path, sent with `Host: localhost` (so requests go to
+`/anthropic/v1/messages`). A `unix://` URL with no `.sock` segment is an error.
+Works for every HTTP-based API (anthropic-messages, openai-completions, …),
+streaming included.
+
+A custom provider may **omit `apiKey`** when every model's effective `baseUrl`
+is `unix://` — access is controlled by socket permissions/peer credentials, and
+fir sends no auth header:
+
+```json
+{ "providers": { "bifrost": {
+    "baseUrl": "unix:///run/boxres/bifrost.sock/anthropic",
+    "api": "anthropic-messages",
+    "models": [{ "id": "claude-sonnet-4-6" }] } } }
+```
+
 `apiKey` and header values are resolved the same way: a value starting with `!`
 is run as a shell command and its stdout used; otherwise the value is used as an
 env var *name* if that variable is set, else taken literally. There is no

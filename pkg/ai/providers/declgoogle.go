@@ -668,7 +668,7 @@ func streamDeclGoogle(
 		for k, v := range hdrs {
 			req.Header.Set(k, v)
 		}
-		resp, err = http.DefaultClient.Do(req)
+		resp, err = defaultHTTPClient.Do(req)
 		if err != nil {
 			lastErr = fmt.Errorf("network error: %v", err)
 			if attempt < declGoogleMaxRetries {
@@ -741,7 +741,7 @@ func streamDeclGoogle(
 			for k, v := range hdrs {
 				req.Header.Set(k, v)
 			}
-			retryResp, err := http.DefaultClient.Do(req)
+			retryResp, err := defaultHTTPClient.Do(req)
 			if err != nil {
 				return fmt.Errorf("network error on retry: %v", err)
 			}
