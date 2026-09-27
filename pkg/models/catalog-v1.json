@@ -1,38 +1,143 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-09-26T01:01:45Z",
+  "generatedAt": "2026-09-27T01:02:08Z",
   "clientVersions": {
     "claudeCode": "2.1.280"
   },
   "providers": {
+    "opencode": {
+      "models": [
+        {
+          "id": "longcat-2.5-preview-free",
+          "name": "LongCat 2.5 Preview Free",
+          "api": "openai-completions",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          },
+          "contextWindow": 1000000,
+          "maxTokens": 131072
+        }
+      ]
+    },
+    "opencode-go": {
+      "models": [
+        {
+          "id": "longcat-2.5-preview-free",
+          "name": "LongCat 2.5 Preview Free",
+          "api": "openai-completions",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          },
+          "contextWindow": 1000000,
+          "maxTokens": 131072
+        }
+      ]
+    },
     "openrouter": {
       "modelOverrides": {
-        "deepseek/deepseek-v4-pro": {
+        "deepseek/deepseek-v4-pro-0423": {
           "cost": {
-            "input": 0.418818,
-            "output": 0.837636,
-            "cacheRead": 0.0349015,
+            "input": 0.348,
+            "output": 0.696,
+            "cacheRead": 0.029,
             "cacheWrite": 0
           }
         },
-        "qwen/qwen3-235b-a22b-2507": {
+        "deepseek/deepseek-v4-pro-0813": {
           "cost": {
-            "input": 0.0875,
-            "output": 0.35,
-            "cacheRead": 0.0175,
+            "input": 0.24634,
+            "output": 3.5,
+            "cacheRead": 0.24584,
+            "cacheWrite": 0
+          }
+        },
+        "deepseek/deepseek-v4.1-flash": {
+          "cost": {
+            "input": 0.035,
+            "output": 0.29,
+            "cacheRead": 0.001,
+            "cacheWrite": 0
+          }
+        },
+        "minimax/minimax-m2": {
+          "cost": {
+            "input": 0.255,
+            "output": 1.02,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          }
+        },
+        "minimax/minimax-m2.7": {
+          "cost": {
+            "input": 0.21,
+            "output": 0.84,
+            "cacheRead": 0.042,
+            "cacheWrite": 0
+          }
+        },
+        "z-ai/glm-5.3": {
+          "cost": {
+            "input": 0.238,
+            "output": 0.748,
+            "cacheRead": 0.0391,
+            "cacheWrite": 0
+          }
+        },
+        "~moonshotai/kimi-latest": {
+          "cost": {
+            "input": 1,
+            "output": 5.6,
+            "cacheRead": 0.116,
             "cacheWrite": 0
           }
         },
         "~z-ai/glm-latest": {
           "cost": {
-            "input": 0.5586,
-            "output": 1.7556,
-            "cacheRead": 0.10374,
+            "input": 0.238,
+            "output": 0.748,
+            "cacheRead": 0.0391,
             "cacheWrite": 0
-          },
-          "maxTokens": 131072
+          }
         }
       }
+    },
+    "vercel-ai-gateway": {
+      "models": [
+        {
+          "id": "meituan/longcat-2.5-preview",
+          "name": "LongCat 2.5 Preview",
+          "api": "anthropic-messages",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 0.3,
+            "output": 1.2,
+            "cacheRead": 0.006,
+            "cacheWrite": 0
+          },
+          "contextWindow": 1048576,
+          "maxTokens": 131072
+        }
+      ]
     }
   }
 }
