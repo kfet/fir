@@ -78,6 +78,10 @@ type watchResult struct {
 	ClientVersionBump string      `json:"client_version_bump,omitempty"`
 	Failed            []string    `json:"sources_failed,omitempty"`
 	specs             []modelSpec // qualifying specs, in report order
+	// known and defaults are the runtime baseline (compiled + overlay) the
+	// default-successor check resolves against; nil means compiled-only.
+	known    map[modelKey]bool
+	defaults map[string]string
 }
 
 // compiledCatalog snapshots the models compiled into this binary.
@@ -95,30 +99,33 @@ func compiledCatalog() map[modelKey]*ai.Model {
 // catalog PLUS the committed catalog overlay. Leaving the overlay out would
 // re-report every overlay-shipped model as new for eternity — they are exactly
 // the models that reached the fleet without a release.
-func knownModels(compiled map[modelKey]*ai.Model, overlayPath string) map[modelKey]bool {
+//
+// It also returns the overlay's providerDefaults, which override the
+// compiled-in DefaultModelID anchors at runtime.
+func knownModels(compiled map[modelKey]*ai.Model, overlayPath string) (map[modelKey]bool, map[string]string) {
 	known := make(map[modelKey]bool, len(compiled))
 	for k := range compiled {
 		known[k] = true
 	}
 	if overlayPath == "" {
-		return known
+		return known, nil
 	}
 	raw, err := os.ReadFile(overlayPath)
 	if err != nil {
 		log.Printf("Warning: catalog overlay unreadable (%v); treating overlay models as unknown", err)
-		return known
+		return known, nil
 	}
 	overlay, err := models.ParseCatalogOverlay(raw)
 	if err != nil {
 		log.Printf("Warning: catalog overlay invalid (%v); treating overlay models as unknown", err)
-		return known
+		return known, nil
 	}
 	for provider, pc := range overlay.Providers {
 		for _, m := range pc.Models {
 			known[modelKey{provider, m.ID}] = true
 		}
 	}
-	return known
+	return known, overlay.ProviderDefaults
 }
 
 // qualifies decides whether a new model is worth waking a human for.
@@ -149,7 +156,7 @@ func qualifies(m modelSpec, known map[modelKey]bool, lineages map[string]bool, t
 // compareCatalogs diffs a fresh fetch against the compiled-in catalog.
 func compareCatalogs(fresh []modelSpec, overlayPath, trigger string) *watchResult {
 	compiled := compiledCatalog()
-	known := knownModels(compiled, overlayPath)
+	known, defaults := knownModels(compiled, overlayPath)
 
 	lineages := map[string]bool{}
 	for k := range known {
@@ -158,7 +165,7 @@ func compareCatalogs(fresh []modelSpec, overlayPath, trigger string) *watchResul
 		}
 	}
 
-	res := &watchResult{Trigger: trigger}
+	res := &watchResult{Trigger: trigger, known: known, defaults: defaults}
 	seen := map[modelKey]bool{}
 	for _, m := range fresh {
 		key := modelKey{m.Provider, m.ID}
@@ -426,6 +433,86 @@ func flagship(m modelSpec, compiled map[modelKey]*ai.Model) (modelKey, *ai.Model
 	return bestKey, best
 }
 
+// defaultSuccessor is a new model that is a strictly newer generation of its
+// provider's resolved default. adopted reports whether the runtime
+// auto-resolution (ai.NewestInProductLine, the same ordering
+// DefaultModelForProvider uses) will make it the default by itself.
+type defaultSuccessor struct {
+	provider, current, successor string
+	adopted                      bool
+}
+
+// defaultSuccessors compares each new model against its provider's default as
+// auto-resolved over the runtime baseline (compiled + overlay). A model the resolver would pick
+// once registered is "adopted". A model of the same lineage and prefix whose
+// generation is higher but whose product-line shape differs (a -preview tag, a
+// variant word) is newer yet NOT adopted — those need a human decision.
+// Unorderable ids (no version, dated snapshots) are silence, never a guess.
+func defaultSuccessors(res *watchResult) []defaultSuccessor {
+	known, defaults := res.known, res.defaults
+	if known == nil {
+		known, defaults = knownModels(compiledCatalog(), "")
+	}
+	compiled := map[string][]string{}
+	for k := range known {
+		compiled[k.Provider] = append(compiled[k.Provider], k.ID)
+	}
+	specs := res.specs
+	withNew := map[string][]string{}
+	for p, ids := range compiled {
+		withNew[p] = append([]string(nil), ids...)
+	}
+	for _, m := range specs {
+		withNew[m.Provider] = append(withNew[m.Provider], m.ID)
+	}
+	var out []defaultSuccessor
+	for _, m := range specs {
+		anchor := defaults[m.Provider]
+		if rec := ai.GetProviderRecord(ai.Provider(m.Provider)); anchor == "" && rec != nil {
+			anchor = rec.DefaultModelID
+		}
+		if anchor == "" {
+			continue
+		}
+		// The default today: auto-resolved over what already ships.
+		cur := ai.NewestInProductLine(anchor, compiled[m.Provider])
+		if cur == m.ID {
+			continue
+		}
+		if ai.NewestInProductLine(anchor, withNew[m.Provider]) == m.ID {
+			out = append(out, defaultSuccessor{m.Provider, cur, m.ID, true})
+			continue
+		}
+		// Not picked by the resolver: warn only when it is still plainly a
+		// newer generation of the same line under the same prefix.
+		if l := ai.ExtractLineage(m.ID); l == "" || l != ai.ExtractLineage(cur) || idPrefix(m.ID) != idPrefix(cur) {
+			continue
+		}
+		newShape, newGen, ok := ai.ProductLine(m.ID)
+		if !ok {
+			continue
+		}
+		curShape, curGen, ok := ai.ProductLine(cur)
+		// Same shape means the resolver saw it and chose a newer sibling.
+		if !ok || newShape == curShape || ai.CompareGenerations(newGen, curGen) <= 0 {
+			continue
+		}
+		out = append(out, defaultSuccessor{m.Provider, cur, m.ID, false})
+	}
+	return out
+}
+
+// idPrefix is everything before the product-line name: "us.anthropic." for
+// "us.anthropic.claude-opus-5-5", "anthropic/" for gateway ids, "" for bare.
+func idPrefix(id string) string {
+	if l := ai.ExtractLineage(id); l != "" {
+		if i := strings.Index(id, l); i >= 0 {
+			return id[:i]
+		}
+	}
+	return ""
+}
+
 // writeSummary writes the machine-readable verdict the workflow branches on.
 func writeSummary(path string, res *watchResult) error {
 	data, err := json.MarshalIndent(res, "", "  ")
@@ -483,6 +570,51 @@ func writeReport(path string, res *watchResult, overlayAdded []string) error {
 			}
 		}
 		b.WriteString("\n")
+	}
+
+	var adopted, missed []defaultSuccessor
+	for _, d := range defaultSuccessors(res) {
+		if d.adopted {
+			adopted = append(adopted, d)
+		} else {
+			missed = append(missed, d)
+		}
+	}
+	if len(missed) > 0 {
+		// Loud on purpose. claude-opus-5-5 sat unused for five days because
+		// nothing said "this is newer than what every unpinned host runs".
+		// Auto-resolution now covers the plain case; these are the ones it
+		// deliberately will not follow (different tag/variant shape).
+		b.WriteString("## ⚠️ Newer generation NOT adopted as provider default\n\n")
+		b.WriteString("Merging this PR only makes these models *selectable*. Default auto-resolution will " +
+			"**not** pick them up (different product-line shape, e.g. a `-preview` tag or variant).\n\n")
+		for _, s := range missed {
+			fmt.Fprintf(&b, "- `%s`: default resolves to `%s`, new `%s` is a newer generation\n",
+				s.provider, s.current, s.successor)
+		}
+		b.WriteString("\nDecide the default for each line above — in the same PR or a follow-up: the " +
+			"compiled-in `DefaultModelID` (`pkg/ai/provider_registry_builtins.go`, needs a release) or " +
+			"`providerDefaults` in `pkg/models/catalog-v1.json` (fleet-wide on merge, no release). Then check " +
+			"each host's `~/.config/fir/settings.json` `defaultModel` and each Poe bot's `defaults.model` pins. " +
+			"If the answer is \"not yet\", say why in the PR.\n\n")
+	}
+	if len(adopted) > 0 {
+		inOverlay := map[string]bool{}
+		for _, k := range overlayAdded {
+			inOverlay[k] = true
+		}
+		b.WriteString("## Provider default advances\n\n")
+		for _, s := range adopted {
+			when := "on the next release"
+			if inOverlay[modelKey{s.provider, s.successor}.String()] {
+				when = "on merge, within the catalog TTL (overlay entry)"
+			}
+			fmt.Fprintf(&b, "- `%s`: default auto-resolves from `%s` to `%s` %s\n",
+				s.provider, s.current, s.successor, when)
+		}
+		b.WriteString("\nThese become the default for unpinned hosts as noted. Explicit pins do " +
+			"not follow: check each host's `~/.config/fir/settings.json` `defaultModel` and each Poe bot's " +
+			"`defaults.model`.\n\n")
 	}
 
 	if res.ClientVersionBump != "" {

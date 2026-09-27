@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- **model-watch PRs now say what a new model does to provider defaults.** `claude-opus-5-5` shipped in 1.19.0 via the nightly model-watch PR yet sat unused for five days because the report never mentioned defaults. The report now compares each new model against the provider's auto-resolved default (same ordering and compiled + overlay baseline as `DefaultModelForProvider`): models auto-resolution will adopt are listed as becoming the default for unpinned hosts on the next release (or on merge for catalog-overlay entries), with a reminder to check host `settings.json` `defaultModel` and Poe bot `defaults.model` pins; a loud "NOT adopted" section remains only for newer generations it will not follow (e.g. `-preview` or variant shapes), naming `DefaultModelID` and catalog `providerDefaults`.
+
 ## [1.21.1] - 2026-09-27
 
 ### Changed

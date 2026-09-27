@@ -164,6 +164,72 @@ func TestFlagshipAndReport(t *testing.T) {
 	}
 }
 
+func TestDefaultSuccessorsFollowsAutoResolution(t *testing.T) {
+	// The regression: claude-opus-5-5 arrived while anthropic defaulted to
+	// claude-opus-5 and the PR said nothing about the default. Now the
+	// report must mirror what DefaultModelForProvider will actually do.
+	anth := ai.NewestInProductLine(ai.GetProviderRecord("anthropic").DefaultModelID,
+		providerIDs("anthropic"))
+	bed := ai.NewestInProductLine(ai.GetProviderRecord("amazon-bedrock").DefaultModelID,
+		providerIDs("amazon-bedrock"))
+	specs := []modelSpec{
+		spec("anthropic", anth+"-8"),                   // older sibling in the same PR: silent
+		spec("anthropic", anth+"-9"),                   // same shape, newest: adopted
+		spec("anthropic", anth+"-10-preview"),          // newer but -preview: NOT adopted
+		spec("anthropic", "claude-sonnet-99"),          // other product line: silent
+		spec("amazon-bedrock", bed+"-9"),               // same regional prefix: adopted
+		spec("amazon-bedrock", "global."+bed[3:]+"-9"), // different prefix: silent
+		spec("anthropic", anth),                        // the default itself: silent
+	}
+	got := defaultSuccessors(&watchResult{specs: specs})
+	want := []defaultSuccessor{
+		{"anthropic", anth, anth + "-9", true},
+		{"anthropic", anth, anth + "-10-preview", false},
+		{"amazon-bedrock", bed, bed + "-9", true},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("defaultSuccessors = %+v, want %+v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("defaultSuccessors = %+v, want %+v", got, want)
+		}
+	}
+
+	res := &watchResult{Trigger: triggerCurated, specs: specs[1:3]}
+	path := filepath.Join(t.TempDir(), "report.md")
+	if err := writeReport(path, res, nil); err != nil {
+		t.Fatal(err)
+	}
+	body, _ := os.ReadFile(path)
+	for _, want := range []string{"Provider default advances", "on the next release", "defaultModel", "defaults.model",
+		"NOT adopted", "providerDefaults", "DefaultModelID"} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("report is missing %q:\n%s", want, body)
+		}
+	}
+
+	// Adopted only, shipped via the overlay: no loud warning, adopted on merge.
+	res.specs = specs[1:2]
+	if err := writeReport(path, res, []string{"anthropic/" + anth + "-9"}); err != nil {
+		t.Fatal(err)
+	}
+	body, _ = os.ReadFile(path)
+	if strings.Contains(string(body), "NOT adopted") || !strings.Contains(string(body), "on merge") {
+		t.Errorf("adopted overlay-only report is wrong:\n%s", body)
+	}
+}
+
+func providerIDs(p string) []string {
+	var ids []string
+	for k := range compiledCatalog() {
+		if k.Provider == p {
+			ids = append(ids, k.ID)
+		}
+	}
+	return ids
+}
+
 func TestOverlayDefinitionCarriesOnlyAssertedFields(t *testing.T) {
 	m := spec("anthropic", "claude-watch-5")
 	m.BaseURL = "https://api.anthropic.com"
@@ -285,6 +351,26 @@ func TestCatalogOverlayIsPartOfTheBaseline(t *testing.T) {
 	// A missing/invalid overlay degrades to compiled-only rather than failing.
 	if res := compareCatalogs([]modelSpec{fresh}, filepath.Join(t.TempDir(), "nope.json"), triggerCurated); len(res.New) != 1 {
 		t.Errorf("expected the model to be new without an overlay, got %v", res.New)
+	}
+}
+
+// The runtime anchor is the overlay's providerDefaults, and overlay models
+// count toward what the default already resolves to.
+func TestDefaultSuccessorsUsesOverlayBaseline(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "catalog-v1.json")
+	seed := `{"schemaVersion":1,"generatedAt":"2026-01-01T00:00:00Z",
+	  "providerDefaults":{"anthropic":"claude-anchor-7"},
+	  "providers":{"anthropic":{"models":[
+	    {"id":"claude-anchor-7","api":"anthropic-messages"},
+	    {"id":"claude-anchor-7-2","api":"anthropic-messages"}]}}}`
+	if err := os.WriteFile(path, []byte(seed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res := compareCatalogs([]modelSpec{spec("anthropic", "claude-anchor-7-1"), spec("anthropic", "claude-anchor-7-3")},
+		path, triggerCurated)
+	got := defaultSuccessors(res)
+	if len(got) != 1 || got[0] != (defaultSuccessor{"anthropic", "claude-anchor-7-2", "claude-anchor-7-3", true}) {
+		t.Fatalf("defaultSuccessors = %+v", got)
 	}
 }
 
