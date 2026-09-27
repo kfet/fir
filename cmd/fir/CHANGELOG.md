@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Changed
+- **Provider defaults follow their product line automatically.** The configured default (compiled-in or catalog `providerDefaults`) is now an anchor that resolves to the newest registered generation of the same product line — e.g. `claude-opus-5` → `claude-opus-5-5`, `us.anthropic.claude-opus-5` → `us.anthropic.claude-opus-5-5` — with no code or data edit. Conservative: never crosses product lines, variants, regional/aggregator prefixes or `-preview` tags, skips dated snapshots, respects the provider's live model list, and falls back to the anchor. Explicit pins are unchanged; the stale-pin warning compares against the resolved default.
+
 ## [1.21.0] - 2026-09-26
 
 ### Added

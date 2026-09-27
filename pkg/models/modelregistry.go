@@ -606,11 +606,37 @@ func (r *ModelRegistry) ModelOrigin(provider, modelID string) string {
 }
 
 // DefaultModelForProvider returns the default model ID for a provider, or ""
-// if the provider isn't registered (or has no default). The catalog overlay's
-// providerDefaults win over the compiled-in ai.RegisteredProvider value, which
-// stays as the offline fallback — moving a provider default is plainly data
-// and must not require a binary release.
+// if the provider isn't registered (or has no default).
+//
+// The configured default — the catalog overlay's providerDefaults, else the
+// compiled-in ai.RegisteredProvider value — is only a product-line ANCHOR: it
+// resolves to the newest generation of that same product line registered for
+// the provider (built-in, catalog overlay or models.json) and allowed by its
+// live model list once fetched, so a new generation becomes the default the
+// moment it is in the registry, with no code or data edit. See ai.NewestInProductLine for the (conservative)
+// ordering; anything it cannot order leaves the anchor unchanged. Explicit
+// user pins never pass through here.
 func (r *ModelRegistry) DefaultModelForProvider(p ai.Provider) string {
+	anchor := r.defaultAnchor(p)
+	if anchor == "" {
+		return ""
+	}
+	r.mu.RLock()
+	var ids []string
+	for _, m := range r.models {
+		// A provider's live model list, once fetched, is authoritative:
+		// never advance to an id the account cannot actually use.
+		if m.Provider == string(p) && r.isModelLive(m.Provider, m.ID) {
+			ids = append(ids, m.ID)
+		}
+	}
+	r.mu.RUnlock()
+	return ai.NewestInProductLine(anchor, ids)
+}
+
+// defaultAnchor is the configured (unresolved) provider default: the catalog
+// overlay's providerDefaults over the compiled-in offline fallback.
+func (r *ModelRegistry) defaultAnchor(p ai.Provider) string {
 	r.mu.RLock()
 	id, ok := r.providerDefaults[string(p)]
 	r.mu.RUnlock()

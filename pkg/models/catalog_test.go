@@ -665,3 +665,45 @@ func TestEmbeddedCatalogIsCanonical(t *testing.T) {
 	t.Errorf("%s is not in canonical form; rewrite it with:\n"+
 		"    go test ./pkg/models -run TestEmbeddedCatalogIsCanonical -update", catalogFileName)
 }
+
+// The configured default is an anchor that follows its product line: the
+// built-in catalog already carries claude-opus-5-5, so the anchor
+// claude-opus-5 (and its Bedrock us. equivalent) resolves to it with no edit.
+func TestDefaultModelForProviderFollowsProductLine(t *testing.T) {
+	r := newCatalogTestRegistry(t, t.TempDir(), "")
+	for _, tt := range []struct {
+		p      ai.Provider
+		anchor string
+		want   string
+	}{
+		{ai.ProviderAnthropic, "claude-opus-5", "claude-opus-5-5"},
+		{ai.ProviderAmazonBedrock, "us.anthropic.claude-opus-5", "us.anthropic.claude-opus-5-5"},
+	} {
+		if r.Find(string(tt.p), tt.want) == nil {
+			t.Skipf("%s/%s not in built-in catalog", tt.p, tt.want)
+		}
+		if got := r.defaultAnchor(tt.p); got != tt.anchor {
+			t.Skipf("anchor for %s is %q, test assumes %q", tt.p, got, tt.anchor)
+		}
+		if got := r.DefaultModelForProvider(tt.p); got != tt.want {
+			t.Errorf("DefaultModelForProvider(%s) = %q, want %q", tt.p, got, tt.want)
+		}
+	}
+}
+
+// Once the provider's live list is known it bounds the advance: a newer
+// generation the account cannot use must not become the default.
+func TestDefaultModelForProviderRespectsLiveList(t *testing.T) {
+	r := newCatalogTestRegistry(t, t.TempDir(), "")
+	if r.DefaultModelForProvider(ai.ProviderAnthropic) != "claude-opus-5-5" {
+		t.Skip("built-in catalog lacks claude-opus-5-5")
+	}
+	state := newLiveModelState()
+	state.set([]string{"claude-opus-5"}, nil)
+	r.liveModelsMu.Lock()
+	r.liveModels[string(ai.ProviderAnthropic)] = state
+	r.liveModelsMu.Unlock()
+	if got := r.DefaultModelForProvider(ai.ProviderAnthropic); got != "claude-opus-5" {
+		t.Fatalf("default = %q, want anchor claude-opus-5", got)
+	}
+}

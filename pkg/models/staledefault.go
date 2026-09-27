@@ -61,7 +61,11 @@ type StaleDefaultPinInput struct {
 	// means "no pin".
 	Provider string
 	Pinned   string
-	// Current is the provider's current default model id (overlay-aware).
+	// Current is the provider's current RESOLVED default model id: the
+	// configured anchor advanced to the newest registered generation of its
+	// product line (ModelRegistry.DefaultModelForProvider). A pin equal to the
+	// anchor therefore warns once a newer generation is registered — that pin
+	// is exactly what now shadows the automatic advance.
 	Current string
 	// Scope and Path describe where the pin is written.
 	Scope string

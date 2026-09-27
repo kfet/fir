@@ -265,3 +265,106 @@ func isVersionToken(s string) bool {
 	}
 	return true
 }
+
+// ProductLine splits a raw model id into a product-line shape and a
+// generation vector, for deciding whether one registered id is a newer
+// generation of another. Unlike ExtractLineage it normalises NOTHING away:
+// every non-version character — aggregator and Bedrock regional prefixes
+// ("us.anthropic."), release tags ("-preview"), variant words ("-pro",
+// "-fast"), API qualifiers (":0") and letter case — must match literally, so
+// two ids with the same shape differ only in their version numbers.
+//
+// Version runs collapse to one "#", so both spellings of a generation bump
+// share a shape:
+//
+//	claude-opus-5               claude-opus-#                [5]
+//	claude-opus-5-5             claude-opus-#                [5 5]
+//	us.anthropic.claude-opus-5  us.anthropic.claude-opus-#   [5]
+//	gemini-3.1-pro-preview      gemini-#-pro-preview         [3 1]
+//	moonshotai/kimi-k2.6        moonshotai/kimi-k#           [2 6]
+//
+// A single letter glued to a version ("k2.6", "M2.7", "v4") is kept as the
+// letter plus "#". ok is false — the id cannot be ordered with confidence —
+// when it carries no version at all, or any numeric segment that looks like a
+// date or build stamp (four or more digits, or a leading zero: "20251101",
+// "2024-12-17", "1106", "0309"). Dated snapshots therefore never become a default automatically.
+func ProductLine(modelID string) (shape string, vec []int, ok bool) {
+	segs := strings.Split(modelID, "-")
+	out := make([]string, 0, len(segs))
+	inRun := false
+	for _, seg := range segs {
+		prefix, ver := seg, ""
+		if isDottedDigits(seg) {
+			prefix, ver = "", seg
+		} else if len(seg) > 1 && isASCIILetter(seg[0]) && isDottedDigits(seg[1:]) {
+			prefix, ver = seg[:1], seg[1:]
+		}
+		if ver == "" {
+			out = append(out, seg)
+			inRun = false
+			continue
+		}
+		for _, part := range strings.Split(ver, ".") {
+			if len(part) >= 4 || (len(part) > 1 && part[0] == '0') {
+				return "", nil, false
+			}
+			n := 0 // isDottedDigits + the length cap make this overflow-free
+			for i := 0; i < len(part); i++ {
+				n = n*10 + int(part[i]-'0')
+			}
+			vec = append(vec, n)
+		}
+		if prefix == "" && inRun {
+			continue // extend the current "#" run
+		}
+		out = append(out, prefix+"#")
+		inRun = prefix == ""
+	}
+	if len(vec) == 0 {
+		return "", nil, false
+	}
+	return strings.Join(out, "-"), vec, true
+}
+
+// isDottedDigits reports whether s is digits optionally separated by single
+// dots, with no leading or trailing dot: "5", "5.4", "4.20".
+func isDottedDigits(s string) bool {
+	if s == "" || s[0] == '.' || s[len(s)-1] == '.' || strings.Contains(s, "..") {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] != '.' && (s[i] < '0' || s[i] > '9') {
+			return false
+		}
+	}
+	return true
+}
+
+func isASCIILetter(c byte) bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+}
+
+// NewestInProductLine returns the id among candidates that is the newest
+// generation of anchor's product line (see ProductLine), or anchor itself
+// when no candidate is strictly newer or anchor cannot be ordered. Candidates
+// that cannot be ordered, or have a different shape, are ignored. Ties
+// between equal generations resolve to the lexicographically smallest id so
+// the result is deterministic.
+func NewestInProductLine(anchor string, candidates []string) string {
+	shape, best, ok := ProductLine(anchor)
+	if !ok {
+		return anchor
+	}
+	bestID := anchor
+	for _, id := range candidates {
+		s, v, ok := ProductLine(id)
+		if !ok || s != shape {
+			continue
+		}
+		switch c := CompareGenerations(v, best); {
+		case c > 0, c == 0 && bestID != anchor && id < bestID:
+			best, bestID = v, id
+		}
+	}
+	return bestID
+}

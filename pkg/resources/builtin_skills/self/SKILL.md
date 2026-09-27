@@ -379,7 +379,11 @@ overlay**: a `models.d`-shaped document published as a static file at
 `https://raw.githubusercontent.com/kfet/fir-dist/main/catalog-v1.json`. It
 exists so a newly-released model can reach the whole fleet as *data* — no
 binary release, no redeploy. It can add models, correct metadata, and move a
-provider's default model (`providerDefaults`).
+provider's default model (`providerDefaults`). A provider default is only a
+product-line anchor: it resolves to the newest registered generation of the
+same line (e.g. `claude-opus-5` → `claude-opus-5-5` once that model is
+registered), keeping prefixes, variants and `-preview` tags, skipping dated
+snapshots. Explicit pins (`defaultModel`, `--model`) are not advanced.
 
 Full precedence, lowest to highest:
 
