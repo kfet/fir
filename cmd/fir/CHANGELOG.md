@@ -2,7 +2,10 @@
 
 ## [Unreleased]
 
+## [1.22.1] - 2026-09-28
+
 ### Changed
+- **Model catalog regenerated**: added 1 aggregator model(s); removed 1 aggregator model(s); 14 model(s) with changed pricing/limits.
 - **mood: `lesson_add` description now defines the :mortar_board: reaction trigger** — a user :mortar_board: reaction on a message means read it, add or propose a lesson, and reply briefly; ships with the tool so every deployment (including relay-fronted bots) gets it.
 
 ## [1.22.0] - 2026-09-28
