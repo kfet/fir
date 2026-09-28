@@ -683,7 +683,9 @@ def _bet_lines(e: dict, indent: str) -> list[str]:
     name="lesson_add",
     description=(
         "Create a lesson: a standing, falsifiable prediction (not prose) that "
-        "future sessions will see and bet against."
+        "future sessions will see and bet against. A :mortar_board: reaction "
+        "from the user on a message is an agreed trigger: read that message, "
+        "add or propose a lesson from it, and reply briefly instead of staying silent."
     ),
     parameters={
         "type": "object",

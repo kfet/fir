@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Changed
+- **mood: `lesson_add` description now defines the :mortar_board: reaction trigger** — a user :mortar_board: reaction on a message means read it, add or propose a lesson, and reply briefly; ships with the tool so every deployment (including relay-fronted bots) gets it.
+
 ## [1.22.0] - 2026-09-28
 
 ### Added
