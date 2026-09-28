@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Added
+- **mood: pre-registered bets, computed surprise, and lessons.** `mood_note` takes optional `bet` / `conf` / `anchor` and returns a short entry id; `mood_outcome(id, outcome, correct)` records what happened and computes `surprise = |conf - correct|` — surprise is never accepted as input. New `lesson_add` / `lesson_score` / `lesson_list` / `lesson_state` keep standing predictions in `~/.config/fir/mood/lessons.jsonl` with a per-model hit/miss map that only grows; nothing expires by date, retire by archiving. Active lessons are injected at session start via `[SYS_EXT]` prepend (prompt cache untouched), rendered as bets with evidence and tagged `[strong]`, `[weak - probe it]`, or `[unverified on this model - probe it]` when the current model has no column. Three high-surprise bets on one exact anchor from three different sessions propose a lesson at `agent_end`, best-effort.
+
 ## [1.21.2] - 2026-09-27
 
 ### Fixed

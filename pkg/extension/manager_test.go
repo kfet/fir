@@ -29,7 +29,7 @@ import (
 //	pipe:           2 tools (pipe, wait)
 //	agent-introspect: 1 tool  (agent_introspect)
 //	doctor:         2 tools (doctor_query, doctor_summary)
-//	mood:           2 tools (mood_note, mood_recent)
+//	mood:           7 tools (mood_note, mood_recent, mood_outcome, lesson_add, lesson_score, lesson_state, lesson_list)
 //	autoresearch:   3 tools (run_experiment, log_experiment, lock_benchmark)
 //	handoff:        3 tools (self_handoff, bookmark, pin)
 //	forge:          1 tool  (forge_tool)
@@ -39,7 +39,7 @@ import (
 //
 // The exact composition is tested elsewhere; this constant pins the total
 // for shape-checking tests in this file.
-const builtinToolCount = 28
+const builtinToolCount = 33
 
 // Write a test extension script that responds to the init handshake
 // and then stays alive reading from stdin.
