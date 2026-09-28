@@ -16,6 +16,7 @@ import (
 	"github.com/kfet/fir/pkg/config"
 	"github.com/kfet/fir/pkg/models"
 	"github.com/kfet/fir/pkg/resources"
+	"github.com/kfet/fir/pkg/sections"
 	"github.com/kfet/fir/pkg/session/store"
 )
 
@@ -226,6 +227,10 @@ func CreateAgentSession(ctx context.Context, opts CreateAgentSessionOptions) (*C
 		agentTools = DefaultCodingTools(cwd)
 	}
 
+	// Persistent extension sections: the startup block is read from disk by
+	// fir itself and prepended to every LLM context after the system prompt.
+	secTracker := newSectionTracker(sections.NewStore(filepath.Join(agentDir, "sections")))
+
 	// Create agent
 	agentOpts := agent.AgentOptions{
 		InitialState: &agent.AgentState{
@@ -235,7 +240,7 @@ func CreateAgentSession(ctx context.Context, opts CreateAgentSessionOptions) (*C
 			Tools:         agent.ToolSetFrom(agentTools),
 		},
 		ConvertToLLM: func(messages []agent.AgentMessage) ([]ai.Message, error) {
-			return store.ConvertToLLM(messages)
+			return secTracker.convert(messages, store.ConvertToLLM)
 		},
 		SessionID:    sessionStore.GetSessionID(),
 		SteeringMode: settingsManager.GetSteeringMode(),
@@ -332,6 +337,7 @@ func CreateAgentSession(ctx context.Context, opts CreateAgentSessionOptions) (*C
 		UsageTracker:     opts.UsageTracker,
 		Cwd:              cwd,
 		ExtReady:         opts.ExtReady,
+		sections:         secTracker,
 		MCPConfigured:    opts.MCPConfigured,
 		DoctorLogPath:    models.DoctorLogPath(agentDir),
 	})

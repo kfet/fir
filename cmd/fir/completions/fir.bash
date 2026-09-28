@@ -7,7 +7,7 @@
 
 # Built-in slash commands, runnable as `fir /<command>`. Kept in sync with
 # resources.BuiltinSlashCommands by TestCompletionScripts_SlashCommandsInSync.
-_FIR_SLASH_COMMANDS="help theme thinking model settings session new compact resume tree export share name changelog login logout reload skills update reexec queue dequeue plan mcp quit"
+_FIR_SLASH_COMMANDS="help theme thinking model settings session new compact resume tree export share name changelog login logout reload skills update reexec queue dequeue plan sections mcp quit"
 
 _fir_complete() {
     local cur prev words cword

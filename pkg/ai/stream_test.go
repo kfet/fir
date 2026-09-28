@@ -183,6 +183,9 @@ func TestStreamSimple_ThinkingOffFallback(t *testing.T) {
 						StopReason:   StopReasonError,
 						ErrorMessage: `"thinking.type.disabled" is not supported for this model.`,
 					}})
+					// A trailing event on the rejected attempt must be
+					// drained and never reach the caller.
+					s.Push(AssistantMessageEvent{Type: EventTextDelta, Delta: "stray"})
 					s.End(nil)
 					return
 				}
@@ -214,6 +217,9 @@ func TestStreamSimple_ThinkingOffFallback(t *testing.T) {
 	for _, e := range events {
 		if e.Type == EventError {
 			t.Fatal("unexpected EventError — fallback should be transparent")
+		}
+		if e.Delta == "stray" {
+			t.Fatal("rejected attempt's trailing event leaked")
 		}
 	}
 	if len(seen) != 2 || seen[0] != ThinkingOff || seen[1] != ThinkingMinimal {

@@ -64,6 +64,7 @@ var BuiltinSlashCommands = []BuiltinSlashCommand{
 	{Name: "queue", Description: "Show the follow-up message queue"},
 	{Name: "dequeue", Description: "Restore queued messages to the editor (/dequeue [N] removes item N)"},
 	{Name: "plan", Description: "Show/hide the current session plan"},
+	{Name: "sections", Description: "Show the persistent extension sections fir injects"},
 	{Name: "mcp", Description: "MCP servers: /mcp <name> for details, /mcp reload, /mcp login|logout <name>"},
 	{Name: "quit", Description: "Quit fir"},
 }

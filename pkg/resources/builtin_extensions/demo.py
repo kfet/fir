@@ -18,7 +18,7 @@ Outbound calls demonstrated (extension → fir):
   set_session_data · get_session_data · get_session_file · get_session_name · get_session_id · continue_session · side_query · call_tool ·
   list_tools · list_extensions · available_models ·
   report_progress · restart_session · reload_extension · reload_mcp ·
-  prepend
+  prepend · set_section · clear_section
 
 Inbound surface demonstrated (fir → extension):
   • Tool registration: word_count, shell_run, list_tools, pin_tools,
@@ -404,6 +404,8 @@ def on_session_start(params: fir_ext.SessionStartParams, ctx: fir_ext.Context) -
     ctx.list_extensions()  # list_extensions (which extensions are actually live)
     ctx.available_models()  # available_models (live-availability)
     ctx.prepend("Demo extension is active.")  # prepend
+    ctx.set_section("Demo extension section.")  # set_section (persistent)
+    ctx.clear_section()  # clear_section (demo leaves nothing behind)
     ctx.agent_info()  # agent_info
     ctx.get_session_file()  # get_session_file
     ctx.get_session_name()  # get_session_name

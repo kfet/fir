@@ -199,5 +199,6 @@ func (s *AgentSession) ApplyCompaction(out CompactionOutput) error {
 		ctx := s.SessionStore.BuildSessionContext()
 		s.Agent.ReplaceMessages(ctx.Messages)
 	}
+	s.sections.reset()
 	return nil
 }

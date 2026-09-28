@@ -831,6 +831,16 @@ class TestDemoEvents(DemoTestCase):
         assert msg is not None
         self.assertEqual(msg["params"]["content"], "Demo extension is active.")
 
+    def test_session_start_sets_and_clears_section(self) -> None:
+        fake = self._run_event("session_start")
+        set_msg = fake.wait_for_method("set_section")
+        clear_msg = fake.wait_for_method("clear_section")
+        fake.stop()
+        self.assertIsNotNone(set_msg, "expected set_section after session_start")
+        assert set_msg is not None
+        self.assertEqual(set_msg["params"]["text"], "Demo extension section.")
+        self.assertIsNotNone(clear_msg, "expected clear_section after session_start")
+
     def test_session_start_calls_agent_info(self) -> None:
         fake = self._run_event("session_start")
         msg = fake.wait_for_method("agent.info")

@@ -323,6 +323,8 @@ func (m *InteractiveMode) handleSlashCommand(text string) {
 		m.Shutdown()
 	case "/plan":
 		m.handlePlanCommand()
+	case "/sections":
+		m.handleSectionsCommand()
 	case "/mcp":
 		if len(parts) > 1 {
 			switch parts[1] {
@@ -600,6 +602,14 @@ func (m *InteractiveMode) handleQueueCommand() {
 		fmt.Fprintf(&sb, "  %d. %s\n", i+1, preview)
 	}
 	m.showStatus(strings.TrimRight(sb.String(), "\n"))
+}
+
+// handleSectionsCommand shows what fir injects from extension sections.
+func (m *InteractiveMode) handleSectionsCommand() {
+	if m.session == nil {
+		return
+	}
+	m.showStatus(m.session.Sections().Format())
 }
 
 // handleDequeueCommand is the slash-command version of handleDequeue.

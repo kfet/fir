@@ -1044,6 +1044,47 @@ its next turn.
 
 Response: `{"ok": true}`
 
+#### `set_section`
+
+Persist the calling extension's **section** — standing context owned by the
+extension.  Fir stores it at `~/.config/fir/sections/<ext-name>.md` (atomic
+tmp + rename; `$XDG_CONFIG_HOME` respected).  `[SYS_EXT]`/`[section]` markers
+in `text` are stripped; empty `text` clears the section.
+
+Caps are enforced at write time: ~500 tokens per section and ~2000 tokens
+across all sections (tokens ≈ bytes/4).  An over-cap write returns a
+`-32000` error and the last valid version is kept — text is never truncated.
+
+At session start fir lists the directory itself (no extension call, no wait
+on extension processes) and emits the sections of installed, enabled and
+trusted extensions (builtin/global/package, or trusted project-local),
+sorted by name, as one `[SYS_EXT sections]` user message placed right after
+the system prompt, each headed `[section=<name>]`.  The block has no
+timestamps or counters, so the prefix is byte-identical across sessions;
+Anthropic requests get a cache breakpoint after it.  When a section's
+content hash changes mid-session, the full new text is appended before the
+next turn as `[SYS_EXT section=<name> vN replaces vM]`.
+
+Lifecycle: a disabled extension's section is kept but not emitted; the
+section of an uninstalled extension is deleted at startup; a file without a
+discovered owner is never emitted.  `/sections` shows what fir injects.
+
+```json
+{"jsonrpc":"2.0","id":1019,"method":"set_section","params":{"text":"Prefer small commits."}}
+```
+
+Response: `{"ok": true}`
+
+#### `clear_section`
+
+Delete the calling extension's section.  Missing is not an error.
+
+```json
+{"jsonrpc":"2.0","id":1020,"method":"clear_section","params":{}}
+```
+
+Response: `{"ok": true}`
+
 #### `report_progress`
 
 Send a transient progress message to the UI.  Updates the spinner text inside

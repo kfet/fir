@@ -57,6 +57,7 @@ func newCommandRegistry() *commandRegistry {
 	r.register(slashCommand{"continue", "Continue the most recent session", cmdContinue})
 	r.register(slashCommand{"name", "Rename the current session (usage: /name <new name>)", cmdName})
 	r.register(slashCommand{"session", "Show session statistics", cmdSession})
+	r.register(slashCommand{"sections", "Show the persistent extension sections fir injects", cmdSections})
 	r.register(slashCommand{"changelog", "Show changelog", cmdChangelog})
 	r.register(slashCommand{"share", "Share session as a secret GitHub Gist with a preview link", cmdShare})
 	r.register(slashCommand{"export", "Export session to an HTML file (usage: /export [path])", cmdExport})
@@ -225,6 +226,10 @@ func cmdName(ctx *commandContext, args string) {
 	}
 	ctx.entry.session.SessionStore.AppendSessionInfo(args)
 	ctx.sendMessage(fmt.Sprintf("Session renamed to: %s", args))
+}
+
+func cmdSections(ctx *commandContext, _ string) {
+	ctx.sendMessage("```\n" + ctx.entry.session.Sections().Format() + "\n```")
 }
 
 func cmdSession(ctx *commandContext, _ string) {

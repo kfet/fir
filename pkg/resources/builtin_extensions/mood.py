@@ -81,11 +81,12 @@ three different sessions propose a lesson (``state: "proposed"``).
 Lessons (``lessons.jsonl``) are standing predictions with a per-model
 hit/miss map that only grows (``lesson_add`` / ``lesson_score`` /
 ``lesson_list`` / ``lesson_state``).  Nothing expires by date; retire by
-archiving.  On ``session_start`` active lessons are injected via
-``ctx.prepend`` (a ``[SYS_EXT]`` user message — the system prompt and its
-cache are untouched), rendered as bets with evidence and tagged
-``[strong]`` / ``[weak - probe it]`` / ``[unverified on this model -
-probe it]`` (no column for the current provider/model).  All arithmetic
+archiving.  Whenever lessons change, active lessons are published as
+this extension's persistent fir section (``ctx.set_section``) — fir reads
+it from disk before the first turn (so ``fir -p`` sees it) and re-injects
+it only when it changes.  Lessons render as bets with evidence, tagged
+``[strong]`` / ``[weak - probe it]`` with the models they were tested on
+(the section is shared by all models, so it is model-independent).  All arithmetic
 is local; no LLM is involved in scoring or clustering.
 
 Both files live in ``<global fir config dir>/mood/``.
@@ -373,7 +374,9 @@ def _lesson_stats(lesson: dict) -> tuple[int, int, int, int]:
     return len(models), len(vendors), hits, misses
 
 
-def _lesson_mark(lesson: dict, model_key: str) -> str:
+def _lesson_mark(lesson: dict, model_key: str = "") -> str:
+    """Evidence tag. With model_key (per-session views only, never the
+    shared section) a lesson untested on that model is flagged unverified."""
     breadth, _, hits, misses = _lesson_stats(lesson)
     if model_key and model_key not in (lesson.get("models") or {}):
         return "[unverified on this model - probe it]"
@@ -388,13 +391,15 @@ def _lesson_rank(lesson: dict) -> tuple:
     return (vendors, breadth, hits - misses, hits)
 
 
-def _render_lessons(lessons: list[dict], model_key: str) -> str:
+def _render_lessons(lessons: list[dict], limit: int = _MAX_INJECT) -> str:
+    """Model-independent render: the section is shared by every session and
+    model, so it must not depend on who is reading it."""
     active = [ls_ for ls_ in lessons if ls_.get("state") == "active"]
     if not active:
         return ""
     active.sort(key=_lesson_rank, reverse=True)
     lines = ["LESSONS (standing predictions — bet against them, then log the outcome)"]
-    for ls_ in active[:_MAX_INJECT]:
+    for ls_ in active[:limit]:
         breadth, vendors, hits, misses = _lesson_stats(ls_)
         lines.append(f"{ls_.get('id', '?'):<4}{_sanitise_reason(str(ls_.get('rule', '')))}")
         bet = _sanitise_reason(str(ls_.get("bet", "")))
@@ -403,12 +408,60 @@ def _render_lessons(lessons: list[dict], model_key: str) -> str:
         b = f"breadth {breadth} model{'s' if breadth != 1 else ''}"
         if vendors > 1:
             b += f" / {vendors} vendors"
-        lines.append(f"    {b:<30} hits {hits}  misses {misses}   {_lesson_mark(ls_, model_key)}")
+        lines.append(f"    {b:<30} hits {hits}  misses {misses}   {_lesson_mark(ls_)}")
+        tested = sorted((ls_.get("models") or {}).keys())
+        if tested:
+            lines.append(f"    tested on: {', '.join(tested)}")
     lines.append(
+        "A lesson not tested on your model is unverified for you - probe it. "
         "Score a lesson you tested with lesson_score(id, hit). Lessons are "
         "evidence, not settled fact."
     )
     return "\n".join(lines)
+
+
+def _render_section(lessons: list[dict], limit: int = _MAX_INJECT) -> str:
+    """Full mood section text: active lessons plus a proposed-review note."""
+    block = _render_lessons(lessons, limit)
+    proposed = sum(1 for ls_ in lessons if ls_.get("state") == "proposed")
+    if proposed:
+        note = (
+            f"{proposed} proposed lesson(s) from repeated surprise await review: "
+            "lesson_list state=proposed, then lesson_score or lesson_state archived."
+        )
+        block = f"{block}\n{note}" if block else note
+    return block
+
+
+def _sync_section(ctx: fir_ext.Context) -> None:
+    """Publish lessons as this extension's persistent fir section.
+
+    Fir reads the section from disk before the first turn (so ``fir -p``
+    sees it) and re-injects it only when its content changes. If the render
+    exceeds fir's size cap, fewer lessons are published (strongest first).
+    """
+    lessons = _read_jsonl("lessons.jsonl")
+    limit = _MAX_INJECT
+    while True:
+        text = _render_section(lessons, limit)
+        if not text:
+            ctx.clear_section()
+            return
+        try:
+            ctx.set_section(text)
+            return
+        except RuntimeError:
+            if limit <= 1:
+                raise
+            limit -= 1
+
+
+def _publish(ctx: fir_ext.Context) -> None:
+    """Best-effort _sync_section after lessons.jsonl changed."""
+    try:
+        _sync_section(ctx)
+    except Exception as exc:
+        print(f"mood: set_section failed: {exc}", file=sys.stderr)
 
 
 def _promote() -> str | None:
@@ -721,6 +774,7 @@ def lesson_add(params: dict, ctx: fir_ext.Context) -> dict:
             }
         )
         _write_jsonl("lessons.jsonl", lessons)
+    _publish(ctx)
     return _text(f"added {lid}")
 
 
@@ -758,6 +812,7 @@ def lesson_score(params: dict, ctx: fir_ext.Context) -> dict:
         if lesson.get("state") == "proposed":
             lesson["state"] = "active"
         _write_jsonl("lessons.jsonl", lessons)
+    _publish(ctx)
     return _text(f"{lid} {model_key}: hits {col['hits']} misses {col['misses']}")
 
 
@@ -788,6 +843,7 @@ def lesson_state(params: dict, ctx: fir_ext.Context) -> dict:
             return _text(f"no lesson {lid}", True)
         lesson["state"] = state
         _write_jsonl("lessons.jsonl", lessons)
+    _publish(ctx)
     return _text(f"{lid} -> {state}")
 
 
@@ -934,6 +990,7 @@ def _run_promotion(ctx: fir_ext.Context) -> None:
         return
     if lid:
         print(f"mood: proposed lesson {lid}", file=sys.stderr)
+        _publish(ctx)
 
 
 def _run_gating(ctx: fir_ext.Context) -> None:
@@ -1118,25 +1175,11 @@ def on_session_start(params: fir_ext.SessionStartParams, ctx: fir_ext.Context) -
     try:
         _restore_tag(ctx)
     finally:
+        # Self-heal: publish the current lessons as our section. Fir itself
+        # already injected the on-disk section before the first turn; this
+        # only rewrites it when lessons.jsonl changed outside a tool call.
         with contextlib.suppress(Exception):
-            _inject_lessons(ctx)
-
-
-def _inject_lessons(ctx: fir_ext.Context) -> None:
-    """Prepend active lessons as bets-with-evidence. Nothing when none."""
-    lessons = _read_jsonl("lessons.jsonl")
-    proposed = sum(1 for ls_ in lessons if ls_.get("state") == "proposed")
-    if not proposed and not any(ls_.get("state") == "active" for ls_ in lessons):
-        return
-    model_key, _ = _agent_ids(ctx)
-    block = _render_lessons(lessons, model_key)
-    if proposed:
-        note = (
-            f"{proposed} proposed lesson(s) from repeated surprise await review: "
-            "lesson_list state=proposed, then lesson_score or lesson_state archived."
-        )
-        block = f"{block}\n{note}" if block else note
-    ctx.prepend(block)
+            _sync_section(ctx)
 
 
 def _restore_tag(ctx: fir_ext.Context) -> None:

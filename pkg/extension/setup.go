@@ -138,6 +138,14 @@ func (r *SetupResult) Reload(ctx context.Context) error {
 		return nil
 	}
 	firlog.Info("extensions reloading")
+	if r.session != nil {
+		r.Manager.mu.Lock()
+		projectDir := r.Manager.projectDir
+		r.Manager.mu.Unlock()
+		if pol, err := r.Manager.SectionPolicy(projectDir); err == nil {
+			r.session.SetSectionFilter(pol.Allowed)
+		}
+	}
 	return r.Manager.Reload(ctx)
 }
 
@@ -198,6 +206,19 @@ func Setup(asession *session.AgentSession, opts SetupOptions) (*SetupResult, err
 	cwd := opts.Cwd
 	if cwd == "" {
 		cwd = opts.ProjectDir
+	}
+
+	// Persistent extension sections: decide from discovery alone (no
+	// extension process involved) which owners fir may emit, and drop
+	// sections of uninstalled extensions. Done before Start so the policy
+	// is in place before the first turn can snapshot the startup block.
+	secStore := asession.SectionStore()
+	mgr.SetSectionStore(secStore)
+	if pol, err := mgr.SectionPolicy(opts.ProjectDir); err != nil {
+		firlog.Warn("extension section policy failed", "err", err)
+	} else {
+		mgr.PruneSections(secStore, pol)
+		asession.SetSectionFilter(pol.Allowed)
 	}
 
 	if err := mgr.Start(context.Background(), opts.ProjectDir, cwd, bridge); err != nil {

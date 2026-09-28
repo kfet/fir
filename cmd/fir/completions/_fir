@@ -142,7 +142,7 @@ _fir_first_arg() {
     # resources.BuiltinSlashCommands by TestCompletionScripts_SlashCommandsInSync.
     local -a slash_commands
     local c
-    for c in help theme thinking model settings session new compact resume tree export share name changelog login logout reload skills update reexec queue dequeue plan mcp quit; do
+    for c in help theme thinking model settings session new compact resume tree export share name changelog login logout reload skills update reexec queue dequeue plan sections mcp quit; do
         slash_commands+=("/$c:slash command")
     done
     _alternative \

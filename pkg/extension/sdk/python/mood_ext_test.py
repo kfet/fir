@@ -109,6 +109,8 @@ class Bridge:
             "set_status",
             "notify",
             "prepend_context",
+            "set_section",
+            "clear_section",
             "send_message",
             "put_observable",
             "clear_observable",

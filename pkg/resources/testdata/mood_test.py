@@ -35,6 +35,8 @@ class FakeCtx:
     def __init__(self, provider="anthropic", model="claude-opus-5-5", session="s1"):
         self.data = {}
         self.prepended = []
+        self.section = "<unset>"  # last set_section text; "" after clear
+        self.section_cap = None  # reject set_section over this many chars
         self.provider, self.model, self.session = provider, model, session
         self.tool_call_id = ""
 
@@ -52,6 +54,14 @@ class FakeCtx:
 
     def prepend(self, content):
         self.prepended.append(content)
+
+    def set_section(self, text):
+        if self.section_cap is not None and len(text) > self.section_cap:
+            raise RuntimeError("over cap")
+        self.section = text
+
+    def clear_section(self):
+        self.section = ""
 
     def put_observable(self, *a, **k):
         pass
@@ -119,12 +129,13 @@ class MoodTest(unittest.TestCase):
         self.assertEqual(models["anthropic/claude-opus-5-5"], {"hits": 2, "misses": 0})
         self.assertEqual(models["openrouter/openai/gpt-5.2"], {"hits": 0, "misses": 1})
 
-    def test_session_start_injects_nothing_without_lessons(self):
+    def test_session_start_clears_section_without_lessons(self):
         ctx = FakeCtx()
         self.mood.on_session_start({}, ctx)
-        self.assertEqual(ctx.prepended, [])
+        self.assertEqual(ctx.prepended, [])  # no ctx.prepend any more
+        self.assertEqual(ctx.section, "")
 
-    def test_session_start_marks(self):
+    def test_section_marks_and_is_model_independent(self):
         a = FakeCtx()
         self.mood.lesson_add({"rule": "strong one", "bet": "b", "anchor_pattern": "p"}, a)
         self.mood.lesson_add({"rule": "weak one", "bet": "b", "anchor_pattern": "q"}, a)
@@ -135,14 +146,28 @@ class MoodTest(unittest.TestCase):
         self.mood.lesson_score({"id": "L1", "hit": True}, b)
         self.mood.lesson_score({"id": "L2", "hit": True}, a)
         self.mood.lesson_score({"id": "L3", "hit": True}, b)
-        self.mood.on_session_start({}, a)
-        out = a.prepended[0]
+        # Lesson changes publish the section; no prepend.
+        out = b.section
+        self.assertEqual(a.prepended + b.prepended, [])
         self.assertIn("LESSONS", out)
         lines = out.splitlines()
         self.assertTrue(lines[1].startswith("L1"))  # strongest first
         self.assertIn("[strong]", out)
         self.assertIn("[weak - probe it]", out)
-        self.assertIn("[unverified on this model - probe it]", out)
+        self.assertIn("tested on: openai/gpt-6", out)
+        # Same text whichever model renders it.
+        self.mood.on_session_start({}, a)
+        self.assertEqual(a.section, out)
+
+    def test_section_shrinks_to_fit_cap(self):
+        a = FakeCtx()
+        for i in range(5):
+            self.mood.lesson_add({"rule": f"rule {i}", "bet": "b", "anchor_pattern": f"p{i}"}, a)
+        full = a.section
+        a.section_cap = len(full) - 1
+        self.mood.on_session_start({}, a)
+        self.assertLess(len(a.section), len(full))
+        self.assertIn("LESSONS", a.section)
 
     def test_promotion_requires_distinct_sessions(self):
         for _ in range(3):

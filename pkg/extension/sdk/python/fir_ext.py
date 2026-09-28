@@ -477,6 +477,14 @@ otherwise noted.
 |                  | to live agent state; leaves the       |                           |
 |                  | system prompt (and cache) intact.     |                           |
 +------------------+---------------------------------------+---------------------------+
+| ``set_section``  | ``{text}``                            | ``{ok: true}``            |
+|                  | Persist this extension's section      | error when over cap       |
+|                  | (read by fir at startup; changes      | (~500 tok/section, ~2000  |
+|                  | re-injected in full next turn).       | total; old version kept). |
++------------------+---------------------------------------+---------------------------+
+| ``clear_         | ``{}``                                | ``{ok: true}``            |
+| section``        | Delete this extension's section.      |                           |
++------------------+---------------------------------------+---------------------------+
 | ``reload_        | ``{name}``                            | ``{ok: true}``            |
 | extension``      | Reload one extension by name: stop    |                           |
 |                  | it, drop only its tools, re-spawn     |                           |
@@ -3192,6 +3200,26 @@ class Context:
             The context to prepend (e.g. project info, user preferences).
         """
         self._call("prepend_context", {"content": content})
+
+    def set_section(self, text: str) -> None:
+        """Persist this extension's section (its standing context).
+
+        Fir stores the text at ``~/.config/fir/sections/<ext>.md`` (atomic
+        write) and reads it from disk itself at session start, so it is in
+        context from the very first turn — even with ``fir -p``, before any
+        extension event fires. When the text changes mid-session, the full
+        new version is re-injected on the next turn. ``[SYS_EXT]`` markers
+        in ``text`` are stripped.
+
+        Caps: ~500 tokens per section, ~2000 across all sections. An
+        over-cap write raises ``FirError`` and the previous version is kept;
+        text is never truncated. Empty ``text`` clears the section.
+        """
+        self._call("set_section", {"text": text})
+
+    def clear_section(self) -> None:
+        """Delete this extension's section. Missing is not an error."""
+        self._call("clear_section", {})
 
     def agent_info(self, timeout: float = 5.0) -> dict[str, Any]:
         """Return a structured snapshot of the current agent runtime.

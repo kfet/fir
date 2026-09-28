@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -136,4 +137,20 @@ func (ts *TrustStore) ensureLoaded() error {
 	ts.cache = m
 	ts.loaded = true
 	return nil
+}
+
+// KnowsName reports whether any project has a trust entry for name.
+func (ts *TrustStore) KnowsName(name string) bool {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+	if err := ts.ensureLoaded(); err != nil {
+		return true // unreadable store: assume known, never delete on doubt
+	}
+	suffix := ":" + name
+	for k := range ts.cache {
+		if strings.HasSuffix(k, suffix) {
+			return true
+		}
+	}
+	return false
 }

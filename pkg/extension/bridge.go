@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/sections"
 	"github.com/kfet/fir/pkg/session"
 	"github.com/kfet/fir/pkg/session/store"
 	"github.com/kfet/pinoauth"
@@ -39,6 +40,10 @@ type Bridge struct {
 	// directly.
 	notifyFn    atomic.Pointer[NotifyFunc]
 	setStatusFn atomic.Pointer[SetStatusFunc]
+
+	// sectionStore receives set_section/clear_section writes; set by the
+	// Manager before Run. nil means sections.Default().
+	sectionStore *sections.Store
 
 	// api is the host API this bridge was registered against, kept so
 	// non-tool paths (auth providers, client-version placeholder
@@ -586,6 +591,27 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 		api.PrependContext(p.Content)
 		result = okTrue
 
+	case "set_section":
+		var p setSectionParams
+		if req.Params != nil {
+			if err := json.Unmarshal(*req.Params, &p); err != nil {
+				rpcErr = &Error{Code: -32602, Message: "invalid params: " + err.Error()}
+				break
+			}
+		}
+		if err := b.sections().Set(b.extName(), p.Text); err != nil {
+			rpcErr = &Error{Code: -32000, Message: err.Error()}
+		} else {
+			result = okTrue
+		}
+
+	case "clear_section":
+		if err := b.sections().Clear(b.extName()); err != nil {
+			rpcErr = &Error{Code: -32000, Message: err.Error()}
+		} else {
+			result = okTrue
+		}
+
 	case "report_progress":
 		var p reportProgressParams
 		if req.Params != nil {
@@ -1089,4 +1115,20 @@ func sideQueryErrorData(res session.SideQueryResult) *json.RawMessage {
 	}
 	msg := json.RawMessage(raw)
 	return &msg
+}
+
+// extName is the name of the extension behind this bridge ("" if unknown).
+func (b *Bridge) extName() string {
+	if b.proc == nil {
+		return ""
+	}
+	return b.proc.cfg.Name
+}
+
+// sections returns the store set_section/clear_section write to.
+func (b *Bridge) sections() *sections.Store {
+	if b.sectionStore != nil {
+		return b.sectionStore
+	}
+	return sections.Default()
 }

@@ -20,6 +20,7 @@ import (
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/ai/envkeys"
 	firlog "github.com/kfet/fir/pkg/log"
+	"github.com/kfet/fir/pkg/sections"
 )
 
 // Tool-name translation for the anthropic OAuth (Claude Pro/Max) path.
@@ -1053,6 +1054,7 @@ func buildAnthropicParams(model *ai.Model, ctx ai.Context, oauthToken bool, opti
 		// isSideQuery is false for nil options, so options is non-nil here.
 		applySideQueryCacheControl(msgs, model, retention, options.SessionID)
 	}
+	markSectionsBreakpoint(msgs, model, retention)
 	params["messages"] = msgs
 
 	// Check prefix stability for cache preservation
@@ -1346,6 +1348,28 @@ func convertAnthropicMessages(messages []ai.Message, model *ai.Model, oauthToken
 	}
 
 	return params
+}
+
+// markSectionsBreakpoint places a cache breakpoint on the persistent
+// extension-sections block when it leads the messages, so the stable
+// system-prompt + sections prefix is cached independently of the rolling
+// tail. Uses the request's retention even on the side-query path (system,
+// sections, anchor and write stay within the four-breakpoint budget).
+func markSectionsBreakpoint(msgs []map[string]any, model *ai.Model, retention ai.CacheRetention) {
+	if retention == ai.CacheNone || len(msgs) == 0 {
+		return
+	}
+	if role, _ := msgs[0]["role"].(string); role != "user" {
+		return
+	}
+	content, ok := msgs[0]["content"].([]map[string]any)
+	if !ok || len(content) == 0 {
+		return
+	}
+	if text, _ := content[0]["text"].(string); !strings.HasPrefix(text, sections.BlockHeader) {
+		return
+	}
+	content[len(content)-1]["cache_control"] = cacheControlBlock(model, retention)
 }
 
 // pruneEmptyAssistantTextBlocks removes text blocks whose accumulated text is

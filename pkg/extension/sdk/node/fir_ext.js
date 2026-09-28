@@ -290,6 +290,20 @@ class Context {
   async prepend(content) {
     await this._call("prepend_context", { content });
   }
+
+  /**
+   * Persist this extension's section (read by fir from disk at startup;
+   * changes re-injected in full on the next turn). Over-cap writes reject.
+   * @param {string} text
+   */
+  async setSection(text) {
+    await this._call("set_section", { text });
+  }
+
+  /** Delete this extension's section. */
+  async clearSection() {
+    await this._call("clear_section", {});
+  }
 }
 
 // ---------------------------------------------------------------------------

@@ -21,6 +21,7 @@ import (
 	firlog "github.com/kfet/fir/pkg/log"
 	"github.com/kfet/fir/pkg/models"
 	"github.com/kfet/fir/pkg/resources"
+	"github.com/kfet/fir/pkg/sections"
 	"github.com/kfet/fir/pkg/session/store"
 	"github.com/kfet/pinexec"
 )
@@ -202,6 +203,11 @@ type AgentSessionOptions struct {
 	// re-extracted — sees fully-initialised credentials and headers.
 	ExtReady <-chan struct{}
 
+	// sections tracks persistent extension sections. When nil a tracker
+	// over the default sections dir is created (with no owners allowed
+	// until SetSectionFilter is called).
+	sections *sectionTracker
+
 	// MCPConfigured records whether any MCP servers are configured for this
 	// session. Used to advertise the default MCP tool-call timeout in the
 	// system prompt (MCP tools arrive asynchronously, so this build-time
@@ -274,6 +280,9 @@ type AgentSession struct {
 	// upgrade sees fully-initialised auth-provider OAuth registrations.
 	extReady <-chan struct{}
 
+	// sections tracks persistent extension sections (never nil).
+	sections *sectionTracker
+
 	// mcpConfigured records whether MCP servers are configured for this
 	// session (see AgentSessionOptions.MCPConfigured).
 	mcpConfigured bool
@@ -308,7 +317,11 @@ func NewAgentSession(opts AgentSessionOptions) *AgentSession {
 		usageTracker:     opts.UsageTracker,
 		sessionDate:      time.Now().Format("2006-01-02"),
 		extReady:         opts.ExtReady,
+		sections:         opts.sections,
 		mcpConfigured:    opts.MCPConfigured,
+	}
+	if s.sections == nil {
+		s.sections = newSectionTracker(sections.Default())
 	}
 
 	// Subscribe to agent events for internal handling
@@ -643,7 +656,9 @@ func (s *AgentSession) Prompt(text string, opts ...*PromptOptions) error {
 		return nil
 	}
 
-	msgs := []agent.AgentMessage{userMsg}
+	// Changed extension sections are emitted as full replacements just
+	// before the user message (persisted with the turn).
+	msgs := append(s.sections.updateMessages(), userMsg)
 
 	// Send to agent
 	if err := s.Agent.PromptMessages(msgs); err != nil {
@@ -676,7 +691,7 @@ func (s *AgentSession) InjectMessage(msg agent.AgentMessage) {
 			if s.extReady != nil {
 				<-s.extReady
 			}
-			if err := s.Agent.PromptMessages([]agent.AgentMessage{msg}); err != nil {
+			if err := s.Agent.PromptMessages(append(s.sections.updateMessages(), msg)); err != nil {
 				firlog.Debug("injected message auto-prompt failed", "err", err)
 			}
 		}()
@@ -1221,6 +1236,7 @@ func (s *AgentSession) GetSessionName() string {
 func (s *AgentSession) NewSessionCmd() (bool, error) {
 	s.SessionStore.NewSession(nil)
 	s.Agent.ReplaceMessages(nil)
+	s.sections.reset()
 	s.sessionDate = time.Now().Format("2006-01-02")
 	s.buildSystemPrompt()
 	// Clear plan state so stale plans don't persist across sessions.
@@ -1245,6 +1261,7 @@ func (s *AgentSession) SwitchSession(sessionPath string) (bool, error) {
 	// Rebuild agent messages from session context
 	ctx := s.SessionStore.BuildSessionContext()
 	s.Agent.ReplaceMessages(ctx.Messages)
+	s.sections.reset()
 
 	// Restore session model if recorded and still available.
 	// Use Agent.SetModel directly (not s.SetModel) to avoid writing a
@@ -1655,6 +1672,7 @@ func (s *AgentSession) NavigateTree(entryID string, summarize bool, customInstru
 	// Rebuild messages from the new branch
 	ctx := s.SessionStore.BuildSessionContext()
 	s.Agent.ReplaceMessages(ctx.Messages)
+	s.sections.reset()
 	s.restorePlan(ctx.PlanTitle, ctx.PlanEntries, ctx.PlanMetadata)
 
 	// Find user message text at this entry for editor pre-fill

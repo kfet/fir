@@ -137,6 +137,11 @@ type prependContextParams struct {
 	Content string `json:"content"`
 }
 
+// setSectionParams is the payload of the set_section RPC.
+type setSectionParams struct {
+	Text string `json:"text"`
+}
+
 // reportProgressParams maps to "report_progress" (request and notification).
 type reportProgressParams struct {
 	Message string `json:"message"`

@@ -13,6 +13,7 @@ import (
 	"github.com/kfet/fir/pkg/ai/providers"
 	"github.com/kfet/fir/pkg/extension/sdk"
 	"github.com/kfet/fir/pkg/resources"
+	"github.com/kfet/fir/pkg/sections"
 )
 
 // ConfirmFunc asks the user whether to trust an extension.
@@ -21,12 +22,16 @@ type ConfirmFunc func(name, path string) bool
 
 // Manager owns all external process extension bridges for a session.
 type Manager struct {
-	logger    *slog.Logger
-	trust     *TrustStore
-	mu        sync.Mutex
-	bridges   []*managedBridge
-	stopped   bool // set true by Stop; startOne refuses to append after it
-	ConfirmFn ConfirmFunc
+	logger *slog.Logger
+	trust  *TrustStore
+
+	// sectionStore is where extensions' set_section writes land. It must
+	// be the store the session injects from; nil means sections.Default().
+	sectionStore *sections.Store
+	mu           sync.Mutex
+	bridges      []*managedBridge
+	stopped      bool // set true by Stop; startOne refuses to append after it
+	ConfirmFn    ConfirmFunc
 
 	// reloadOneMu serializes ReloadOne calls so two concurrent reloads of
 	// the same extension cannot both miss the running instance and spawn
@@ -216,28 +221,9 @@ func (m *Manager) Start(ctx context.Context, projectDir string, cwd string, api 
 		l.SetListExtensionsFn(m.RunningExtensions)
 	}
 
-	configs, err := Discover(projectDir)
+	configs, err := m.discoverAll(projectDir)
 	if err != nil {
 		return err
-	}
-
-	// Merge in package-contributed extension dirs at lower priority.
-	// The byName map from Discover ensures project/global already win.
-	m.mu.Lock()
-	extraDirs := append([]string(nil), m.extraExtensionDirs...)
-	extraFiles := append([]string(nil), m.extraExtensionFiles...)
-	m.mu.Unlock()
-	if len(extraDirs) > 0 || len(extraFiles) > 0 {
-		// Layer package-contributed extensions beneath discovered ones.
-		// mergeConfigsByName enforces project/global shadowing by Name.
-		if len(extraDirs) > 0 {
-			if extraConfigs, extraErr := DiscoverExtra(extraDirs); extraErr == nil {
-				configs = mergeConfigsByName(configs, extraConfigs)
-			}
-		}
-		if len(extraFiles) > 0 {
-			configs = mergeConfigsByName(configs, ConfigsFromFiles(extraFiles))
-		}
 	}
 
 	// Extract SDKs and build env.
@@ -320,6 +306,28 @@ func (m *Manager) Start(ctx context.Context, projectDir string, cwd string, api 
 	m.resolveAuthConflicts()
 
 	return nil
+}
+
+// discoverAll runs discovery for projectDir and layers package-contributed
+// extension dirs and files beneath it (project/global shadow by Name).
+func (m *Manager) discoverAll(projectDir string) ([]ExtProcConfig, error) {
+	configs, err := Discover(projectDir)
+	if err != nil {
+		return nil, err
+	}
+	m.mu.Lock()
+	extraDirs := append([]string(nil), m.extraExtensionDirs...)
+	extraFiles := append([]string(nil), m.extraExtensionFiles...)
+	m.mu.Unlock()
+	if len(extraDirs) > 0 {
+		if extraConfigs, extraErr := DiscoverExtra(extraDirs); extraErr == nil {
+			configs = mergeConfigsByName(configs, extraConfigs)
+		}
+	}
+	if len(extraFiles) > 0 {
+		configs = mergeConfigsByName(configs, ConfigsFromFiles(extraFiles))
+	}
+	return configs, nil
 }
 
 // shouldSkip returns true if the extension should be skipped based on
@@ -436,6 +444,9 @@ func (m *Manager) startOne(ctx context.Context, cfg ExtProcConfig, cwd string, e
 	}
 
 	bridge := NewBridge(proc, caps)
+	m.mu.Lock()
+	bridge.sectionStore = m.sectionStore
+	m.mu.Unlock()
 	// Wire observable cards before handlers can fire (nil-safe).
 	bridge.SetObservableStore(api.GetObservableStore())
 	bridge.RegisterTools(api)
