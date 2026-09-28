@@ -2,10 +2,13 @@
 
 ## [Unreleased]
 
+## [1.23.0] - 2026-09-28
+
 ### Added
 - **Extension sections**: extensions own one persistent context section each (`set_section` / `clear_section` RPCs, stored at `~/.config/fir/sections/<ext>.md`, atomic, ~500-token/section and ~2000-token total caps with rejection). Fir reads them from disk before the first turn and injects them as one `[SYS_EXT sections]` message after the system prompt (with its own cache breakpoint); changes are re-injected in full on the next turn. Only installed, enabled, trusted owners are emitted; uninstalled owners' files are pruned. New `/sections` command.
 
 ### Changed
+- **Model catalog regenerated**: 2 model(s) with changed pricing/limits.
 - **mood: lessons are published as a persistent section** instead of a `session_start` prepend, so `fir -p` and the very first turn see them. The render is now model-independent (lists the models each lesson was tested on).
 
 ## [1.22.1] - 2026-09-28
