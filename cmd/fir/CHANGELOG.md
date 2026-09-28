@@ -2,8 +2,13 @@
 
 ## [Unreleased]
 
+## [1.22.0] - 2026-09-28
+
 ### Added
 - **mood: pre-registered bets, computed surprise, and lessons.** `mood_note` takes optional `bet` / `conf` / `anchor` and returns a short entry id; `mood_outcome(id, outcome, correct)` records what happened and computes `surprise = |conf - correct|` — surprise is never accepted as input. New `lesson_add` / `lesson_score` / `lesson_list` / `lesson_state` keep standing predictions in `~/.config/fir/mood/lessons.jsonl` with a per-model hit/miss map that only grows; nothing expires by date, retire by archiving. Active lessons are injected at session start via `[SYS_EXT]` prepend (prompt cache untouched), rendered as bets with evidence and tagged `[strong]`, `[weak - probe it]`, or `[unverified on this model - probe it]` when the current model has no column. Three high-surprise bets on one exact anchor from three different sessions propose a lesson at `agent_end`, best-effort.
+
+### Changed
+- **Model catalog regenerated**: added `azure-openai-responses/gpt-daybreak-blue-latest`, `azure-openai-responses/gpt-daybreak-red-latest`, `openai/gpt-daybreak-blue-latest`, `openai/gpt-daybreak-red-latest`; removed `opencode-go/glm-5.1`, `opencode-go/kimi-k2.6`, `opencode-go/qwen3.6-plus`, `opencode-go/qwen3.7-max`; 18 model(s) with changed pricing/limits.
 
 ## [1.21.2] - 2026-09-27
 
