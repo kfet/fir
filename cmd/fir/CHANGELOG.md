@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [1.23.2] - 2026-10-01
+
+### Changed
+- **release skill gains a docs step (2b)**: review repo docs each release; update or generate high-level docs — bigger diagrams, less words.
+- **Model catalog regenerated**: added `amazon-bedrock/openai.gpt-6.1-sol`, `amazon-bedrock/us.openai.gpt-6.1-sol` (+1 on aggregators); 4 model(s) with changed pricing/limits.
+
 ## [1.23.1] - 2026-09-30
 
 ### Fixed

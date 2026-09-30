@@ -24,6 +24,8 @@ agent in my editor of choice - [Zed](https://zed.dev).
 - **Extensions & skills** — extend with custom tools and workflows
 - **Tiny footprint** — ~10 MB static binary, runs on a Raspberry Pi Zero W 1.1
 
+Architecture at a glance: [docs/architecture.md](docs/architecture.md).
+
 ## Install
 
 ### Homebrew (macOS, Linux)
