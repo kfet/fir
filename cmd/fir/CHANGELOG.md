@@ -2,10 +2,15 @@
 
 ## [Unreleased]
 
+## [1.23.1] - 2026-09-30
+
 ### Fixed
 - **ACP: client-supplied MCP servers survive idle reaping.** A session reaped by the idle reaper and re-hydrated by the next Prompt lost its `session/new` `mcpServers` (e.g. zulip-acp's `relay`), yielding `Tool mcp__relay__* not found`; the reap record now carries and re-applies them.
 - **Data race in MCP tool registration** when several MCP servers finished starting concurrently (shared `prevMCPNames` slice); the callback is now serialised, and the lazily-created auto-reply state is published atomically.
 - **`TestLoadDefaultConfigs_MissingFiles` no longer reads the real user `mcp.json`.**
+
+### Changed
+- **Model catalog regenerated**: added `amazon-bedrock/anthropic.claude-sonnet-5-5`, `amazon-bedrock/global.anthropic.claude-sonnet-5-5`, `amazon-bedrock/global.xai.grok-4.7`, `amazon-bedrock/us.xai.grok-4.7`, `anthropic/claude-sonnet-5-5`, `azure-openai-responses/gpt-6.1-sol`, `github-copilot/claude-sonnet-5.5`, `github-copilot/gpt-6.1-sol` +3 more (+17 on aggregators); removed `mistral/magistral-small` (+2 on aggregators); 44 model(s) with changed pricing/limits.
 
 ## [1.23.0] - 2026-09-28
 
