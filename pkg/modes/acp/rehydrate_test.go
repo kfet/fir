@@ -8,6 +8,7 @@ import (
 	acpsdk "github.com/coder/acp-go-sdk"
 	"github.com/kfet/agent"
 	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/mcp"
 )
 
 // newRehydrateAgent builds a firAgent wired for re-hydration tests: an isolated
@@ -233,5 +234,78 @@ func TestRelease_ReapedSession_ForgetsAndBlocksRehydration(t *testing.T) {
 	})
 	if !promptIsNotFound(perr) {
 		t.Fatalf("expected session-not-found after release of reaped session, got %v", perr)
+	}
+}
+
+// relayServer is a client-supplied MCP server, as zulip-acp passes on
+// session/new. The command is bogus: we only assert it is configured.
+var relayServer = map[string]mcp.ServerConfig{
+	"relay": {Command: "/nonexistent/zulip-acp", Args: []string{"mcp-serve"}},
+}
+
+func assertRelayRestored(t *testing.T, pa *firAgent, sid string) {
+	t.Helper()
+	entry := pa.lookupSession(sid)
+	if entry == nil {
+		t.Fatal("session not re-hydrated into map")
+	}
+	if _, ok := entry.clientMCPConfigs["relay"]; !ok {
+		t.Errorf("clientMCPConfigs = %v, want relay server", entry.clientMCPConfigs)
+	}
+	if entry.mcpStatus == nil {
+		t.Fatal("no MCP manager: client server not passed to createSession")
+	}
+	found := false
+	for _, s := range entry.mcpStatus() {
+		if s.Name == "relay" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("relay server missing from merged MCP config: %+v", entry.mcpStatus())
+	}
+}
+
+func TestPrompt_RehydrateReaped_KeepsClientMCPServers(t *testing.T) {
+	for _, withFile := range []bool{true, false} {
+		t.Run(map[bool]string{true: "file", false: "nofile"}[withFile], func(t *testing.T) {
+			pa, cwd := newRehydrateAgent(t)
+			ctx := context.Background()
+			const sid = "acp-sid-mcp"
+
+			entry, err := pa.createSession(ctx, sid, cwd, relayServer)
+			if err != nil {
+				t.Fatalf("createSession: %v", err)
+			}
+			entry.clientMCPConfigs = relayServer
+			if withFile {
+				entry.session.SessionStore.NewSession(nil)
+				entry.session.SessionStore.AppendAgentMessage(
+					agent.NewAgentMessage(ai.NewUserMsg("turn", time.Now().UnixMilli())))
+			}
+			reapNow(t, pa, sid, entry)
+
+			// A failed re-hydration must keep the client servers in the record.
+			r, _ := pa.takeReaped(sid)
+			pa.restoreReaped(sid, r)
+			pa.mu.Lock()
+			rec := pa.reaped[sid]
+			pa.mu.Unlock()
+			if _, ok := rec.clientMCPConfigs["relay"]; !ok {
+				t.Fatalf("reap record lost client MCP servers: %+v", rec)
+			}
+
+			_, perr := pa.Prompt(ctx, acpsdk.PromptRequest{
+				SessionId: acpsdk.SessionId(sid),
+				Prompt:    []acpsdk.ContentBlock{acpsdk.TextBlock("again")},
+			})
+			if promptIsNotFound(perr) {
+				t.Fatal("unexpected session-not-found")
+			}
+			assertRelayRestored(t, pa, sid)
+			if e := pa.lookupSession(sid); e != nil {
+				t.Cleanup(func() { pa.teardownSession(context.Background(), sid, e) })
+			}
+		})
 	}
 }

@@ -151,8 +151,10 @@ func (pa *firAgent) rememberReaped(sessionID string, entry *firSession) {
 	if pa.reaped == nil {
 		pa.reaped = make(map[string]reapedSession)
 	}
-	pa.reaped[sessionID] = reapedSession{file: file, cwd: entry.cwd}
+	pa.reaped[sessionID] = reapedSession{file: file, cwd: entry.cwd, clientMCPConfigs: entry.clientMCPConfigs}
 	pa.mu.Unlock()
+	firlog.Info("acp idle reaper: remembered session for re-hydration",
+		"sessionId", sessionID, "clientMCPServers", len(entry.clientMCPConfigs))
 }
 
 // takeReaped atomically looks up and removes the reaped record for sessionID.

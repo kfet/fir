@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 
 	"github.com/kfet/agent"
 	"github.com/kfet/fir/pkg/ai"
@@ -231,11 +233,16 @@ func StartMCPManager(ctx context.Context, sess *AgentSession, configs map[string
 
 	// Auto-reply: when a channel message arrives from a message_id-addressed
 	// reply tool, stream LLM output directly without manual reply() calls.
-	var ar *autoreply.State
+	// ar is created lazily by the notification goroutine and read by tool
+	// calls on the agent goroutine.
+	var (
+		arOnce sync.Once
+		arPtr  atomic.Pointer[autoreply.State]
+	)
 	replyHook := func(serverName, messageID string) {
 		firlog.Info("auto-reply: replyHook fired", "server", serverName, "messageID", messageID)
-		if ar == nil {
-			ar = autoreply.New(func(ctx context.Context, args map[string]any) error {
+		arOnce.Do(func() {
+			ar := autoreply.New(func(ctx context.Context, args map[string]any) error {
 				_, err := mgr.CallTool(ctx, serverName, "reply", args)
 				if err != nil {
 					firlog.Info("auto-reply: CallTool error", "err", err)
@@ -243,9 +250,10 @@ func StartMCPManager(ctx context.Context, sess *AgentSession, configs map[string
 				return err
 			})
 			ar.Wire(sess.Agent)
+			arPtr.Store(ar)
 			firlog.Info("auto-reply: wired to agent")
-		}
-		ar.SetMessageID(messageID)
+		})
+		arPtr.Load().SetMessageID(messageID)
 	}
 
 	mcp.WireChannelInjectionWithReplyHook(mgr, func(content any, ts int64) {
@@ -257,8 +265,15 @@ func StartMCPManager(ctx context.Context, sess *AgentSession, configs map[string
 		return len(sess.SessionStore.BuildSessionContext().Messages)
 	})
 
-	var prevMCPNames []string
+	// OnToolsChanged fires concurrently from each server's start goroutine;
+	// serialise so prevMCPNames is read and swapped atomically.
+	var (
+		toolsMu      sync.Mutex
+		prevMCPNames []string
+	)
 	mgr.SetOnToolsChanged(func(mcpTools []agent.AgentTool) {
+		toolsMu.Lock()
+		defer toolsMu.Unlock()
 		// Bound each model-dispatched MCP tool call with the default timeout,
 		// innermost — on the RAW Execute, before hook wrapping — so N covers
 		// only the MCP round-trip and never a blocking OnToolCall hook.
@@ -278,7 +293,7 @@ func StartMCPManager(ctx context.Context, sess *AgentSession, configs map[string
 			}
 			origExec := t.Execute
 			mcpTools[i].Execute = func(ctx context.Context, toolCallID string, params map[string]any, onUpdate agent.AgentToolUpdateCallback) (agent.AgentToolResult, error) {
-				if ar != nil {
+				if ar := arPtr.Load(); ar != nil {
 					if absorbed, _ := ar.InterceptReply(ctx, params); absorbed {
 						return agent.AgentToolResult{Content: []ai.ToolResultContent{{Type: "text", Text: "ok (auto-reply active)"}}}, nil
 					}

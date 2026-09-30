@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Fixed
+- **ACP: client-supplied MCP servers survive idle reaping.** A session reaped by the idle reaper and re-hydrated by the next Prompt lost its `session/new` `mcpServers` (e.g. zulip-acp's `relay`), yielding `Tool mcp__relay__* not found`; the reap record now carries and re-applies them.
+- **Data race in MCP tool registration** when several MCP servers finished starting concurrently (shared `prevMCPNames` slice); the callback is now serialised, and the lazily-created auto-reply state is published atomically.
+- **`TestLoadDefaultConfigs_MissingFiles` no longer reads the real user `mcp.json`.**
+
 ## [1.23.0] - 2026-09-28
 
 ### Added

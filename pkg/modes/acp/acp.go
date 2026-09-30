@@ -113,6 +113,10 @@ func (s *firSession) getThinkingAccessor() thinkingAccessor {
 type reapedSession struct {
 	file string
 	cwd  string
+	// clientMCPConfigs are the MCP servers the ACP client supplied on
+	// session/new (or resume/load). They exist only in memory, so they must
+	// be carried through the reap record or re-hydration silently drops them.
+	clientMCPConfigs map[string]mcp.ServerConfig
 }
 
 // firAgent implements the ACP Agent interface.
@@ -499,6 +503,21 @@ func loadProjectMCPConfigs(cwd, extraConfigPath string) map[string]mcp.ServerCon
 // ============================================================================
 // Helpers
 // ============================================================================
+
+// withClientMCPConfigs overlays client-supplied MCP configs onto base (client
+// wins on name collisions, matching mergeRequestMCPServers).
+func withClientMCPConfigs(base, client map[string]mcp.ServerConfig) map[string]mcp.ServerConfig {
+	if len(client) == 0 {
+		return base
+	}
+	if base == nil {
+		base = make(map[string]mcp.ServerConfig, len(client))
+	}
+	for name, cfg := range client {
+		base[name] = cfg
+	}
+	return base
+}
 
 // mergeRequestMCPServers merges ACP request-level MCP server configurations
 // into an existing config map. Request entries take precedence. Returns the

@@ -185,6 +185,7 @@ func TestLoadDefaultConfigs_ProjectOverridesUser(t *testing.T) {
 
 func TestLoadDefaultConfigs_MissingFiles(t *testing.T) {
 	// With a non-existent project dir, both files are missing → empty result.
+	t.Setenv("FIR_AGENT_DIR", t.TempDir()) // isolate from the real user config
 	cfg, err := LoadDefaultConfigs(filepath.Join(t.TempDir(), "no-such-dir"))
 	require.NoError(t, err)
 	assert.Empty(t, cfg.MCPServers)
