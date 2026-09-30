@@ -45,6 +45,7 @@ step 1); that line alone is not grounds for a minor bump either.
    first run's own output and reports nothing changed. If you have already run
    it twice, `git checkout pkg/ai/models_generated.go` and run it once more.
 2. **Full build & test** — execute `make all` and confirm everything passes.
+2b. **Docs** — review repo docs against this release; update them, and update or generate high-level docs. Bigger diagrams, less words.
 3. **Check CHANGELOG** — read `CHANGELOG.md` and confirm there are entries under `## [Unreleased]`. If empty, ask the user.
 4. **Determine version** — follow the rules above if the user didn't specify one. State the version and proceed.
 5. **Update CHANGELOG** — rename `## [Unreleased]` to `## [VERSION] - YYYY-MM-DD` (today's date) and add a fresh empty `## [Unreleased]` section above it. Keep reverse-chronological order.
