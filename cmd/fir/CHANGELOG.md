@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Changed
+- **Session state is now an append-only history** (`<session>.jsonl.state.jsonl`, 0600): one timestamped full snapshot per actual change, fsynced, torn last line ignored on restore, capped at 1000 lines; a legacy `.state.json` is migrated automatically.
+
 ## [1.24.1] - 2026-10-01
 
 ### Changed

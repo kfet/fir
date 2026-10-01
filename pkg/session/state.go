@@ -13,7 +13,7 @@ import (
 )
 
 // SessionState is every per-session setting fir saves next to a transcript
-// (<session>.jsonl.state.json, 0600) and restores when the session is opened
+// (<session>.jsonl.state.jsonl, 0600) and restores when the session is opened
 // again, in any mode. It is saved and restored as a whole: a field added to
 // either half survives a restart with no other code change.
 type SessionState struct {

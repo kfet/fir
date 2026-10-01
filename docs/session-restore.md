@@ -5,7 +5,7 @@ settings next to its transcript and gets them back through one core path.
 
 ```
  <agentDir>/sessions/<cwd>/<ts>_<id>.jsonl              transcript (messages, model/thinking/name entries)
- <agentDir>/sessions/<cwd>/<ts>_<id>.jsonl.state.json   session state, 0600 (this doc)
+ <agentDir>/sessions/<cwd>/<ts>_<id>.jsonl.state.jsonl  session state history, 0600, append-only (this doc)
  <agentDir>/sessions/<cwd>/<ts>_<id>.jsonl.meta.json    listing cache + flock target (0644, rebuilt freely)
  <agentDir>/session-handles/<sha256(handle)[:16]>       handle → transcript path (e.g. ACP sessionId)
 ```
@@ -13,7 +13,28 @@ settings next to its transcript and gets them back through one core path.
 The state lives in its own sibling file, not in `.meta.json`: that file is a
 world-readable, mtime-invalidated listing cache that is rewritten freely and is
 the flock target, while state is authoritative and holds secrets (MCP `env`),
-so it is written atomically with mode 0600. Logs name MCP servers only.
+so it is created mode 0600. Logs name MCP servers only.
+
+## History file format
+
+`<transcript>.state.jsonl` is append-only JSONL (`pkg/session/store/state.go`).
+Each line is a full snapshot:
+
+```json
+{"ts":"2026-10-01T12:00:00.123456789Z","state":{"runtime":{...},"conversation":{...}}}
+```
+
+- A line is appended (`O_APPEND`, then `fsync`) only when the snapshot differs
+  from the last line; a no-op save writes nothing. `reason` is optional
+  (`"migrate"` marks a migrated snapshot).
+- Restore uses the last line that decodes. A torn/truncated final line is
+  skipped, and the next append starts on a fresh line.
+- Growth is capped: once the file exceeds 1000 lines (`MaxStateHistory`) it is
+  atomically rewritten (temp file + fsync + rename) keeping the newest 1000.
+  Snapshots only change on settings changes, so this is years of history.
+- Migration: a legacy `<transcript>.state.json` (fir ≤ 1.24.1) with no history
+  file is written as the first line (ts = its mtime) and deleted on first read.
+- A fork starts a new history whose first line is the source's latest state.
 
 ## What is saved
 
@@ -29,14 +50,14 @@ field added to it is saved and restored with no other change
 Saved on: open, switch, `/new`, `SetModel`, `SetThinkingLevel`,
 `SetSessionName`, `UpdateSessionState`, end of every turn. Nothing is saved
 after `Close`, so a late save cannot revive a forgotten session. A fork copies
-the source's state.
+the source's latest state.
 
 ## How it is restored
 
 ```
  TUI/print -c, --session, ── store opened ──┐
  ACP new/load/resume/rehydrate              ├─▶ session.Setup ─▶ CreateAgentSession
-                                            │      1. load <transcript>.state.json
+                                            │      1. load <transcript>.state.jsonll (last valid line)
           StateOverride (e.g. ACP client) ──┘      2. apply override
                                                    3. model/thinking/name → agent
                                                       (unless pinned by --model/--thinking)
