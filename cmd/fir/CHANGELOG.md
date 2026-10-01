@@ -2,7 +2,10 @@
 
 ## [Unreleased]
 
+## [1.24.2] - 2026-10-01
+
 ### Changed
+- **Model catalog regenerated**: 3 model(s) with changed pricing/limits.
 - **Session state is now an append-only history** (`<session>.jsonl.state.jsonl`, 0600): one timestamped full snapshot per actual change, fsynced, torn last line ignored on restore, capped at 1000 lines; a legacy `.state.json` is migrated automatically.
 
 ## [1.24.1] - 2026-10-01
