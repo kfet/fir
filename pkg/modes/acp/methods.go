@@ -177,9 +177,6 @@ func (pa *firAgent) Prompt(ctx context.Context, params acpsdk.PromptRequest) (ac
 		entry = rehydrated
 	}
 	entry.touch(pa.now())
-	// A turn can change model or thinking (e.g. /model); keep the saved
-	// config current.
-	defer pa.saveSessionConfig(string(params.SessionId), entry)
 
 	// Wait for async extension setup to complete so hooks and event
 	// forwarding are wired before any tool calls execute.
@@ -300,8 +297,7 @@ func (pa *firAgent) SetSessionMode(_ context.Context, params acpsdk.SetSessionMo
 	if entry == nil {
 		return acpsdk.SetSessionModeResponse{}, newSessionNotFound(string(params.SessionId))
 	}
-	entry.updateSetup(func(s *acpSetup) { s.Mode = string(params.ModeId) })
-	pa.saveSessionConfig(string(params.SessionId), entry)
+	entry.session.UpdateSessionState(func(st *session.SessionState) { st.Runtime.Mode = string(params.ModeId) })
 	return acpsdk.SetSessionModeResponse{}, nil
 }
 
@@ -330,7 +326,6 @@ func (pa *firAgent) SetSessionModel(_ context.Context, params SetSessionModelReq
 	if err := entry.session.SetModel(model); err != nil {
 		return SetSessionModelResponse{}, err
 	}
-	pa.saveSessionConfig(string(params.SessionId), entry)
 	return SetSessionModelResponse{}, nil
 }
 
@@ -541,9 +536,10 @@ func (pa *firAgent) rehydrateForPrompt(ctx context.Context, sessionID string) (*
 		return entry, nil
 	}
 
-	// The saved config is the only sessionID→transcript mapping (the store
-	// names files by its own UUID) and carries the full client setup.
-	if _, ok := pa.loadSessionConfig(sessionID); ok {
+	// The sessionId handle is the only sessionID→transcript mapping (the
+	// store names files by its own UUID); the transcript's saved state
+	// carries the full client setup.
+	if pa.canRehydrate(sessionID) {
 		entry, _, err := pa.openSession(ctx, sessionID, nil)
 		if err != nil {
 			firlog.Warn("acp prompt: re-hydration failed", "sessionId", sessionID, "err", err)
@@ -553,7 +549,7 @@ func (pa *firAgent) rehydrateForPrompt(ctx context.Context, sessionID string) (*
 		return entry, nil
 	}
 
-	// No saved config: sessionID may still be an explicit path or store UUID
+	// No binding: sessionID may still be an explicit path or store UUID
 	// the client retained. Its client setup is unknown.
 	sessionPath := pa.resolveSessionFilePath(sessionID, defaultPromptCwd())
 	if sessionPath == "" {

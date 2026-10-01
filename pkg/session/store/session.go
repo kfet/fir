@@ -1720,6 +1720,10 @@ func ForkFrom(sourcePath, targetCwd, sessionDir string) (*SessionStore, error) {
 	if err := os.WriteFile(newSessionFile, []byte(strings.Join(lines, "\n")+"\n"), 0600); err != nil {
 		return nil, fmt.Errorf("cannot write forked session: %w", err)
 	}
+	// A fork carries the source's saved settings.
+	if data, err := os.ReadFile(StatePath(sourcePath)); err == nil {
+		_ = WriteFileAtomic(StatePath(newSessionFile), data, 0o600)
+	}
 
 	ss, _ := OpenSessionStore(newSessionFile, sessionDir)
 	return ss, nil

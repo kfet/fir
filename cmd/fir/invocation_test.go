@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/kfet/agent"
+	"github.com/kfet/fir/pkg/session"
 	"github.com/kfet/fir/pkg/session/store"
 )
 
@@ -251,5 +252,25 @@ func TestParseArgs_NoRestoreConfig(t *testing.T) {
 	}
 	if !a.Continue {
 		t.Error("--continue should still parse")
+	}
+}
+
+// A /model switch recorded in the saved state beats the stamped start-up
+// --model on resume; other stamped flags still apply.
+func TestSupersededBySavedState(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "s.jsonl")
+	inv := &store.SessionInvocation{Provider: "p", Model: "m", Thinking: "low", Tools: []string{"read"}}
+	if got := supersededBySavedState(inv, file); got != inv {
+		t.Fatal("no saved state should keep the invocation")
+	}
+	if err := store.WriteState(file, session.SessionState{Conversation: session.ConversationState{Model: "a/b", Thinking: "high"}}); err != nil {
+		t.Fatal(err)
+	}
+	got := supersededBySavedState(inv, file)
+	if got.Provider != "" || got.Model != "" || got.Thinking != "" || len(got.Tools) != 1 {
+		t.Fatalf("got %#v", got)
+	}
+	if inv.Model != "m" {
+		t.Fatal("input mutated")
 	}
 }

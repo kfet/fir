@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Changed
+- **Session state is saved and restored universally, in every mode.** Model, thinking level, name, cwd, mode, client metadata and session-scoped MCP servers are saved next to each transcript (`<session>.jsonl.state.json`, 0600) and restored through one core path on `-c`/`--session`/`/resume`/ACP new/load/resume/rehydrate; new `SessionState` fields ride along automatically. ACP drops its private `acp-sessions/` store for a `sessionId` handle (old configs are migrated on first use). See `docs/session-restore.md`.
+
 ## [1.24.0] - 2026-10-01
 
 ### Changed

@@ -218,6 +218,8 @@ type AgentSessionOptions struct {
 	// client-version-gate records are appended to and read back from.
 	// Empty disables gate recording and the gate diagnostic.
 	DoctorLogPath string
+	// AgentDir is the global config directory; session handles live under it.
+	AgentDir string
 }
 
 // ============================================================================
@@ -286,6 +288,13 @@ type AgentSession struct {
 	// mcpConfigured records whether MCP servers are configured for this
 	// session (see AgentSessionOptions.MCPConfigured).
 	mcpConfigured bool
+
+	// state is the persisted per-session settings; see state.go.
+	stateMu  sync.Mutex
+	saveMu   sync.Mutex
+	state    SessionState
+	agentDir string
+	closed   atomic.Bool
 }
 
 // WaitExtReady blocks until extensions have finished loading, ctx is done, or
@@ -319,7 +328,9 @@ func NewAgentSession(opts AgentSessionOptions) *AgentSession {
 		extReady:         opts.ExtReady,
 		sections:         opts.sections,
 		mcpConfigured:    opts.MCPConfigured,
+		agentDir:         opts.AgentDir,
 	}
+	s.state.Runtime.Cwd = opts.Cwd
 	if s.sections == nil {
 		s.sections = newSectionTracker(sections.Default())
 	}
@@ -556,7 +567,10 @@ func (s *AgentSession) handleAgentEvent(event agent.AgentEvent) {
 			s.checkAutoCompaction(msg)
 		}
 
-		// (typing indicators are fire-and-forget, no cleanup needed)
+		// Keep the state file current (and next to the transcript, which a
+		// branch or compaction may have moved), so it also refreshes the
+		// handle binding's age.
+		s.SaveState()
 	}
 
 }
@@ -1081,6 +1095,7 @@ func (s *AgentSession) SetModel(model *ai.Model) error {
 	}
 	s.Agent.SetModel(model)
 	s.SessionStore.AppendModelChange(model.Provider, model.ID)
+	s.UpdateSessionState(func(st *SessionState) { st.Conversation.Model = model.Provider + "/" + model.ID })
 	return nil
 }
 
@@ -1088,6 +1103,7 @@ func (s *AgentSession) SetModel(model *ai.Model) error {
 func (s *AgentSession) SetThinkingLevel(level string) {
 	s.Agent.SetThinkingLevel(agent.ThinkingLevel(level))
 	s.SessionStore.AppendThinkingLevelChange(level)
+	s.UpdateSessionState(func(st *SessionState) { st.Conversation.Thinking = level })
 }
 
 // RecordCommand records a user-initiated command for audit/metering purposes.
@@ -1217,6 +1233,7 @@ func (s *AgentSession) wrapTool(t agent.AgentTool) agent.AgentTool {
 // SetSessionName sets the display name for the current session.
 func (s *AgentSession) SetSessionName(name string) {
 	s.SessionStore.AppendSessionInfo(name)
+	s.UpdateSessionState(func(st *SessionState) { st.Conversation.Name = name })
 	s.emit(AgentSessionEvent{
 		Type:        "session_named",
 		SessionName: name,
@@ -1241,6 +1258,11 @@ func (s *AgentSession) NewSessionCmd() (bool, error) {
 	s.buildSystemPrompt()
 	// Clear plan state so stale plans don't persist across sessions.
 	s.UpdatePlan("", nil, nil)
+	// The new transcript keeps the running session's runtime settings and
+	// starts from its current model and thinking level, unnamed.
+	s.updateStateNoSave(func(st *SessionState) { st.Conversation = ConversationState{} })
+	s.syncConversation()
+	s.SaveState()
 	// Clear the session name so extensions (e.g. tmuxspinner) reset the window title.
 	s.emit(AgentSessionEvent{
 		Type:        "session_named",
@@ -1255,8 +1277,25 @@ func (s *AgentSession) SwitchSession(sessionPath string) (bool, error) {
 	// Abort any in-progress streaming
 	s.Agent.Abort()
 
+	// A transcript another owner holds by handle (e.g. a reaped ACP
+	// session) is forked, so switching here never rewrites its settings.
+	ownedElsewhere := false
+	if saved, ok := LoadState(sessionPath); ok && saved.Runtime.Handle != "" &&
+		saved.Runtime.Handle != s.SessionState().Runtime.Handle &&
+		store.ResolveHandle(s.agentDir, saved.Runtime.Handle) == sessionPath {
+		if dir := s.SessionStore.GetSessionDir(); dir != "" {
+			fork, err := store.ForkFrom(sessionPath, s.SessionStore.GetCwd(), dir)
+			if err != nil {
+				return false, err
+			}
+			sessionPath = fork.GetSessionFile()
+			fork.Close()
+			ownedElsewhere = true
+		}
+	}
+
 	// Switch the session file (loads entries, forks if locked)
-	forked := s.SessionStore.SetSessionFile(sessionPath)
+	forked := s.SessionStore.SetSessionFile(sessionPath) || ownedElsewhere
 
 	// Rebuild agent messages from session context
 	ctx := s.SessionStore.BuildSessionContext()
@@ -1280,6 +1319,10 @@ func (s *AgentSession) SwitchSession(sessionPath string) (bool, error) {
 
 	// Restore plan state from session without writing a new entry.
 	s.restorePlan(ctx.PlanTitle, ctx.PlanEntries, ctx.PlanMetadata)
+
+	// Adopt the transcript's saved settings, keeping this session's runtime.
+	s.updateStateNoSave(func(st *SessionState) { st.Conversation = ConversationState{} })
+	s.restoreState(true, nil, false, false)
 
 	// Rebuild system prompt
 	s.sessionDate = time.Now().Format("2006-01-02")
@@ -1945,6 +1988,7 @@ func (s *AgentSession) resolveSideQueryModel(modelID, provider string) (*ai.Mode
 
 // Close cleans up the session.
 func (s *AgentSession) Close() {
+	s.closeState()
 	// Cancel any in-flight LLM stream before tearing down.
 	if s.Agent != nil {
 		s.Agent.Abort()

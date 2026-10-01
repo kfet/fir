@@ -66,9 +66,6 @@ type firSession struct {
 	mcpManager      *mcp.Manager              // nil if no MCP servers configured; used for Close()
 	mcpStatus       func() []mcp.ServerStatus // status callback for /session display
 	extReady        chan struct{}             // closed when async extension setup completes
-	// setup is the client-supplied session setup; persisted, see sessionconfig.go.
-	setupMu sync.Mutex
-	setup   acpSetup
 	// lastActiveNs is the UnixNano timestamp of the last activity on this
 	// session (creation or a prompt). Accessed atomically. The idle reaper
 	// uses it to decide when a session has been idle longer than the TTL.
@@ -136,10 +133,11 @@ type firAgent struct {
 	// idleTTL is how long a session may sit idle before the reaper tears it
 	// down. Zero disables the reaper.
 	idleTTL time.Duration
-	// configDir holds one saved sessionConfig per ACP sessionID, so a reaped
-	// or restarted session is rebuilt with its full setup. Empty disables
-	// persistence (unit tests that build firAgent directly).
-	configDir string
+	// agentDir is where session handles live (ACP sessionId → transcript,
+	// see store.BindHandle) and legacy acp-sessions configs are migrated
+	// from. Empty disables handle resolution (unit tests that build
+	// firAgent directly).
+	agentDir string
 	// rehydrateLocks serialises rehydration per sessionID (*sync.Mutex).
 	rehydrateLocks sync.Map
 	// toolHeartbeats holds a stop channel per in-flight tool call, keyed by
@@ -184,7 +182,7 @@ func RunAcpMode(opts Options) error {
 	pa := &firAgent{
 		options:      opts,
 		sessions:     make(map[string]*firSession),
-		configDir:    filepath.Join(resolveAgentDir(), "acp-sessions"),
+		agentDir:     resolveAgentDir(),
 		commands:     newCommandRegistry(),
 		pendingAuths: make(map[string]*pendingAuth),
 		idleTTL:      opts.IdleTTL,
@@ -267,7 +265,10 @@ func (pa *firAgent) resourceLoaderOptions(agentDir, cwd string, sm *config.Setti
 	}
 }
 
-func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mcpConfigs map[string]mcp.ServerConfig) (*firSession, error) {
+// createSession builds and registers an in-memory session. transcript, when
+// non-empty and present on disk, is opened (forked if another process holds
+// it); its saved state is restored by core, edited first by override.
+func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd, transcript string, override func(*session.SessionState)) (*firSession, bool, error) {
 	createStart := time.Now()
 	firlog.Info("acp createSession: start", "sessionID", sessionID, "cwd", cwd)
 
@@ -305,15 +306,22 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mc
 	}
 	firlog.Info("acp createSession: tools created", "count", len(toolList), "clientTerminal", useClientTerminal, "clientFs", useClientFs)
 
+	sessionDir := store.DefaultSessionDir(agentDir, cwd)
+	sessionStore, forked := store.NewSessionStore(cwd, sessionDir), false
+	if transcript != "" && fileExists(transcript) {
+		sessionStore, forked = store.OpenSessionStore(transcript, sessionDir)
+	}
+
 	result, err := session.Setup(ctx, session.SetupOptions{
 		Cwd:                   cwd,
 		AgentDir:              agentDir,
 		AuthStorage:           authStorage,
 		ModelRegistry:         modelRegistry,
 		SettingsManager:       settingsManager,
-		SessionStore:          store.NewSessionStore(cwd, store.DefaultSessionDir(agentDir, cwd)),
+		SessionStore:          sessionStore,
+		StateOverride:         override,
 		Tools:                 toolList,
-		MCPConfigs:            mcpConfigs,
+		MCPConfigs:            pa.sessionMCPConfigs(cwd),
 		ResourceLoaderOptions: pa.resourceLoaderOptions(agentDir, cwd, settingsManager),
 		CompactionRunner: &compaction.DefaultRunner{
 			SettingsManager: settingsManager,
@@ -331,7 +339,7 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mc
 		},
 	})
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
 	entry := &firSession{
@@ -419,7 +427,7 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mc
 						extCollisions[i] = extension.ConvertMCPCollision(c.Server, c.WonFile, c.ShadowedFiles)
 					}
 					// Perform the actual reload, including client-provided MCP configs.
-					reloadErr := session.ReloadMCP(context.Background(), &entry.mcpManager, entry.session, entry.cwd, "", entry.clientMCP())
+					reloadErr := session.ReloadMCP(context.Background(), &entry.mcpManager, entry.session, entry.cwd, "", nil)
 					result := extension.ReloadMCPResult{Collisions: extCollisions}
 					if err != nil {
 						// Broken files were skipped; the rest reloaded. Report them.
@@ -453,7 +461,7 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mc
 	entry.touch(pa.now())
 
 	firlog.Info("acp createSession: done", "total_ms", time.Since(createStart).Milliseconds(), "sessionID", sessionID)
-	return entry, nil
+	return entry, forked, nil
 }
 
 // loadProjectMCPConfigs reads MCP server configurations from both the
@@ -484,21 +492,6 @@ func loadProjectMCPConfigs(cwd, extraConfigPath string) map[string]mcp.ServerCon
 // ============================================================================
 // Helpers
 // ============================================================================
-
-// withClientMCPConfigs overlays client-supplied MCP configs onto base (client
-// wins on name collisions, matching mergeRequestMCPServers).
-func withClientMCPConfigs(base, client map[string]mcp.ServerConfig) map[string]mcp.ServerConfig {
-	if len(client) == 0 {
-		return base
-	}
-	if base == nil {
-		base = make(map[string]mcp.ServerConfig, len(client))
-	}
-	for name, cfg := range client {
-		base[name] = cfg
-	}
-	return base
-}
 
 // mergeRequestMCPServers merges ACP request-level MCP server configurations
 // into an existing config map. Request entries take precedence. Returns the

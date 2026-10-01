@@ -9,6 +9,7 @@ import (
 	"io"
 
 	"github.com/kfet/agent"
+	"github.com/kfet/fir/pkg/session"
 	"github.com/kfet/fir/pkg/session/store"
 )
 
@@ -170,11 +171,29 @@ func maybeRestoreInvocation(args *Args, sm *store.SessionStore, isResumed bool, 
 				fmt.Fprintln(stderr, "fir:", msg)
 			}
 		}
-		ApplyInvocation(args, inv, warn)
+		ApplyInvocation(args, supersededBySavedState(inv, sm.GetSessionFile()), warn)
 		return
 	}
 	// Brand-new session: stamp the invocation for later resumes.
 	if inv := BuildInvocation(args); inv != nil {
 		sm.StampInvocation(inv)
 	}
+}
+
+// supersededBySavedState drops the stamped start-up model and thinking level
+// when the session's saved state records later ones (e.g. a /model switch):
+// the session resumes as it was left, not as it was started.
+func supersededBySavedState(inv *store.SessionInvocation, sessionFile string) *store.SessionInvocation {
+	st, ok := session.LoadState(sessionFile)
+	if !ok {
+		return inv
+	}
+	out := *inv
+	if st.Conversation.Model != "" {
+		out.Provider, out.Model = "", ""
+	}
+	if st.Conversation.Thinking != "" {
+		out.Thinking = ""
+	}
+	return &out
 }

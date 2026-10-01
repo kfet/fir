@@ -68,6 +68,11 @@ type CreateAgentSessionOptions struct {
 	// errors can be surfaced to the user.
 	OnRetry func(attempt int, delaySeconds float64, errMsg string)
 
+	// StateOverride, if set, edits the session's settings after any saved
+	// state for its transcript is loaded and before they are applied — e.g.
+	// to install client-supplied runtime settings.
+	StateOverride func(*SessionState)
+
 	// MCPConfigured records whether MCP servers are configured for this
 	// session. Forwarded to AgentSession so the default MCP tool-call timeout
 	// is advertised in the system prompt.
@@ -340,7 +345,12 @@ func CreateAgentSession(ctx context.Context, opts CreateAgentSessionOptions) (*C
 		sections:         secTracker,
 		MCPConfigured:    opts.MCPConfigured,
 		DoctorLogPath:    models.DoctorLogPath(agentDir),
+		AgentDir:         agentDir,
 	})
+
+	// Restore the transcript's saved settings (in every mode): this is the
+	// one place an opened session gets its state back.
+	session.restoreState(false, opts.StateOverride, opts.Model != nil, opts.ThinkingLevel != "")
 
 	// Register session-aware tools (plan tool needs a session reference).
 	session.RegisterSessionTools()

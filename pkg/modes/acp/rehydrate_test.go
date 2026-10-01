@@ -2,7 +2,10 @@ package acp
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
@@ -11,6 +14,9 @@ import (
 	"github.com/kfet/agent"
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/mcp"
+	"github.com/kfet/fir/pkg/session"
+	"github.com/kfet/fir/pkg/session/statetest"
+	"github.com/kfet/fir/pkg/session/store"
 )
 
 // newRehydrateAgent builds a firAgent wired for re-hydration tests: an isolated
@@ -25,12 +31,12 @@ func newRehydrateAgent(t *testing.T) (*firAgent, string) {
 
 	base := time.Date(2026, 6, 7, 12, 0, 0, 0, time.UTC)
 	pa := &firAgent{
-		conn:      newMockConn(),
-		sessions:  make(map[string]*firSession),
-		configDir: t.TempDir(),
-		options:   Options{NoExtensions: true, NoMCP: true, NoSkills: true},
-		idleTTL:   time.Hour,
-		nowFn:     func() time.Time { return base },
+		conn:     newMockConn(),
+		sessions: make(map[string]*firSession),
+		agentDir: agentDir,
+		options:  Options{NoExtensions: true, NoMCP: true, NoSkills: true},
+		idleTTL:  time.Hour,
+		nowFn:    func() time.Time { return base },
 	}
 	return pa, cwd
 }
@@ -45,9 +51,18 @@ func reapNow(t *testing.T, pa *firAgent, sid string, entry *firSession) {
 	if pa.lookupSession(sid) != nil {
 		t.Fatal("reaped session still present in sessions map")
 	}
-	if _, ok := pa.loadSessionConfig(sid); !ok {
-		t.Fatal("reaped session config not saved")
+	if _, ok := savedState(pa, sid); !ok {
+		t.Fatal("reaped session state not saved")
 	}
+}
+
+// savedState returns the state saved for the transcript sid is bound to.
+func savedState(pa *firAgent, sid string) (session.SessionState, bool) {
+	file := store.ResolveHandle(pa.agentDir, sid)
+	if file == "" {
+		return session.SessionState{}, false
+	}
+	return session.LoadState(file)
 }
 
 func promptIsNotFound(err error) bool {
@@ -108,8 +123,8 @@ func TestPrompt_RehydratesReapedSession_RestoresConversation(t *testing.T) {
 	sessionFile := entry.session.SessionStore.GetSessionFile()
 
 	reapNow(t, pa, sid, entry)
-	if cfg, _ := pa.loadSessionConfig(sid); cfg.Transcript != sessionFile {
-		t.Fatalf("saved transcript = %q, want %q", cfg.Transcript, sessionFile)
+	if got := store.ResolveHandle(pa.agentDir, sid); got != sessionFile {
+		t.Fatalf("bound transcript = %q, want %q", got, sessionFile)
 	}
 
 	_, perr := pa.Prompt(ctx, acpsdk.PromptRequest{
@@ -168,8 +183,8 @@ func TestRelease_ReapedSession_ForgetsAndBlocksRehydration(t *testing.T) {
 	if _, err := pa.ReleaseSession(ctx, ReleaseSessionRequest{SessionId: sid}); err != nil {
 		t.Fatalf("ReleaseSession on reaped id: %v", err)
 	}
-	if _, ok := pa.loadSessionConfig(sid); ok {
-		t.Error("saved config not deleted by explicit release")
+	if _, ok := savedState(pa, sid); ok {
+		t.Error("binding not deleted by explicit release")
 	}
 	_, perr := pa.Prompt(ctx, acpsdk.PromptRequest{
 		SessionId: acpsdk.SessionId(sid),
@@ -222,10 +237,10 @@ func TestReapRehydrate_RestoresSessionState(t *testing.T) {
 		got, want any
 	}{
 		{"cwd", back.cwd, cwd},
-		{"setup.cwd", back.getSetup().Cwd, cwd},
-		{"meta", back.getSetup().Meta, meta},
-		{"mode", back.getSetup().Mode, "architect"},
-		{"client mcp", serverNames(back.clientMCP()), []string{"relay"}},
+		{"state cwd", back.session.SessionState().Runtime.Cwd, cwd},
+		{"meta", back.session.SessionState().Runtime.Meta, meta},
+		{"mode", back.session.SessionState().Runtime.Mode, "architect"},
+		{"client mcp", session.ServerNames(back.session.SessionMCPServers()), []string{"relay"}},
 		{"mcp connected", mcpConnected(back, "relay"), true},
 		{"model", back.session.Model().Provider + "/" + back.session.Model().ID, "anthropic/claude-sonnet-4-5"},
 		{"thinking", back.session.ThinkingLevel(), wantThinking},
@@ -239,57 +254,23 @@ func TestReapRehydrate_RestoresSessionState(t *testing.T) {
 	}
 }
 
-// fillNonZero sets every field of v (a struct pointer) to a non-zero value,
-// by type only, so a field added to acpSetup later is covered with no test
-// change. cwd-like strings get a real directory; MCP configs a working server.
-func fillNonZero(t *testing.T, v reflect.Value, dir string) {
-	t.Helper()
-	for i := 0; i < v.NumField(); i++ {
-		f := v.Field(i)
-		switch {
-		case f.Type() == reflect.TypeOf(map[string]mcp.ServerConfig{}):
-			f.Set(reflect.ValueOf(map[string]mcp.ServerConfig{"srv": echoServer()}))
-		case f.Kind() == reflect.String:
-			f.SetString(dir)
-		case f.Kind() == reflect.Bool:
-			f.SetBool(true)
-		case f.CanInt():
-			f.SetInt(7)
-		case f.Kind() == reflect.Map && f.Type().Key().Kind() == reflect.String:
-			m := reflect.MakeMap(f.Type())
-			elem := reflect.New(f.Type().Elem()).Elem()
-			if elem.Kind() == reflect.Interface || elem.Kind() == reflect.String {
-				elem.Set(reflect.ValueOf("v"))
-			}
-			m.SetMapIndex(reflect.ValueOf("k"), elem)
-			f.Set(m)
-		case f.Kind() == reflect.Slice && f.Type().Elem().Kind() == reflect.String:
-			f.Set(reflect.ValueOf([]string{"v"}).Convert(f.Type()))
-		default:
-			t.Fatalf("fillNonZero: teach it field %s of type %s", v.Type().Field(i).Name, f.Type())
-		}
-		if f.IsZero() {
-			t.Fatalf("fillNonZero left %s zero", v.Type().Field(i).Name)
-		}
-	}
-}
-
-// TestReapRehydrate_AnySetupPropertySurvives: whatever a setter puts in the
-// session setup survives reap and rehydrate, with no reaper code naming it.
-func TestReapRehydrate_AnySetupPropertySurvives(t *testing.T) {
+// TestReapRehydrate_AnyRuntimePropertySurvives: whatever a setter puts in the
+// session's runtime state survives reap and rehydrate (the ACP handle is
+// re-pinned to the sessionId), with no ACP code naming the field.
+func TestReapRehydrate_AnyRuntimePropertySurvives(t *testing.T) {
 	pa, cwd := newRehydrateAgent(t)
 	const sid = "acp-sid-generic"
 	entry := openNew(t, pa, sid, &clientSetup{cwd: cwd})
 
-	var want acpSetup
-	fillNonZero(t, reflect.ValueOf(&want).Elem(), cwd)
-	// A test-only setter: writes the setup the way any ACP setter would.
-	entry.updateSetup(func(s *acpSetup) { *s = want })
+	var want session.RuntimeState
+	statetest.FillNonZero(t, &want, cwd, map[string]mcp.ServerConfig{"srv": echoServer()})
+	want.Handle = sid
+	entry.session.UpdateSessionState(func(st *session.SessionState) { st.Runtime = want })
 
 	reapNow(t, pa, sid, entry)
 	back := rehydrate(t, pa, sid)
-	if got := back.getSetup(); !reflect.DeepEqual(got, want) {
-		t.Fatalf("setup after rehydrate:\n got %#v\nwant %#v", got, want)
+	if got := back.session.SessionState().Runtime; !reflect.DeepEqual(got, want) {
+		t.Fatalf("runtime after rehydrate:\n got %#v\nwant %#v", got, want)
 	}
 }
 
@@ -302,7 +283,7 @@ func TestLoad_ClientOverridesSaved(t *testing.T) {
 	entry := openNew(t, pa, sid, &clientSetup{
 		cwd: cwd, mcpServers: []acpsdk.McpServer{echoMCPServer("old")}, meta: map[string]any{"v": "1"},
 	})
-	entry.updateSetup(func(s *acpSetup) { s.Mode = "kept" })
+	entry.session.UpdateSessionState(func(st *session.SessionState) { st.Runtime.Mode = "kept" })
 	reapNow(t, pa, sid, entry)
 
 	cwd2 := t.TempDir()
@@ -313,14 +294,14 @@ func TestLoad_ClientOverridesSaved(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("resume: %v", err)
 	}
-	want := acpSetup{Cwd: cwd2, McpServers: map[string]mcp.ServerConfig{"new": echoServer()},
-		Meta: map[string]any{"v": "2"}, Mode: "kept"}
-	if got := pa.lookupSession(sid).getSetup(); !reflect.DeepEqual(got, want) {
-		t.Fatalf("live setup:\n got %#v\nwant %#v", got, want)
+	want := session.RuntimeState{Cwd: cwd2, McpServers: map[string]mcp.ServerConfig{"new": echoServer()},
+		Meta: map[string]any{"v": "2"}, Mode: "kept", Handle: sid}
+	if got := pa.lookupSession(sid).session.SessionState().Runtime; !reflect.DeepEqual(got, want) {
+		t.Fatalf("live runtime:\n got %#v\nwant %#v", got, want)
 	}
-	saved, _ := pa.loadSessionConfig(sid)
-	if !reflect.DeepEqual(saved.Setup, want) {
-		t.Fatalf("saved setup:\n got %#v\nwant %#v", saved.Setup, want)
+	saved, _ := savedState(pa, sid)
+	if !reflect.DeepEqual(saved.Runtime, want) {
+		t.Fatalf("saved runtime:\n got %#v\nwant %#v", saved.Runtime, want)
 	}
 }
 
@@ -349,16 +330,16 @@ func TestRehydrate_FailedClientMCP_NeedsReload(t *testing.T) {
 	if pa.lookupSession(sid) != nil {
 		t.Error("failed restore left a session in the map")
 	}
-	if _, ok := pa.loadSessionConfig(sid); !ok {
-		t.Error("failed restore dropped the saved config")
+	if _, ok := savedState(pa, sid); !ok {
+		t.Error("failed restore dropped the saved state")
 	}
 }
 
-func TestSessionConfig_FileMode0600(t *testing.T) {
+func TestSessionState_FileMode0600(t *testing.T) {
 	pa, cwd := newRehydrateAgent(t)
 	const sid = "acp-sid-perm"
-	openNew(t, pa, sid, &clientSetup{cwd: cwd})
-	fi, err := os.Stat(pa.sessionConfigPath(sid))
+	entry := openNew(t, pa, sid, &clientSetup{cwd: cwd, mcpServers: []acpsdk.McpServer{echoMCPServer("relay")}})
+	fi, err := os.Stat(store.StatePath(entry.session.SessionStore.GetSessionFile()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -376,9 +357,9 @@ func TestSaveAfterRelease_DoesNotResurrect(t *testing.T) {
 	if _, err := pa.ReleaseSession(context.Background(), ReleaseSessionRequest{SessionId: sid}); err != nil {
 		t.Fatal(err)
 	}
-	pa.saveSessionConfig(sid, entry)
-	if _, ok := pa.loadSessionConfig(sid); ok {
-		t.Fatal("save after release recreated the session config")
+	entry.session.SaveState()
+	if pa.canRehydrate(sid) {
+		t.Fatal("save after release recreated the session binding")
 	}
 }
 
@@ -406,19 +387,70 @@ func TestRehydrate_ConcurrentSameSession(t *testing.T) {
 	}
 }
 
-func TestPruneSessionConfigs_RemovesStale(t *testing.T) {
+func TestPruneHandles_RemovesStale(t *testing.T) {
 	pa, cwd := newRehydrateAgent(t)
 	openNew(t, pa, "fresh", &clientSetup{cwd: cwd})
-	openNew(t, pa, "stale", &clientSetup{cwd: cwd})
-	old := time.Now().Add(-2 * sessionConfigMaxAge)
-	if err := os.Chtimes(pa.sessionConfigPath("stale"), old, old); err != nil {
+	stale := openNew(t, pa, "stale", &clientSetup{cwd: cwd})
+	// Stop the stale session first so no late save re-touches its binding.
+	if e, ok := pa.removeSession("stale"); ok {
+		pa.teardownSession(context.Background(), "stale", e)
+	}
+	old := time.Now().Add(-2 * handleMaxAge)
+	matches, _ := filepath.Glob(filepath.Join(pa.agentDir, "session-handles", "*"))
+	for _, m := range matches {
+		data, _ := os.ReadFile(m)
+		if string(data) == stale.session.SessionStore.GetSessionFile() {
+			if err := os.Chtimes(m, old, old); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	pa.pruneHandles(time.Now().Add(-handleMaxAge))
+	if pa.canRehydrate("stale") {
+		t.Error("stale binding not pruned")
+	}
+	if !pa.canRehydrate("fresh") {
+		t.Error("fresh binding pruned")
+	}
+}
+
+// A v1.24.0 acp-sessions config is migrated on first use: the session comes
+// back with its client setup, and the legacy file is gone.
+func TestLegacyACPConfig_Migrated(t *testing.T) {
+	pa, cwd := newRehydrateAgent(t)
+	const sid = "acp-sid-legacy"
+	entry := openNew(t, pa, sid, &clientSetup{cwd: cwd})
+	transcript := entry.session.SessionStore.GetSessionFile()
+	if e, ok := pa.removeSession(sid); ok {
+		pa.teardownSession(context.Background(), sid, e)
+	}
+	// Simulate a pre-upgrade install: no binding, no state, only the old file.
+	pa.forgetSession(sid)
+	_ = os.Remove(store.StatePath(transcript))
+	legacy := `{"setup":{"cwd":"` + cwd + `","meta":{"relay":"zulip"},"mode":"m"},"transcript":"` + transcript + `","thinking":"high"}`
+	sum := sha256.Sum256([]byte(sid))
+	path := filepath.Join(pa.legacyConfigDir(), hex.EncodeToString(sum[:16])+".json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	pa.pruneSessionConfigs(time.Now().Add(-sessionConfigMaxAge))
-	if _, ok := pa.loadSessionConfig("stale"); ok {
-		t.Error("stale config not pruned")
+	if err := os.WriteFile(path, []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	if _, ok := pa.loadSessionConfig("fresh"); !ok {
-		t.Error("fresh config pruned")
+
+	back := rehydrate(t, pa, sid)
+	rt := back.session.SessionState().Runtime
+	if rt.Mode != "m" || rt.Meta["relay"] != "zulip" || rt.Cwd != cwd || rt.Handle != sid {
+		t.Fatalf("runtime after migration = %#v", rt)
 	}
+	if back.session.SessionStore.GetSessionFile() != transcript {
+		t.Errorf("transcript = %q, want %q", back.session.SessionStore.GetSessionFile(), transcript)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Error("legacy config not removed after migration")
+	}
+	t.Cleanup(func() {
+		if e, ok := pa.removeSession(sid); ok {
+			pa.teardownSession(context.Background(), sid, e)
+		}
+	})
 }

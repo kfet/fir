@@ -84,18 +84,18 @@ func (pa *firAgent) removeSession(sessionID string) (*firSession, bool) {
 func (pa *firAgent) ReleaseSession(ctx context.Context, params ReleaseSessionRequest) (ReleaseSessionResponse, error) {
 	entry, ok := pa.removeSession(params.SessionId)
 	if !ok {
-		// Not in memory — but it may have been idle-reaped, leaving a saved
-		// config a later Prompt would rehydrate from. An explicit release is
+		// Not in memory — but it may have been idle-reaped, leaving a
+		// binding a later Prompt would rehydrate from. An explicit release is
 		// authoritative: forget it so the session is truly gone.
-		if pa.deleteSessionConfig(params.SessionId) {
+		if pa.forgetSession(params.SessionId) {
 			firlog.Info("acp session/release: forgot reaped session", "sessionId", params.SessionId)
 			return ReleaseSessionResponse{}, nil
 		}
 		return ReleaseSessionResponse{}, newSessionNotFound(params.SessionId)
 	}
 	firlog.Info("acp session/release: tearing down", "sessionId", params.SessionId)
-	pa.deleteSessionConfig(params.SessionId)
 	pa.teardownSession(ctx, params.SessionId, entry)
+	pa.forgetSession(params.SessionId)
 	return ReleaseSessionResponse{}, nil
 }
 
@@ -107,7 +107,7 @@ func (pa *firAgent) reapIdle(now time.Time) []string {
 		return nil
 	}
 	cutoff := now.Add(-pa.idleTTL)
-	pa.pruneSessionConfigs(now.Add(-sessionConfigMaxAge))
+	pa.pruneHandles(now.Add(-handleMaxAge))
 
 	// Collect victims under the lock, then tear down outside it.
 	pa.mu.Lock()
@@ -128,9 +128,11 @@ func (pa *firAgent) reapIdle(now time.Time) []string {
 		pa.stopSessionHeartbeats(sid)
 		firlog.Info("acp idle reaper: tearing down idle session",
 			"sessionId", sid, "idleSeconds", now.Sub(entries[i].lastActive()).Seconds())
-		// Save the session's config so a later Prompt rehydrates it in place
+		// Save the session's state so a later Prompt rehydrates it in place
 		// through openSession. Capture before teardown closes the session.
-		pa.writeSessionConfig(sid, entries[i])
+		if entries[i].session != nil {
+			entries[i].session.SaveState()
+		}
 		pa.teardownSession(context.Background(), sid, entries[i])
 	}
 	return victims

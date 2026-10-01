@@ -65,6 +65,10 @@ type SetupOptions struct {
 	// is retried.
 	OnRetry func(attempt int, delaySeconds float64, errMsg string)
 
+	// StateOverride edits the session's settings after its saved state is
+	// loaded and before it is applied (see CreateAgentSessionOptions).
+	StateOverride func(*SessionState)
+
 	// ExtReady is closed when extensions finish loading. Live model fetching
 	// for OAuth providers waits on this. When nil, OAuth fetching starts immediately.
 	ExtReady <-chan struct{}
@@ -185,6 +189,7 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 		UsageTracker:     opts.UsageTracker,
 		ExtReady:         opts.ExtReady,
 		OnRetry:          opts.OnRetry,
+		StateOverride:    opts.StateOverride,
 		MCPConfigured:    len(opts.MCPConfigs) > 0,
 	})
 	if err != nil {
@@ -195,7 +200,14 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 	// Lifecycle events (connecting/ready/disconnected) are surfaced via the
 	// Manager's buffered ServerEvents channel; callers attach a consumer to
 	// mcpMgr after Setup returns.
-	mcpMgr := StartMCPManager(ctx, result.Session, opts.MCPConfigs)
+	// Session-scoped servers (restored or supplied via StateOverride) start
+	// on top of the configured ones.
+	sessionServers := result.Session.SessionMCPServers()
+	if len(sessionServers) > 0 && len(opts.MCPConfigs) == 0 {
+		result.Session.mcpConfigured = true
+		result.Session.buildSystemPrompt()
+	}
+	mcpMgr := StartMCPManager(ctx, result.Session, mergeMCP(opts.MCPConfigs, sessionServers))
 
 	return &SetupResult{
 		Session:              result.Session,
@@ -349,8 +361,8 @@ func ReloadMCP(ctx context.Context, mgrPtr **mcp.Manager, sess *AgentSession, cw
 		}
 		cfg = mcp.MergeConfigs(cfg, extra)
 	}
-	servers := cfg.MCPServers
-	// Merge in-memory overrides (e.g. ACP client-provided MCP servers).
+	servers := mergeMCP(cfg.MCPServers, sess.SessionMCPServers())
+	// Merge in-memory overrides.
 	for name, sc := range extraConfigs {
 		if servers == nil {
 			servers = make(map[string]mcp.ServerConfig)

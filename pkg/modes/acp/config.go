@@ -157,7 +157,6 @@ func (pa *firAgent) setSessionConfigOptionLocal(_ context.Context, params SetSes
 		return SetSessionConfigOptionResponse{}, fmt.Errorf("unknown config option: %s", params.ConfigId)
 	}
 
-	pa.saveSessionConfig(params.SessionId, entry)
 	return SetSessionConfigOptionResponse{
 		ConfigOptions: buildConfigOptions(entry),
 	}, nil

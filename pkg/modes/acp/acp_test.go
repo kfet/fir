@@ -136,7 +136,7 @@ func TestCreateSession_ReusesGlobalAuthStorage(t *testing.T) {
 
 	// createSession may fail downstream, but the authStorage passed to
 	// the model registry should be the same object.
-	entry, _ := pa.createSession(context.Background(), "s1", t.TempDir(), nil)
+	entry, _, _ := pa.createSession(context.Background(), "s1", t.TempDir(), "", nil)
 
 	// If a session was created, tear it down so its background goroutines
 	// (async extension session_start, session-store writes, MCP) finish
