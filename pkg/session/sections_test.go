@@ -36,7 +36,12 @@ func newSectionsHarness(t *testing.T) *sectionsHarness {
 		t.Fatal(err)
 	}
 	h := &sectionsHarness{s: res.Session, store: sections.NewStore(filepath.Join(agentDir, "sections"))}
-	t.Cleanup(func() { h.s.Close() })
+	// Let the agent finish its run (and the transcript writes it triggers)
+	// before Close, or a late write races t.TempDir's RemoveAll.
+	t.Cleanup(func() {
+		h.s.Agent.WaitForIdle()
+		h.s.Close()
+	})
 	h.s.Agent.SetStreamFn(func(_ *ai.Model, llmCtx ai.Context, _ *ai.SimpleStreamOptions) *ai.AssistantMessageEventStream {
 		h.mu.Lock()
 		h.calls = append(h.calls, append([]ai.Message(nil), llmCtx.Messages...))
