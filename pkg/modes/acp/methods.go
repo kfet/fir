@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -139,32 +140,15 @@ func (pa *firAgent) NewSession(ctx context.Context, params acpsdk.NewSessionRequ
 	newSessionStart := time.Now()
 	sessionID := uuid.New().String()
 	firlog.Info("acp new session: start", "sessionID", sessionID)
-	cwd := os.Getenv("PWD")
-	if cwd == "" {
-		cwd, _ = os.Getwd()
-	}
-	if params.Cwd != "" {
-		cwd = params.Cwd
-	}
-
-	// Merge project-level configs with request-level configs.
-	// Request-level entries take precedence over project-level ones.
 	t0 := time.Now()
-	var mcpConfigs map[string]mcp.ServerConfig
-	if !pa.options.NoMCP {
-		mcpConfigs = loadProjectMCPConfigs(cwd, pa.options.MCPConfig)
+	if _, _, err := pa.openSession(ctx, sessionID, &clientSetup{
+		cwd:        params.Cwd,
+		mcpServers: params.McpServers,
+		meta:       params.Meta,
+	}); err != nil {
+		return acpsdk.NewSessionResponse{}, err
 	}
-	firlog.Info("acp new session: loaded project MCP configs", "elapsed_ms", time.Since(t0).Milliseconds(), "count", len(mcpConfigs))
-	mcpConfigs = mergeRequestMCPServers(mcpConfigs, params.McpServers)
-
-	t0 = time.Now()
-	entry, err := pa.createSession(ctx, sessionID, cwd, mcpConfigs)
-	firlog.Info("acp new session: createSession done", "elapsed_ms", time.Since(t0).Milliseconds())
-	if err != nil {
-		return acpsdk.NewSessionResponse{}, fmt.Errorf("create session: %w", err)
-	}
-	// Store client-provided MCP configs so /reload can re-merge them.
-	entry.clientMCPConfigs = mergeRequestMCPServers(nil, params.McpServers)
+	firlog.Info("acp new session: openSession done", "elapsed_ms", time.Since(t0).Milliseconds())
 
 	firlog.Info("acp new session: done", "total_ms", time.Since(newSessionStart).Milliseconds())
 	return acpsdk.NewSessionResponse{
@@ -193,6 +177,9 @@ func (pa *firAgent) Prompt(ctx context.Context, params acpsdk.PromptRequest) (ac
 		entry = rehydrated
 	}
 	entry.touch(pa.now())
+	// A turn can change model or thinking (e.g. /model); keep the saved
+	// config current.
+	defer pa.saveSessionConfig(string(params.SessionId), entry)
 
 	// Wait for async extension setup to complete so hooks and event
 	// forwarding are wired before any tool calls execute.
@@ -306,7 +293,15 @@ func (pa *firAgent) Cancel(_ context.Context, params acpsdk.CancelNotification) 
 	return nil
 }
 
-func (pa *firAgent) SetSessionMode(_ context.Context, _ acpsdk.SetSessionModeRequest) (acpsdk.SetSessionModeResponse, error) {
+// SetSessionMode records the requested mode. fir advertises no modes, so it
+// changes no behaviour, but the value is persisted with the session setup.
+func (pa *firAgent) SetSessionMode(_ context.Context, params acpsdk.SetSessionModeRequest) (acpsdk.SetSessionModeResponse, error) {
+	entry := pa.lookupSession(string(params.SessionId))
+	if entry == nil {
+		return acpsdk.SetSessionModeResponse{}, newSessionNotFound(string(params.SessionId))
+	}
+	entry.updateSetup(func(s *acpSetup) { s.Mode = string(params.ModeId) })
+	pa.saveSessionConfig(string(params.SessionId), entry)
 	return acpsdk.SetSessionModeResponse{}, nil
 }
 
@@ -335,6 +330,7 @@ func (pa *firAgent) SetSessionModel(_ context.Context, params SetSessionModelReq
 	if err := entry.session.SetModel(model); err != nil {
 		return SetSessionModelResponse{}, err
 	}
+	pa.saveSessionConfig(string(params.SessionId), entry)
 	return SetSessionModelResponse{}, nil
 }
 
@@ -478,17 +474,15 @@ func (pa *firAgent) resumeSessionLocal(ctx context.Context, params ResumeSession
 		}
 	}
 
+	req := &clientSetup{cwd: params.Cwd, mcpServers: params.McpServers, meta: params.Meta}
 	if createFreshInstead {
-		var mcpConfigs map[string]mcp.ServerConfig
-		if !pa.options.NoMCP {
-			mcpConfigs = loadProjectMCPConfigs(cwd, pa.options.MCPConfig)
-		}
-		mcpConfigs = mergeRequestMCPServers(mcpConfigs, params.McpServers)
-		entry, err := pa.createSession(ctx, params.SessionId, cwd, mcpConfigs)
+		// No transcript by that UUID. The saved config (if any) still knows
+		// the transcript for an ACP sessionID, which the store names by its
+		// own UUID; otherwise this starts a fresh session under that ID.
+		entry, _, err := pa.openSession(ctx, params.SessionId, req)
 		if err != nil {
-			return ResumeSessionResponse{}, fmt.Errorf("create session: %w", err)
+			return ResumeSessionResponse{}, err
 		}
-		entry.clientMCPConfigs = mergeRequestMCPServers(nil, params.McpServers)
 		var mdls interface{}
 		if m := entry.session.Model(); m != nil {
 			mdls = BuildModelState(entry.modelRegistry, m)
@@ -515,7 +509,8 @@ func (pa *firAgent) resumeSessionLocal(ctx context.Context, params ResumeSession
 	// Use params.SessionId as the new session's ID so the client can reference it.
 	sessionID := params.SessionId
 
-	entry, forked, err := pa.hydrateSessionFromFile(ctx, sessionID, sessionPath, cwd, mergeRequestMCPServers(nil, params.McpServers))
+	req.transcript = sessionPath
+	entry, forked, err := pa.openSession(ctx, sessionID, req)
 	if err != nil {
 		return ResumeSessionResponse{}, err
 	}
@@ -530,114 +525,47 @@ func (pa *firAgent) resumeSessionLocal(ctx context.Context, params ResumeSession
 	return ResumeSessionResponse{Models: models}, nil
 }
 
-// hydrateSessionFromFile creates an in-memory session entry for sessionID and
-// switches it to the on-disk transcript at sessionPath. Any existing in-memory
-// session with the same ID is torn down first. It is the shared setup path used
-// by both session/resume and Prompt-driven lazy re-hydration. Returns the new
-// entry and whether the session was forked (active in another window).
-//
-// Heavy setup (createSession, extension start, SwitchSession) runs outside
-// pa.mu; createSession registers the entry in pa.sessions under the lock.
-func (pa *firAgent) hydrateSessionFromFile(ctx context.Context, sessionID, sessionPath, cwd string, clientMCPConfigs map[string]mcp.ServerConfig) (*firSession, bool, error) {
-	// Close any existing session with the same ID before creating a new one.
-	// Without this, a client retry would overwrite the old session's
-	// unsubscribe, extSetup, and agent goroutine, leaking all three.
-	if existing, ok := pa.removeSession(sessionID); ok {
-		pa.teardownSession(ctx, sessionID, existing)
-	}
-
-	mcpConfigs := withClientMCPConfigs(pa.sessionMCPConfigs(cwd), clientMCPConfigs)
-
-	entry, err := pa.createSession(ctx, sessionID, cwd, mcpConfigs)
-	if err != nil {
-		return nil, false, fmt.Errorf("create session: %w", err)
-	}
-	entry.clientMCPConfigs = clientMCPConfigs
-
-	// Wait for async extension setup so the EmitSessionStart goroutine
-	// (which reads session state via GetSessionName) finishes before we
-	// mutate the session via SwitchSession. Without this the two race on
-	// SessionStore internals.
-	if entry.extReady != nil {
-		<-entry.extReady
-	}
-
-	// Switch to the requested session file.
-	forked, err := entry.session.SwitchSession(sessionPath)
-	if err != nil {
-		return nil, false, fmt.Errorf("switch session: %w", err)
-	}
-	return entry, forked, nil
-}
-
 // rehydrateForPrompt brings sessionID back into memory after it was reaped for
 // idleness (or when it lives only on disk), re-hydrating it under the SAME
 // sessionID. Returns the entry on success, (nil, nil) when there is no session
 // to resume (caller surfaces session-not-found), or (nil, err) when
 // re-hydration itself failed.
 func (pa *firAgent) rehydrateForPrompt(ctx context.Context, sessionID string) (*firSession, error) {
-	// Prefer the reaper's recorded transcript+cwd. The ACP sessionID has no
-	// on-disk link (the store names files by its own UUID), so this in-process
-	// map is the only reliable sessionID→file mapping.
-	if r, ok := pa.takeReaped(sessionID); ok {
-		cwd := r.cwd
-		if cwd == "" {
-			cwd = defaultPromptCwd()
-		}
-		var entry *firSession
-		var err error
-		if !fileExists(r.file) {
-			// Reaped session with no persisted transcript (empty path, or the
-			// file vanished): re-create it fresh under the same ID so the
-			// conversation continues seamlessly.
-			entry, err = pa.createSession(ctx, sessionID, cwd,
-				withClientMCPConfigs(pa.sessionMCPConfigs(cwd), r.clientMCPConfigs))
-			if err == nil {
-				entry.clientMCPConfigs = r.clientMCPConfigs
-			}
-		} else {
-			entry, _, err = pa.hydrateSessionFromFile(ctx, sessionID, r.file, cwd, r.clientMCPConfigs)
-		}
-		if err != nil {
-			// Re-insert the record so a retry can still recover; a transient
-			// failure must not permanently lose the only sessionID→file
-			// mapping (which would force ID churn on the next prompt).
-			pa.restoreReaped(sessionID, r)
-			firlog.Warn("acp prompt: re-hydration failed", "sessionId", sessionID, "err", err)
-			return nil, err
-		}
-		firlog.Info("acp prompt: re-hydrated reaped session in place",
-			"sessionId", sessionID, "clientMCPServers", len(r.clientMCPConfigs))
-		return entry, nil
-	}
-
-	// No reaped record. A concurrent Prompt may have just re-hydrated this same
-	// id and consumed the record — re-check the live map before giving up so we
-	// don't spuriously surface session-not-found.
+	// Serialise per sessionID: a second concurrent Prompt must reuse the
+	// first one's session, not tear it down by rebuilding it.
+	muAny, _ := pa.rehydrateLocks.LoadOrStore(sessionID, &sync.Mutex{})
+	mu := muAny.(*sync.Mutex)
+	mu.Lock()
+	defer mu.Unlock()
 	if entry := pa.lookupSession(sessionID); entry != nil {
 		return entry, nil
 	}
 
-	// See if sessionID resolves to an on-disk session file (an explicit path or
-	// store UUID the client retained). cwd is unknown here — fall back to the
-	// process cwd; the main reaped path above uses the recorded session cwd.
-	cwd := defaultPromptCwd()
-	sessionPath := pa.resolveSessionFilePath(sessionID, cwd)
-	if sessionPath == "" {
-		// Final re-check: another goroutine may have registered it meanwhile.
-		if entry := pa.lookupSession(sessionID); entry != nil {
-			return entry, nil
+	// The saved config is the only sessionID→transcript mapping (the store
+	// names files by its own UUID) and carries the full client setup.
+	if _, ok := pa.loadSessionConfig(sessionID); ok {
+		entry, _, err := pa.openSession(ctx, sessionID, nil)
+		if err != nil {
+			firlog.Warn("acp prompt: re-hydration failed", "sessionId", sessionID, "err", err)
+			return nil, err
 		}
+		firlog.Info("acp prompt: re-hydrated session in place", "sessionId", sessionID)
+		return entry, nil
+	}
+
+	// No saved config: sessionID may still be an explicit path or store UUID
+	// the client retained. Its client setup is unknown.
+	sessionPath := pa.resolveSessionFilePath(sessionID, defaultPromptCwd())
+	if sessionPath == "" {
 		return nil, nil // genuinely unknown — caller surfaces session-not-found
 	}
-	firlog.Warn("acp prompt: hydrating on-disk session without a reap record; client-supplied MCP servers cannot be restored",
+	firlog.Warn("acp prompt: hydrating on-disk session with no saved config; client-supplied MCP servers cannot be restored",
 		"sessionId", sessionID)
-	entry, _, err := pa.hydrateSessionFromFile(ctx, sessionID, sessionPath, cwd, nil)
+	entry, _, err := pa.openSession(ctx, sessionID, &clientSetup{transcript: sessionPath})
 	if err != nil {
 		firlog.Warn("acp prompt: on-disk re-hydration failed", "sessionId", sessionID, "err", err)
 		return nil, err
 	}
-	firlog.Info("acp prompt: hydrated on-disk session in place", "sessionId", sessionID)
 	return entry, nil
 }
 
@@ -1145,6 +1073,7 @@ func (pa *firAgent) ResumeSession(ctx context.Context, params acpsdk.ResumeSessi
 		SessionId:  string(params.SessionId),
 		Cwd:        params.Cwd,
 		McpServers: params.McpServers,
+		Meta:       params.Meta,
 	})
 	if err != nil {
 		return acpsdk.ResumeSessionResponse{}, err

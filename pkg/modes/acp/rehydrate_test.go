@@ -2,6 +2,8 @@ package acp
 
 import (
 	"context"
+	"os"
+	"reflect"
 	"testing"
 	"time"
 
@@ -23,33 +25,28 @@ func newRehydrateAgent(t *testing.T) (*firAgent, string) {
 
 	base := time.Date(2026, 6, 7, 12, 0, 0, 0, time.UTC)
 	pa := &firAgent{
-		conn:     newMockConn(),
-		sessions: make(map[string]*firSession),
-		reaped:   make(map[string]reapedSession),
-		options:  Options{NoExtensions: true, NoMCP: true, NoSkills: true},
-		idleTTL:  time.Hour,
-		nowFn:    func() time.Time { return base },
+		conn:      newMockConn(),
+		sessions:  make(map[string]*firSession),
+		configDir: t.TempDir(),
+		options:   Options{NoExtensions: true, NoMCP: true, NoSkills: true},
+		idleTTL:   time.Hour,
+		nowFn:     func() time.Time { return base },
 	}
 	return pa, cwd
 }
 
 func reapNow(t *testing.T, pa *firAgent, sid string, entry *firSession) {
 	t.Helper()
-	// Make the session look idle, then run a reaper pass.
 	entry.touch(pa.now().Add(-2 * time.Hour))
 	reaped := pa.reapIdle(pa.now())
 	if len(reaped) != 1 || reaped[0] != sid {
 		t.Fatalf("reapIdle = %v, want [%s]", reaped, sid)
 	}
-	pa.mu.Lock()
-	_, present := pa.sessions[sid]
-	_, recorded := pa.reaped[sid]
-	pa.mu.Unlock()
-	if present {
+	if pa.lookupSession(sid) != nil {
 		t.Fatal("reaped session still present in sessions map")
 	}
-	if !recorded {
-		t.Fatal("reaped session not recorded for re-hydration")
+	if _, ok := pa.loadSessionConfig(sid); !ok {
+		t.Fatal("reaped session config not saved")
 	}
 }
 
@@ -58,106 +55,97 @@ func promptIsNotFound(err error) bool {
 	return ok && re.Code == SessionNotFoundError
 }
 
-// TestPrompt_RehydratesReapedSession_RestoresConversation proves the core win:
-// after the idle reaper tears a session down, a Prompt for the SAME sessionID
-// transparently re-hydrates it in place (entry back in the map, same ID, prior
-// conversation restored) instead of returning session-not-found.
+// echoServer is a working client-supplied MCP server: the test binary itself
+// (see TestMain in acp_mcp_e2e_test.go).
+func echoServer() mcp.ServerConfig {
+	return mcp.ServerConfig{Command: os.Args[0], Env: map[string]string{"MCP_TEST_SERVER": "1"}}
+}
+
+func echoMCPServer(name string) acpsdk.McpServer {
+	return acpsdk.McpServer{Stdio: &acpsdk.McpServerStdio{
+		Name: name, Command: os.Args[0],
+		Env: []acpsdk.EnvVariable{{Name: "MCP_TEST_SERVER", Value: "1"}},
+	}}
+}
+
+func openNew(t *testing.T, pa *firAgent, sid string, req *clientSetup) *firSession {
+	t.Helper()
+	entry, _, err := pa.openSession(context.Background(), sid, req)
+	if err != nil {
+		t.Fatalf("openSession: %v", err)
+	}
+	t.Cleanup(func() {
+		if e, ok := pa.removeSession(sid); ok {
+			pa.teardownSession(context.Background(), sid, e)
+		}
+	})
+	return entry
+}
+
+func rehydrate(t *testing.T, pa *firAgent, sid string) *firSession {
+	t.Helper()
+	entry, err := pa.rehydrateForPrompt(context.Background(), sid)
+	if err != nil {
+		t.Fatalf("rehydrateForPrompt: %v", err)
+	}
+	if entry == nil {
+		t.Fatal("session not rehydrated")
+	}
+	return entry
+}
+
+// TestPrompt_RehydratesReapedSession_RestoresConversation: after a reap, a
+// Prompt for the same ID rehydrates it in place with its prior conversation.
 func TestPrompt_RehydratesReapedSession_RestoresConversation(t *testing.T) {
 	pa, cwd := newRehydrateAgent(t)
 	ctx := context.Background()
 	const sid = "acp-sid-restore"
 
-	entry, err := pa.createSession(ctx, sid, cwd, nil)
-	if err != nil {
-		t.Fatalf("createSession: %v", err)
-	}
-
-	// Give the session a real on-disk transcript carrying one user turn.
+	entry := openNew(t, pa, sid, &clientSetup{cwd: cwd})
 	entry.session.SessionStore.NewSession(nil)
 	entry.session.SessionStore.AppendAgentMessage(
 		agent.NewAgentMessage(ai.NewUserMsg("remembered turn", time.Now().UnixMilli())))
 	sessionFile := entry.session.SessionStore.GetSessionFile()
-	if sessionFile == "" {
-		t.Fatal("expected an on-disk session file after NewSession")
-	}
 
 	reapNow(t, pa, sid, entry)
-
-	// The recorded transcript path must point at the file we created.
-	pa.mu.Lock()
-	rec := pa.reaped[sid]
-	pa.mu.Unlock()
-	if rec.file != sessionFile {
-		t.Fatalf("recorded reaped file = %q, want %q", rec.file, sessionFile)
+	if cfg, _ := pa.loadSessionConfig(sid); cfg.Transcript != sessionFile {
+		t.Fatalf("saved transcript = %q, want %q", cfg.Transcript, sessionFile)
 	}
 
-	// Prompt the SAME id. No model is configured, so the prompt itself fails
-	// with a no-model/auth error — but crucially NOT session-not-found, and
-	// the session must be re-hydrated back into the map under the same ID.
 	_, perr := pa.Prompt(ctx, acpsdk.PromptRequest{
 		SessionId: acpsdk.SessionId(sid),
 		Prompt:    []acpsdk.ContentBlock{acpsdk.TextBlock("hello again")},
 	})
 	if promptIsNotFound(perr) {
-		t.Fatalf("Prompt returned session-not-found after reap; expected re-hydration")
+		t.Fatal("Prompt returned session-not-found after reap")
 	}
-
-	pa.mu.Lock()
-	rehydrated, back := pa.sessions[sid]
-	_, stillReaped := pa.reaped[sid]
-	pa.mu.Unlock()
-	if !back {
+	back := pa.lookupSession(sid)
+	if back == nil {
 		t.Fatal("session not re-hydrated into map under same ID")
 	}
-	if stillReaped {
-		t.Error("reaped record not cleared after re-hydration")
-	}
-
-	// The restored session must carry the prior conversation.
-	msgs := rehydrated.session.SessionStore.BuildSessionContext().Messages
-	if len(msgs) == 0 {
+	if len(back.session.SessionStore.BuildSessionContext().Messages) == 0 {
 		t.Error("re-hydrated session has no restored conversation history")
 	}
 }
 
-// TestPrompt_RehydratesReapedSession_NoTranscript_FreshSameID covers a reaped
-// session whose recorded transcript is absent (empty path, or the file vanished
-// from disk): the next Prompt must still re-create it in place under the same
-// ID, not error.
+// A reaped session that never wrote a transcript comes back fresh, same ID.
 func TestPrompt_RehydratesReapedSession_NoTranscript_FreshSameID(t *testing.T) {
 	pa, cwd := newRehydrateAgent(t)
-	ctx := context.Background()
 	const sid = "acp-sid-fresh"
-
-	// Seed a reaped record with no on-disk transcript, as if the session had
-	// been reaped before it ever persisted anything.
-	pa.mu.Lock()
-	pa.reaped[sid] = reapedSession{file: "", cwd: cwd}
-	pa.mu.Unlock()
-
-	_, perr := pa.Prompt(ctx, acpsdk.PromptRequest{
+	entry := openNew(t, pa, sid, &clientSetup{cwd: cwd})
+	reapNow(t, pa, sid, entry)
+	_, perr := pa.Prompt(context.Background(), acpsdk.PromptRequest{
 		SessionId: acpsdk.SessionId(sid),
 		Prompt:    []acpsdk.ContentBlock{acpsdk.TextBlock("first real prompt")},
 	})
 	if promptIsNotFound(perr) {
-		t.Fatalf("Prompt returned session-not-found; expected fresh same-ID re-hydration")
+		t.Fatal("Prompt returned session-not-found; expected fresh same-ID re-hydration")
 	}
-
-	pa.mu.Lock()
-	_, back := pa.sessions[sid]
-	_, stillReaped := pa.reaped[sid]
-	pa.mu.Unlock()
-	if !back {
-		t.Fatal("session not re-created into map under same ID")
-	}
-	if stillReaped {
-		t.Error("reaped record not cleared after fresh re-hydration")
+	if pa.lookupSession(sid) == nil {
+		t.Fatal("session not re-created under same ID")
 	}
 }
 
-// TestPrompt_UnknownSession_StillTypedError verifies that a sessionID that was
-// never known (not reaped, no on-disk file) still returns the typed
-// session-not-found (-32001) — re-hydration must not mask genuinely unknown IDs.
 func TestPrompt_UnknownSession_StillTypedError(t *testing.T) {
 	pa, _ := newRehydrateAgent(t)
 	_, err := pa.Prompt(context.Background(), acpsdk.PromptRequest{
@@ -169,143 +157,268 @@ func TestPrompt_UnknownSession_StillTypedError(t *testing.T) {
 	}
 }
 
-// TestCreateSession_ClearsStaleReapedRecord verifies that bringing a sessionID
-// back to life (as session/resume does) drops any stale reaped record for that
-// ID, so it can never shadow the live session on a later Prompt.
-func TestCreateSession_ClearsStaleReapedRecord(t *testing.T) {
-	pa, cwd := newRehydrateAgent(t)
-	ctx := context.Background()
-	const sid = "acp-sid-stale"
-
-	entry, err := pa.createSession(ctx, sid, cwd, nil)
-	if err != nil {
-		t.Fatalf("createSession: %v", err)
-	}
-	reapNow(t, pa, sid, entry) // pa.reaped[sid] is now set
-
-	// Re-create the same id (as session/resume would). The stale reaped record
-	// must be dropped so it cannot shadow the live session later.
-	if _, err := pa.createSession(ctx, sid, cwd, nil); err != nil {
-		t.Fatalf("re-createSession: %v", err)
-	}
-
-	pa.mu.Lock()
-	_, stale := pa.reaped[sid]
-	_, live := pa.sessions[sid]
-	pa.mu.Unlock()
-	if stale {
-		t.Error("stale reaped record was not cleared on re-create")
-	}
-	if !live {
-		t.Error("re-created session not registered in the map")
-	}
-}
-
-// TestRelease_ReapedSession_ForgetsAndBlocksRehydration verifies that an
-// explicit session/release on an already-reaped session is authoritative: it
-// clears the reaped record (returning success), so a later Prompt for that ID
-// returns session-not-found rather than re-hydrating.
+// An explicit release of a reaped session forgets its saved config.
 func TestRelease_ReapedSession_ForgetsAndBlocksRehydration(t *testing.T) {
 	pa, cwd := newRehydrateAgent(t)
 	ctx := context.Background()
 	const sid = "acp-sid-release-reaped"
+	entry := openNew(t, pa, sid, &clientSetup{cwd: cwd})
+	reapNow(t, pa, sid, entry)
 
-	entry, err := pa.createSession(ctx, sid, cwd, nil)
-	if err != nil {
-		t.Fatalf("createSession: %v", err)
-	}
-	reapNow(t, pa, sid, entry) // pa.reaped[sid] is now set
-
-	// Release the reaped session — must succeed and forget the record.
 	if _, err := pa.ReleaseSession(ctx, ReleaseSessionRequest{SessionId: sid}); err != nil {
 		t.Fatalf("ReleaseSession on reaped id: %v", err)
 	}
-	pa.mu.Lock()
-	_, stillReaped := pa.reaped[sid]
-	pa.mu.Unlock()
-	if stillReaped {
-		t.Error("reaped record not cleared by explicit release")
+	if _, ok := pa.loadSessionConfig(sid); ok {
+		t.Error("saved config not deleted by explicit release")
 	}
-
-	// A Prompt now must report session-not-found (it was authoritatively released).
 	_, perr := pa.Prompt(ctx, acpsdk.PromptRequest{
 		SessionId: acpsdk.SessionId(sid),
 		Prompt:    []acpsdk.ContentBlock{acpsdk.TextBlock("anyone home?")},
 	})
 	if !promptIsNotFound(perr) {
-		t.Fatalf("expected session-not-found after release of reaped session, got %v", perr)
+		t.Fatalf("expected session-not-found after release, got %v", perr)
 	}
 }
 
-// relayServer is a client-supplied MCP server, as zulip-acp passes on
-// session/new. The command is bogus: we only assert it is configured.
-var relayServer = map[string]mcp.ServerConfig{
-	"relay": {Command: "/nonexistent/zulip-acp", Args: []string{"mcp-serve"}},
-}
-
-func assertRelayRestored(t *testing.T, pa *firAgent, sid string) {
-	t.Helper()
-	entry := pa.lookupSession(sid)
-	if entry == nil {
-		t.Fatal("session not re-hydrated into map")
-	}
-	if _, ok := entry.clientMCPConfigs["relay"]; !ok {
-		t.Errorf("clientMCPConfigs = %v, want relay server", entry.clientMCPConfigs)
-	}
-	if entry.mcpStatus == nil {
-		t.Fatal("no MCP manager: client server not passed to createSession")
-	}
-	found := false
-	for _, s := range entry.mcpStatus() {
-		if s.Name == "relay" {
-			found = true
+func mcpConnected(e *firSession, name string) bool {
+	for _, st := range e.mcpManager.Status() {
+		if st.Name == name {
+			return st.Connected
 		}
 	}
-	if !found {
-		t.Errorf("relay server missing from merged MCP config: %+v", entry.mcpStatus())
+	return false
+}
+
+// TestReapRehydrate_RestoresSessionState: every piece of client-supplied or
+// ACP-set state survives a reap and a rehydrate.
+func TestReapRehydrate_RestoresSessionState(t *testing.T) {
+	pa, cwd := newRehydrateAgent(t)
+	ctx := context.Background()
+	const sid = "acp-sid-state"
+	meta := map[string]any{"relay": "zulip", "conv": "c1"}
+
+	entry := openNew(t, pa, sid, &clientSetup{
+		cwd: cwd, mcpServers: []acpsdk.McpServer{echoMCPServer("relay")}, meta: meta,
+	})
+	if _, err := pa.SetSessionModel(ctx, SetSessionModelRequest{
+		SessionId: acpsdk.SessionId(sid), ModelId: "anthropic/claude-sonnet-4-5"}); err != nil {
+		t.Fatalf("SetSessionModel: %v", err)
+	}
+	if _, err := pa.setSessionConfigOptionLocal(ctx, SetSessionConfigOptionRequest{
+		SessionId: sid, ConfigId: thinkingConfigID, Value: "high"}); err != nil {
+		t.Fatalf("set thinking: %v", err)
+	}
+	if _, err := pa.SetSessionMode(ctx, acpsdk.SetSessionModeRequest{
+		SessionId: acpsdk.SessionId(sid), ModeId: "architect"}); err != nil {
+		t.Fatalf("SetSessionMode: %v", err)
+	}
+	wantThinking := entry.session.ThinkingLevel()
+
+	reapNow(t, pa, sid, entry)
+	back := rehydrate(t, pa, sid)
+
+	tests := []struct {
+		name      string
+		got, want any
+	}{
+		{"cwd", back.cwd, cwd},
+		{"setup.cwd", back.getSetup().Cwd, cwd},
+		{"meta", back.getSetup().Meta, meta},
+		{"mode", back.getSetup().Mode, "architect"},
+		{"client mcp", serverNames(back.clientMCP()), []string{"relay"}},
+		{"mcp connected", mcpConnected(back, "relay"), true},
+		{"model", back.session.Model().Provider + "/" + back.session.Model().ID, "anthropic/claude-sonnet-4-5"},
+		{"thinking", back.session.ThinkingLevel(), wantThinking},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if !reflect.DeepEqual(tc.got, tc.want) {
+				t.Errorf("got %#v, want %#v", tc.got, tc.want)
+			}
+		})
 	}
 }
 
-func TestPrompt_RehydrateReaped_KeepsClientMCPServers(t *testing.T) {
-	for _, withFile := range []bool{true, false} {
-		t.Run(map[bool]string{true: "file", false: "nofile"}[withFile], func(t *testing.T) {
-			pa, cwd := newRehydrateAgent(t)
-			ctx := context.Background()
-			const sid = "acp-sid-mcp"
+// fillNonZero sets every field of v (a struct pointer) to a non-zero value,
+// by type only, so a field added to acpSetup later is covered with no test
+// change. cwd-like strings get a real directory; MCP configs a working server.
+func fillNonZero(t *testing.T, v reflect.Value, dir string) {
+	t.Helper()
+	for i := 0; i < v.NumField(); i++ {
+		f := v.Field(i)
+		switch {
+		case f.Type() == reflect.TypeOf(map[string]mcp.ServerConfig{}):
+			f.Set(reflect.ValueOf(map[string]mcp.ServerConfig{"srv": echoServer()}))
+		case f.Kind() == reflect.String:
+			f.SetString(dir)
+		case f.Kind() == reflect.Bool:
+			f.SetBool(true)
+		case f.CanInt():
+			f.SetInt(7)
+		case f.Kind() == reflect.Map && f.Type().Key().Kind() == reflect.String:
+			m := reflect.MakeMap(f.Type())
+			elem := reflect.New(f.Type().Elem()).Elem()
+			if elem.Kind() == reflect.Interface || elem.Kind() == reflect.String {
+				elem.Set(reflect.ValueOf("v"))
+			}
+			m.SetMapIndex(reflect.ValueOf("k"), elem)
+			f.Set(m)
+		case f.Kind() == reflect.Slice && f.Type().Elem().Kind() == reflect.String:
+			f.Set(reflect.ValueOf([]string{"v"}).Convert(f.Type()))
+		default:
+			t.Fatalf("fillNonZero: teach it field %s of type %s", v.Type().Field(i).Name, f.Type())
+		}
+		if f.IsZero() {
+			t.Fatalf("fillNonZero left %s zero", v.Type().Field(i).Name)
+		}
+	}
+}
 
-			entry, err := pa.createSession(ctx, sid, cwd, relayServer)
-			if err != nil {
-				t.Fatalf("createSession: %v", err)
-			}
-			entry.clientMCPConfigs = relayServer
-			if withFile {
-				entry.session.SessionStore.NewSession(nil)
-				entry.session.SessionStore.AppendAgentMessage(
-					agent.NewAgentMessage(ai.NewUserMsg("turn", time.Now().UnixMilli())))
-			}
-			reapNow(t, pa, sid, entry)
+// TestReapRehydrate_AnySetupPropertySurvives: whatever a setter puts in the
+// session setup survives reap and rehydrate, with no reaper code naming it.
+func TestReapRehydrate_AnySetupPropertySurvives(t *testing.T) {
+	pa, cwd := newRehydrateAgent(t)
+	const sid = "acp-sid-generic"
+	entry := openNew(t, pa, sid, &clientSetup{cwd: cwd})
 
-			// A failed re-hydration must keep the client servers in the record.
-			r, _ := pa.takeReaped(sid)
-			pa.restoreReaped(sid, r)
-			pa.mu.Lock()
-			rec := pa.reaped[sid]
-			pa.mu.Unlock()
-			if _, ok := rec.clientMCPConfigs["relay"]; !ok {
-				t.Fatalf("reap record lost client MCP servers: %+v", rec)
-			}
+	var want acpSetup
+	fillNonZero(t, reflect.ValueOf(&want).Elem(), cwd)
+	// A test-only setter: writes the setup the way any ACP setter would.
+	entry.updateSetup(func(s *acpSetup) { *s = want })
 
-			_, perr := pa.Prompt(ctx, acpsdk.PromptRequest{
-				SessionId: acpsdk.SessionId(sid),
-				Prompt:    []acpsdk.ContentBlock{acpsdk.TextBlock("again")},
-			})
-			if promptIsNotFound(perr) {
-				t.Fatal("unexpected session-not-found")
-			}
-			assertRelayRestored(t, pa, sid)
-			if e := pa.lookupSession(sid); e != nil {
-				t.Cleanup(func() { pa.teardownSession(context.Background(), sid, e) })
-			}
-		})
+	reapNow(t, pa, sid, entry)
+	back := rehydrate(t, pa, sid)
+	if got := back.getSetup(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("setup after rehydrate:\n got %#v\nwant %#v", got, want)
+	}
+}
+
+// TestLoad_ClientOverridesSaved: a client session/load supplies fresh values;
+// they replace the saved ones and are saved in turn.
+func TestLoad_ClientOverridesSaved(t *testing.T) {
+	pa, cwd := newRehydrateAgent(t)
+	ctx := context.Background()
+	const sid = "acp-sid-override"
+	entry := openNew(t, pa, sid, &clientSetup{
+		cwd: cwd, mcpServers: []acpsdk.McpServer{echoMCPServer("old")}, meta: map[string]any{"v": "1"},
+	})
+	entry.updateSetup(func(s *acpSetup) { s.Mode = "kept" })
+	reapNow(t, pa, sid, entry)
+
+	cwd2 := t.TempDir()
+	if _, err := pa.resumeSessionLocal(ctx, ResumeSessionRequest{
+		SessionId: sid, Cwd: cwd2,
+		McpServers: []acpsdk.McpServer{echoMCPServer("new")},
+		Meta:       map[string]any{"v": "2"},
+	}); err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	want := acpSetup{Cwd: cwd2, McpServers: map[string]mcp.ServerConfig{"new": echoServer()},
+		Meta: map[string]any{"v": "2"}, Mode: "kept"}
+	if got := pa.lookupSession(sid).getSetup(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("live setup:\n got %#v\nwant %#v", got, want)
+	}
+	saved, _ := pa.loadSessionConfig(sid)
+	if !reflect.DeepEqual(saved.Setup, want) {
+		t.Fatalf("saved setup:\n got %#v\nwant %#v", saved.Setup, want)
+	}
+}
+
+// TestRehydrate_FailedClientMCP_NeedsReload: a restored client MCP server that
+// cannot start yields a typed error telling the client to session/load.
+func TestRehydrate_FailedClientMCP_NeedsReload(t *testing.T) {
+	pa, cwd := newRehydrateAgent(t)
+	const sid = "acp-sid-badmcp"
+	bad := acpsdk.McpServer{Stdio: &acpsdk.McpServerStdio{
+		Name: "relay", Command: "/nonexistent/zulip-acp", Args: []string{"mcp-serve"}, Env: []acpsdk.EnvVariable{}}}
+	entry := openNew(t, pa, sid, &clientSetup{cwd: cwd, mcpServers: []acpsdk.McpServer{bad}})
+	reapNow(t, pa, sid, entry)
+
+	_, err := pa.Prompt(context.Background(), acpsdk.PromptRequest{
+		SessionId: acpsdk.SessionId(sid),
+		Prompt:    []acpsdk.ContentBlock{acpsdk.TextBlock("hi")},
+	})
+	re, ok := err.(*acpsdk.RequestError)
+	if !ok || re.Code != SessionNeedsReloadError {
+		t.Fatalf("err = %v, want code %d", err, SessionNeedsReloadError)
+	}
+	data, _ := re.Data.(map[string]any)
+	if data["reason"] != "session_needs_reload" {
+		t.Errorf("data = %#v, want reason session_needs_reload", re.Data)
+	}
+	if pa.lookupSession(sid) != nil {
+		t.Error("failed restore left a session in the map")
+	}
+	if _, ok := pa.loadSessionConfig(sid); !ok {
+		t.Error("failed restore dropped the saved config")
+	}
+}
+
+func TestSessionConfig_FileMode0600(t *testing.T) {
+	pa, cwd := newRehydrateAgent(t)
+	const sid = "acp-sid-perm"
+	openNew(t, pa, sid, &clientSetup{cwd: cwd})
+	fi, err := os.Stat(pa.sessionConfigPath(sid))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Mode().Perm() != 0o600 {
+		t.Errorf("mode = %v, want 0600", fi.Mode().Perm())
+	}
+}
+
+// A save racing session/release (e.g. Prompt's deferred save) must not
+// resurrect the released session.
+func TestSaveAfterRelease_DoesNotResurrect(t *testing.T) {
+	pa, cwd := newRehydrateAgent(t)
+	const sid = "acp-sid-race"
+	entry := openNew(t, pa, sid, &clientSetup{cwd: cwd})
+	if _, err := pa.ReleaseSession(context.Background(), ReleaseSessionRequest{SessionId: sid}); err != nil {
+		t.Fatal(err)
+	}
+	pa.saveSessionConfig(sid, entry)
+	if _, ok := pa.loadSessionConfig(sid); ok {
+		t.Fatal("save after release recreated the session config")
+	}
+}
+
+// Concurrent rehydrates of one reaped session yield one live session.
+func TestRehydrate_ConcurrentSameSession(t *testing.T) {
+	pa, cwd := newRehydrateAgent(t)
+	const sid = "acp-sid-concurrent"
+	entry := openNew(t, pa, sid, &clientSetup{cwd: cwd})
+	reapNow(t, pa, sid, entry)
+	results := make(chan *firSession, 4)
+	for i := 0; i < 4; i++ {
+		go func() {
+			e, _ := pa.rehydrateForPrompt(context.Background(), sid)
+			results <- e
+		}()
+	}
+	first := <-results
+	for i := 0; i < 3; i++ {
+		if e := <-results; e != first {
+			t.Fatal("concurrent rehydrates produced different sessions")
+		}
+	}
+	if pa.lookupSession(sid) != first {
+		t.Fatal("live session is not the rehydrated one")
+	}
+}
+
+func TestPruneSessionConfigs_RemovesStale(t *testing.T) {
+	pa, cwd := newRehydrateAgent(t)
+	openNew(t, pa, "fresh", &clientSetup{cwd: cwd})
+	openNew(t, pa, "stale", &clientSetup{cwd: cwd})
+	old := time.Now().Add(-2 * sessionConfigMaxAge)
+	if err := os.Chtimes(pa.sessionConfigPath("stale"), old, old); err != nil {
+		t.Fatal(err)
+	}
+	pa.pruneSessionConfigs(time.Now().Add(-sessionConfigMaxAge))
+	if _, ok := pa.loadSessionConfig("stale"); ok {
+		t.Error("stale config not pruned")
+	}
+	if _, ok := pa.loadSessionConfig("fresh"); !ok {
+		t.Error("fresh config pruned")
 	}
 }

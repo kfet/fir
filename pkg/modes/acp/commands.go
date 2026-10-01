@@ -487,7 +487,7 @@ func cmdReload(ctx *commandContext, _ string) {
 	}
 	// Reload MCP servers: re-read configs from disk and apply the diff.
 	// If no manager existed (no MCPs at startup), create one now if configs appear.
-	if err := session.ReloadMCP(context.Background(), &entry.mcpManager, entry.session, entry.cwd, ctx.agent.options.MCPConfig, entry.clientMCPConfigs); err != nil {
+	if err := session.ReloadMCP(context.Background(), &entry.mcpManager, entry.session, entry.cwd, ctx.agent.options.MCPConfig, entry.clientMCP()); err != nil {
 		ctx.sendMessage(fmt.Sprintf("MCP reload failed: %v", err))
 	}
 	entry.mcpStatus = mcp.StatusFunc(entry.mcpManager)
@@ -740,7 +740,7 @@ func cmdMCPReload(ctx *commandContext) {
 	}
 
 	// Perform the actual reload.
-	reloadErr := session.ReloadMCP(context.Background(), &entry.mcpManager, entry.session, entry.cwd, ctx.agent.options.MCPConfig, entry.clientMCPConfigs)
+	reloadErr := session.ReloadMCP(context.Background(), &entry.mcpManager, entry.session, entry.cwd, ctx.agent.options.MCPConfig, entry.clientMCP())
 	entry.mcpStatus = mcp.StatusFunc(entry.mcpManager)
 
 	// Build response message.

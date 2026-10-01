@@ -79,6 +79,8 @@ type ResumeSessionRequest struct {
 	// McpServers are MCP server configurations provided by the client.
 	// These are merged with project-level configs (client entries take precedence).
 	McpServers []acpsdk.McpServer `json:"mcpServers,omitempty"`
+	// Meta is the client's _meta, persisted with the session setup.
+	Meta map[string]any `json:"_meta,omitempty"`
 }
 
 // ResumeSessionResponse is the response for session/resume.

@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Changed
+- **ACP sessions persist and restore their full setup.** cwd, client `mcpServers`, `_meta`, mode, transcript, model and thinking level are saved per session (0600, `<agentDir>/acp-sessions/`) and every path — new, load, resume, idle-reap rehydrate, rehydrate after restart — rebuilds through one function. Client values override the saved ones; configs untouched for 30 days are pruned. Replaces the MCP-only reap record from 1.23.1.
+
+### Added
+- **ACP `session_needs_reload` error (-32010)** on a prompt when a restored client MCP server fails to start, so the client can `session/load` with fresh `mcpServers`.
+
 ## [1.23.2] - 2026-10-01
 
 ### Changed

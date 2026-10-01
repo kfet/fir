@@ -49,24 +49,26 @@ func resolveAgentDir() string {
 
 // firSession holds per-session state.
 type firSession struct {
-	session          *session.AgentSession
-	modelRegistry    *models.ModelRegistry
-	settingsManager  *config.SettingsManager
-	extSetup         *extension.SetupResult
-	unsubscribe      func()
-	cwd              string
-	agentDir         string
-	plan             *planTracker
-	termState        *terminalState
-	pendingArgs      sync.Map // toolCallID → map[string]any
-	pendingTitles    sync.Map // toolCallID → string (title sent at tool call start)
-	resumeMu         sync.Mutex
-	lastResumeList   []store.SessionListInfo
-	configAccessor   thinkingAccessor            // nil → use session (for testing)
-	mcpManager       *mcp.Manager                // nil if no MCP servers configured; used for Close()
-	mcpStatus        func() []mcp.ServerStatus   // status callback for /session display
-	extReady         chan struct{}               // closed when async extension setup completes
-	clientMCPConfigs map[string]mcp.ServerConfig // MCP configs from ACP client request, re-merged on reload
+	session         *session.AgentSession
+	modelRegistry   *models.ModelRegistry
+	settingsManager *config.SettingsManager
+	extSetup        *extension.SetupResult
+	unsubscribe     func()
+	cwd             string
+	agentDir        string
+	plan            *planTracker
+	termState       *terminalState
+	pendingArgs     sync.Map // toolCallID → map[string]any
+	pendingTitles   sync.Map // toolCallID → string (title sent at tool call start)
+	resumeMu        sync.Mutex
+	lastResumeList  []store.SessionListInfo
+	configAccessor  thinkingAccessor          // nil → use session (for testing)
+	mcpManager      *mcp.Manager              // nil if no MCP servers configured; used for Close()
+	mcpStatus       func() []mcp.ServerStatus // status callback for /session display
+	extReady        chan struct{}             // closed when async extension setup completes
+	// setup is the client-supplied session setup; persisted, see sessionconfig.go.
+	setupMu sync.Mutex
+	setup   acpSetup
 	// lastActiveNs is the UnixNano timestamp of the last activity on this
 	// session (creation or a prompt). Accessed atomically. The idle reaper
 	// uses it to decide when a session has been idle longer than the TTL.
@@ -106,19 +108,6 @@ func (s *firSession) getThinkingAccessor() thinkingAccessor {
 	return s.session
 }
 
-// reapedSession records where a reaped session's on-disk transcript lives so a
-// later Prompt can re-hydrate it under the same sessionID. file is empty when
-// the session had no persisted transcript (e.g. it was never prompted); in
-// that case re-hydration creates a fresh same-ID session.
-type reapedSession struct {
-	file string
-	cwd  string
-	// clientMCPConfigs are the MCP servers the ACP client supplied on
-	// session/new (or resume/load). They exist only in memory, so they must
-	// be carried through the reap record or re-hydration silently drops them.
-	clientMCPConfigs map[string]mcp.ServerConfig
-}
-
 // firAgent implements the ACP Agent interface.
 type firAgent struct {
 	conn     acpConn
@@ -147,16 +136,12 @@ type firAgent struct {
 	// idleTTL is how long a session may sit idle before the reaper tears it
 	// down. Zero disables the reaper.
 	idleTTL time.Duration
-	// reaped remembers, for sessions the idle reaper tore down, where their
-	// on-disk transcript lives and the cwd they ran in — keyed by the ACP
-	// sessionID. A subsequent Prompt for that sessionID uses this to
-	// transparently re-hydrate the session in place (same ID) instead of
-	// returning session-not-found. The entry is removed once re-hydrated.
-	// (The ACP sessionID has no on-disk link — the session store names files
-	// by its own UUID — so this in-process map is the only sessionID→file
-	// mapping. It is therefore best-effort: lost across a process restart,
-	// at which point the relay falls back to re-resuming via -32001.)
-	reaped map[string]reapedSession
+	// configDir holds one saved sessionConfig per ACP sessionID, so a reaped
+	// or restarted session is rebuilt with its full setup. Empty disables
+	// persistence (unit tests that build firAgent directly).
+	configDir string
+	// rehydrateLocks serialises rehydration per sessionID (*sync.Mutex).
+	rehydrateLocks sync.Map
 	// toolHeartbeats holds a stop channel per in-flight tool call, keyed by
 	// heartbeatKey(sessionID, toolCallID). See heartbeat.go: a long silent
 	// tool call must keep emitting tool_call updates or a relay watchdog
@@ -199,7 +184,7 @@ func RunAcpMode(opts Options) error {
 	pa := &firAgent{
 		options:      opts,
 		sessions:     make(map[string]*firSession),
-		reaped:       make(map[string]reapedSession),
+		configDir:    filepath.Join(resolveAgentDir(), "acp-sessions"),
 		commands:     newCommandRegistry(),
 		pendingAuths: make(map[string]*pendingAuth),
 		idleTTL:      opts.IdleTTL,
@@ -434,7 +419,7 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mc
 						extCollisions[i] = extension.ConvertMCPCollision(c.Server, c.WonFile, c.ShadowedFiles)
 					}
 					// Perform the actual reload, including client-provided MCP configs.
-					reloadErr := session.ReloadMCP(context.Background(), &entry.mcpManager, entry.session, entry.cwd, "", entry.clientMCPConfigs)
+					reloadErr := session.ReloadMCP(context.Background(), &entry.mcpManager, entry.session, entry.cwd, "", entry.clientMCP())
 					result := extension.ReloadMCPResult{Collisions: extCollisions}
 					if err != nil {
 						// Broken files were skipped; the rest reloaded. Report them.
@@ -463,10 +448,6 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mc
 
 	pa.mu.Lock()
 	pa.sessions[sessionID] = entry
-	// This sessionID is live again: drop any stale reaped record so a future
-	// Prompt re-hydrates from this session's state, not a previously-reaped
-	// transcript for the same ID.
-	delete(pa.reaped, sessionID)
 	pa.mu.Unlock()
 
 	entry.touch(pa.now())
