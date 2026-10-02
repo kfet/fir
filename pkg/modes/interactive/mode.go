@@ -328,7 +328,7 @@ func (m *InteractiveMode) ConsumeMCPServerEvents(ch <-chan mcp.ServerEvent) {
 	if ch == nil {
 		return
 	}
-	go m.coalesceMCPServerEvents(ch, mcpNoticeQuietPeriod)
+	go coalesceMCPServerEvents(m.ctx, ch, mcpNoticeQuietPeriod, m.flushMCPNotice)
 }
 
 // mcpNoticeQuietPeriod is how long the consumer waits for the event stream to
@@ -348,16 +348,17 @@ type mcpServerState struct {
 // quiet period instead of one line per event. A connecting→connected pair
 // collapses into "connected", and a flapping server reports a reconnect count
 // instead of a new pair of lines each cycle.
-func (m *InteractiveMode) coalesceMCPServerEvents(ch <-chan mcp.ServerEvent, quiet time.Duration) {
+func coalesceMCPServerEvents(ctx context.Context, ch <-chan mcp.ServerEvent, quiet time.Duration, flush func([]string, map[string]*mcpServerState)) {
 	var (
 		order   []string
+		pending = map[string]bool{} // names already in order since last flush
 		states  = map[string]*mcpServerState{}
 		timer   *time.Timer
 		timerCh <-chan time.Time
 	)
 	for {
 		select {
-		case <-m.ctx.Done():
+		case <-ctx.Done():
 			if timer != nil {
 				timer.Stop()
 			}
@@ -367,6 +368,12 @@ func (m *InteractiveMode) coalesceMCPServerEvents(ch <-chan mcp.ServerEvent, qui
 			if !ok {
 				st = &mcpServerState{}
 				states[ev.Name] = st
+			}
+			// Re-queue the server for every flush window it has events in,
+			// so a later transition (e.g. connecting -> connected after an
+			// earlier flush) is reported instead of silently swallowed.
+			if !pending[ev.Name] {
+				pending[ev.Name] = true
 				order = append(order, ev.Name)
 			}
 			// A second connect, after an earlier one, is a reconnect.
@@ -390,8 +397,9 @@ func (m *InteractiveMode) coalesceMCPServerEvents(ch <-chan mcp.ServerEvent, qui
 			timerCh = timer.C
 		case <-timerCh:
 			timerCh = nil
-			m.flushMCPNotice(order, states)
+			flush(order, states)
 			order = order[:0]
+			clear(pending)
 		}
 	}
 }

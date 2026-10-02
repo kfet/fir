@@ -1,8 +1,10 @@
 package interactive
 
 import (
+	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/kfet/fir/pkg/mcp"
 )
@@ -42,5 +44,31 @@ func TestBuildMCPNoticeReportsErrorsSeparately(t *testing.T) {
 func TestMCPSuffixReadyIsBare(t *testing.T) {
 	if got := mcpSuffix(&mcpServerState{seen: true, kind: mcp.ServerReady}); got != "" {
 		t.Errorf("suffix = %q, want empty", got)
+	}
+}
+
+// A server still connecting at the first flush must be reported again when it
+// later becomes ready; it used to stay "(connecting)" forever.
+func TestCoalesceReportsLateReady(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch := make(chan mcp.ServerEvent, 4)
+	out := make(chan string, 4)
+	go coalesceMCPServerEvents(ctx, ch, 10*time.Millisecond, func(order []string, states map[string]*mcpServerState) {
+		s, _ := buildMCPNotice(order, states)
+		out <- s
+	})
+	ch <- mcp.ServerEvent{Kind: mcp.ServerConnecting, Name: "daisy-main"}
+	if got := <-out; got != "MCP: daisy-main (connecting)" {
+		t.Fatalf("first = %q", got)
+	}
+	ch <- mcp.ServerEvent{Kind: mcp.ServerReady, Name: "daisy-main"}
+	select {
+	case got := <-out:
+		if got != "MCP: daisy-main" {
+			t.Fatalf("second = %q", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("late ready was never reported")
 	}
 }
