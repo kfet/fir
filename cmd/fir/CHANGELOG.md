@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- **ACP: config-file MCP servers survive session re-hydration.** A session restored by `session/prompt` (after an idle reap or agent restart) no longer loses every `mcp.json` / `mcp.d` server with "connect: context canceled" when that prompt returns.
+
 ## [1.24.3] - 2026-10-02
 
 ### Changed

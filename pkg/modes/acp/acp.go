@@ -312,7 +312,12 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd, transcrip
 		sessionStore, forked = store.OpenSessionStore(transcript, sessionDir)
 	}
 
-	result, err := session.Setup(ctx, session.SetupOptions{
+	// The session outlives the request that creates it. Setup hands ctx to
+	// background work (MCP connects, extensions); a request-scoped ctx — e.g.
+	// the session/prompt ctx during re-hydration, cancelled when the prompt
+	// returns — would kill every still-connecting MCP server with "context
+	// canceled". Keep values, drop cancellation.
+	result, err := session.Setup(context.WithoutCancel(ctx), session.SetupOptions{
 		Cwd:                   cwd,
 		AgentDir:              agentDir,
 		AuthStorage:           authStorage,

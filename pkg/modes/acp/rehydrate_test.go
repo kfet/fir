@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -453,4 +454,40 @@ func TestLegacyACPConfig_Migrated(t *testing.T) {
 			pa.teardownSession(context.Background(), sid, e)
 		}
 	})
+}
+
+// TestRehydrate_ConfigMCPOutlivesPromptCtx: a session re-hydrated by a
+// session/prompt must keep its config-file MCP servers (mcp.json) after the
+// prompt's request ctx is cancelled. Regression: Setup inherited that ctx, so
+// every server still connecting died with "context canceled" — only the
+// client-supplied servers, which restore waits for, survived.
+func TestRehydrate_ConfigMCPOutlivesPromptCtx(t *testing.T) {
+	pa, cwd := newRehydrateAgent(t)
+	pa.options.NoMCP = false
+	srv := echoServer()
+	cfg, _ := json.Marshal(map[string]any{"mcpServers": map[string]any{
+		"proj": map[string]any{"command": srv.Command, "env": srv.Env}}})
+	if err := os.MkdirAll(filepath.Join(cwd, ".fir"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cwd, ".fir", "mcp.json"), cfg, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	const sid = "acp-sid-cfgmcp"
+	entry := openNew(t, pa, sid, &clientSetup{cwd: cwd})
+	reapNow(t, pa, sid, entry)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	back, err := pa.rehydrateForPrompt(ctx, sid)
+	cancel() // the prompt returns
+	if err != nil || back == nil {
+		t.Fatalf("rehydrateForPrompt: %v %v", back, err)
+	}
+	deadline := time.Now().Add(20 * time.Second)
+	for !mcpConnected(back, "proj") {
+		if time.Now().After(deadline) {
+			t.Fatalf("config MCP server not connected after prompt ctx cancel: %+v", back.mcpManager.Status())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }
