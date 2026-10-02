@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [1.24.3] - 2026-10-02
+
+### Changed
+- **Model catalog regenerated**: added `amazon-bedrock/in.anthropic.claude-haiku-4-5-20251001-v1:0`, `amazon-bedrock/in.anthropic.claude-opus-5`, `amazon-bedrock/in.anthropic.claude-sonnet-5`, `opencode/fledge-alpha-free`, `opencode/ling-3.1-flash-free` (+4 on aggregators); 18 model(s) with changed pricing/limits.
+- **MCP: a server that connects after an earlier "connecting" notice is now reported as ready.**
+
 ### Fixed
 - **TUI: Tab-accepting a slash subcommand now opens the next argument list** (e.g. `/mcp lo<Tab>` → `/mcp login ` shows the MCP server list), the same as typing the space by hand.
 
