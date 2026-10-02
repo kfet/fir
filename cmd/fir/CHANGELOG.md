@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [1.24.4] - 2026-10-03
+
+### Changed
+- **Model catalog regenerated**: 9 model(s) with changed pricing/limits.
+
 ### Fixed
 - **ACP: config-file MCP servers survive session re-hydration.** A session restored by `session/prompt` (after an idle reap or agent restart) no longer loses every `mcp.json` / `mcp.d` server with "connect: context canceled" when that prompt returns.
 
