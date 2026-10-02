@@ -1027,6 +1027,13 @@ func (e *Editor) HandleInput(data string) {
 				e.setCursorCol(result.CursorCol)
 				e.cancelAutocomplete()
 				e.fireOnChange()
+				// In a slash command, a completion that ends in a space opens
+				// the next argument level (e.g. "/mcp login " -> server list),
+				// the same as typing the space by hand.
+				before := e.state.lines[e.state.cursorLine][:e.state.cursorCol]
+				if strings.HasSuffix(before, " ") && e.isInSlashCommandContext(before) {
+					e.tryTriggerAutocomplete(false)
+				}
 			}
 			return
 		}

@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- **TUI: Tab-accepting a slash subcommand now opens the next argument list** (e.g. `/mcp lo<Tab>` → `/mcp login ` shows the MCP server list), the same as typing the space by hand.
+
 ## [1.24.2] - 2026-10-01
 
 ### Changed

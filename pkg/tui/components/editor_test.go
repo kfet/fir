@@ -1112,3 +1112,57 @@ func TestEditor_MultilineNavigation(t *testing.T) {
 		t.Errorf("expected line 2, got %d", line)
 	}
 }
+
+// mockSlashArgs: "/mcp <sub>" then "/mcp login <server>". Completions append a space.
+type mockSlashArgs struct{}
+
+func (mockSlashArgs) GetSuggestions(lines []string, cl, cc int) *AutocompleteSuggestions {
+	before := lines[cl][:cc]
+	var cands []string
+	var prefix string
+	switch {
+	case strings.HasPrefix(before, "/mcp login "):
+		prefix = strings.TrimPrefix(before, "/mcp login ")
+		cands = []string{"alpha", "beta"}
+	case strings.HasPrefix(before, "/mcp "):
+		prefix = strings.TrimPrefix(before, "/mcp ")
+		cands = []string{"login", "logout"}
+	default:
+		return nil
+	}
+	var items []SelectItem
+	for _, c := range cands {
+		if strings.HasPrefix(c, prefix) {
+			items = append(items, SelectItem{Value: c, Label: c})
+		}
+	}
+	if len(items) == 0 {
+		return nil
+	}
+	return &AutocompleteSuggestions{Prefix: prefix, Items: items}
+}
+
+func (mockSlashArgs) ApplyCompletion(lines []string, cl, cc int, item SelectItem, prefix string) ApplyCompletionResult {
+	nl := append([]string(nil), lines...)
+	line := nl[cl]
+	nl[cl] = line[:cc-len(prefix)] + item.Value + " " + line[cc:]
+	return ApplyCompletionResult{Lines: nl, CursorLine: cl, CursorCol: cc - len(prefix) + len(item.Value) + 1}
+}
+
+func TestEditor_TabAcceptSlashArgOpensNextLevel(t *testing.T) {
+	e := newTestEditor()
+	e.SetAutocompleteProvider(mockSlashArgs{})
+	for _, r := range "/mcp log" {
+		e.HandleInput(string(r))
+	}
+	if !e.IsShowingAutocomplete() {
+		t.Fatal("expected subcommand list")
+	}
+	e.HandleInput("\t")
+	if e.GetText() != "/mcp login " {
+		t.Fatalf("got %q", e.GetText())
+	}
+	if !e.IsShowingAutocomplete() {
+		t.Error("Tab accept should open the server list, like typing a space")
+	}
+}
