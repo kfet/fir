@@ -205,12 +205,19 @@ func TestStreamGoogle_HTTPError(t *testing.T) {
 }
 
 func TestStreamGoogle_ContextCancelled(t *testing.T) {
-	// Create a server that hangs
+	// Create a server that hangs until the client goes away or the test
+	// ends. The request context alone is not enough: if the client aborts
+	// mid-handshake the server may never observe the disconnect, and
+	// srv.Close would block forever waiting on the handler.
+	done := make(chan struct{})
 	srv := mockSSEServerFunc(t, func(w http.ResponseWriter, r *http.Request) {
-		// Don't respond — just wait for context cancellation
-		<-r.Context().Done()
+		select {
+		case <-r.Context().Done():
+		case <-done:
+		}
 	})
 	defer srv.Close()
+	defer close(done)
 
 	model := googleTestModel(srv.URL)
 	ctx, cancel := context.WithCancel(context.Background())
