@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [1.25.0] - 2026-10-03
+
+### Changed
+- **Model catalog regenerated**: 7 model(s) with changed pricing/limits.
+
 ### Added
 - **Fork a session at an entry, non-interactively.** `fir --resume <session> --at <entry-id>` (or `--session <path> --at <id>`) starts a child session branched at that entry — `/resume` + `/tree` in a fresh process — without writing the parent. ACP `session/load`/`session/resume` accept `at` (response `sessionId` names the child) and ACP `/resume` takes `--at`. Entries that leave a dangling tool call are rejected; the child replays a byte-identical prefix so prompt caches hit. `agent_introspect` now reports `session.leafId` and `session.forkAt`.
 
