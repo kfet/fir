@@ -266,8 +266,12 @@ func rawMethodHandler(pa *firAgent, wn *writeNotifier) acpsdk.MethodHandler {
 			if merr := json.Unmarshal(rawResp, &respMap); merr != nil {
 				return resp, nil
 			}
+			sid := p.SessionId
+			if resp.SessionId != "" {
+				sid = resp.SessionId // forked child (p.At)
+			}
 			pa.mu.Lock()
-			entry, ok := pa.sessions[p.SessionId]
+			entry, ok := pa.sessions[sid]
 			pa.mu.Unlock()
 			if ok {
 				respMap["configOptions"] = buildConfigOptions(entry)
@@ -280,9 +284,9 @@ func rawMethodHandler(pa *firAgent, wn *writeNotifier) acpsdk.MethodHandler {
 				<-afterWrite
 				runtime.Gosched()
 				time.Sleep(5 * time.Millisecond)
-				pa.sendAvailableCommands(p.SessionId)
+				pa.sendAvailableCommands(sid)
 				if replayHistory && ok {
-					pa.replaySessionHistory(p.SessionId, entry)
+					pa.replaySessionHistory(sid, entry)
 				}
 			}()
 			firlog.Info("acp dispatch: "+method+" done", "total_ms", time.Since(methodStart).Milliseconds())

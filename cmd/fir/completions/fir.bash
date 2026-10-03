@@ -80,7 +80,7 @@ _fir_complete() {
     # Flag completion
     if [[ $cur == -* ]]; then
         local flags="
-            --help --version --print --continue --resume --no-restore-config
+            --help --version --print --continue --resume --at --no-restore-config
             --mode --thinking --agent-dir --provider --model --api-key
             --system-prompt --append-system-prompt
             --session --session-name --session-dir --no-session

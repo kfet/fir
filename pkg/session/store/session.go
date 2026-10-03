@@ -7,7 +7,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -1042,6 +1041,11 @@ func (ss *SessionStore) CreateBranchedSession(leafId string) (string, error) {
 	if ss.persist {
 		header.ParentSession = previousSessionFile
 	}
+	// A branch keeps the parent's recorded invocation so a later resume
+	// restores the same model/tools (and so hits the same prompt cache).
+	if ss.header != nil {
+		header.Invocation = ss.header.Invocation
+	}
 
 	// Collect labels for entries in the path
 	pathEntryIDs := make(map[string]bool)
@@ -1098,7 +1102,7 @@ func (ss *SessionStore) CreateBranchedSession(leafId string) (string, error) {
 			lines = append(lines, string(data))
 		}
 		if err := os.WriteFile(newSessionFile, []byte(strings.Join(lines, "\n")+"\n"), 0600); err != nil {
-			log.Printf("session: failed to write branched session file %s: %v", newSessionFile, err)
+			return "", fmt.Errorf("write branched session file: %w", err)
 		}
 
 		ss.header = header
@@ -1721,10 +1725,7 @@ func ForkFrom(sourcePath, targetCwd, sessionDir string) (*SessionStore, error) {
 		return nil, fmt.Errorf("cannot write forked session: %w", err)
 	}
 	// A fork carries the source's saved settings.
-	var st json.RawMessage
-	if ReadState(sourcePath, &st) {
-		_ = WriteState(newSessionFile, st)
-	}
+	copyStateUnbound(sourcePath, newSessionFile)
 
 	ss, _ := OpenSessionStore(newSessionFile, sessionDir)
 	return ss, nil

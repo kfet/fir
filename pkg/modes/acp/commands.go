@@ -53,7 +53,7 @@ type commandRegistry struct {
 func newCommandRegistry() *commandRegistry {
 	r := &commandRegistry{commands: make(map[string]slashCommand)}
 	r.register(slashCommand{"compact", "Compact the session history to save tokens", cmdCompact})
-	r.register(slashCommand{"resume", "List or resume a session (usage: /resume [number|path])", cmdResume})
+	r.register(slashCommand{"resume", "List or resume a session (usage: /resume [number|path] [--at <entry-id>])", cmdResume})
 	r.register(slashCommand{"continue", "Continue the most recent session", cmdContinue})
 	r.register(slashCommand{"name", "Rename the current session (usage: /name <new name>)", cmdName})
 	r.register(slashCommand{"session", "Show session statistics", cmdSession})
@@ -771,6 +771,11 @@ func cmdMCPReload(ctx *commandContext) {
 // ============================================================================
 
 func (pa *firAgent) handleResumeArg(sessionID string, entry *firSession, args string) {
+	args, at := splitAtFlag(args)
+	if at == "" && strings.Contains(" "+args+" ", " --at ") {
+		pa.sendAgentMessage(sessionID, "--at requires an entry id")
+		return
+	}
 	var sessionPath string
 	if n := parseInt(args); n > 0 {
 		entry.resumeMu.Lock()
@@ -795,6 +800,15 @@ func (pa *firAgent) handleResumeArg(sessionID string, entry *firSession, args st
 		return
 	}
 
+	if at != "" {
+		child, _, err := forkSessionAt(sessionPath, at, entry.cwd, store.DefaultSessionDir(entry.agentDir, entry.cwd))
+		if err != nil {
+			pa.sendAgentMessage(sessionID, fmt.Sprintf("Failed to fork session: %v", err))
+			return
+		}
+		sessionPath = child
+	}
+
 	forked, err := entry.session.SwitchSession(sessionPath)
 	if err != nil {
 		pa.sendAgentMessage(sessionID, fmt.Sprintf("Failed to resume session: %v", err))
@@ -805,6 +819,22 @@ func (pa *firAgent) handleResumeArg(sessionID string, entry *firSession, args st
 		pa.sendAgentMessage(sessionID, fmt.Sprintf("Resumed session: %s", sessionPath))
 		pa.replaySessionHistory(sessionID, entry)
 	}
+}
+
+// splitAtFlag extracts an "--at <entry-id>" option from /resume arguments,
+// returning the remaining argument text and the entry id.
+func splitAtFlag(args string) (rest, at string) {
+	fields := strings.Fields(args)
+	var keep []string
+	for i := 0; i < len(fields); i++ {
+		if fields[i] == "--at" && i+1 < len(fields) {
+			at = fields[i+1]
+			i++
+			continue
+		}
+		keep = append(keep, fields[i])
+	}
+	return strings.Join(keep, " "), at
 }
 
 // performShare creates a secret GitHub Gist from the session HTML export and

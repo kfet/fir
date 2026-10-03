@@ -459,6 +459,9 @@ func (pa *firAgent) resumeSessionLocal(ctx context.Context, params ResumeSession
 	if !strings.Contains(params.SessionId, string(filepath.Separator)) && !strings.Contains(params.SessionId, ".jsonl") {
 		// Try to find the session file by UUID in known session directories.
 		resolved := resolveSessionByUUID(params.SessionId, agentDir, cwd)
+		if resolved == "" && params.At != "" {
+			return ResumeSessionResponse{}, fmt.Errorf("session %q not found; cannot fork at %q", params.SessionId, params.At)
+		}
 		if resolved == "" {
 			// No matching session file — create a fresh session instead.
 			firlog.Info("session/resume: UUID not found, creating fresh session",
@@ -503,6 +506,14 @@ func (pa *firAgent) resumeSessionLocal(ctx context.Context, params ResumeSession
 
 	// Use params.SessionId as the new session's ID so the client can reference it.
 	sessionID := params.SessionId
+	forkedAt := ""
+	if params.At != "" {
+		childPath, childID, err := forkSessionAt(sessionPath, params.At, cwd, store.DefaultSessionDir(agentDir, cwd))
+		if err != nil {
+			return ResumeSessionResponse{}, err
+		}
+		sessionPath, sessionID, forkedAt = childPath, childID, childID
+	}
 
 	req.transcript = sessionPath
 	entry, forked, err := pa.openSession(ctx, sessionID, req)
@@ -517,7 +528,20 @@ func (pa *firAgent) resumeSessionLocal(ctx context.Context, params ResumeSession
 	if m := entry.session.Model(); m != nil {
 		models = BuildModelState(entry.modelRegistry, m)
 	}
-	return ResumeSessionResponse{Models: models}, nil
+	return ResumeSessionResponse{SessionId: forkedAt, Models: models}, nil
+}
+
+// forkSessionAt writes a child of the session at sourcePath branched at
+// entryID into sessionDir and returns the child's file path and session id.
+// The child's store is closed so the caller can reopen (and lock) it.
+func forkSessionAt(sourcePath, entryID, cwd, sessionDir string) (string, string, error) {
+	child, err := store.ForkAt(sourcePath, entryID, cwd, sessionDir)
+	if err != nil {
+		return "", "", err
+	}
+	path, id := child.GetSessionFile(), child.GetSessionID()
+	child.Close()
+	return path, id, nil
 }
 
 // rehydrateForPrompt brings sessionID back into memory after it was reaped for
@@ -1065,14 +1089,20 @@ func (pa *firAgent) Logout(_ context.Context, _ acpsdk.LogoutRequest) (acpsdk.Lo
 // in the spec response and is dropped on this path; clients that want it use
 // fir's own dispatch route, which still calls resumeSessionLocal.
 func (pa *firAgent) ResumeSession(ctx context.Context, params acpsdk.ResumeSessionRequest) (acpsdk.ResumeSessionResponse, error) {
-	_, err := pa.resumeSessionLocal(ctx, ResumeSessionRequest{
+	at, _ := params.Meta["at"].(string)
+	resp, err := pa.resumeSessionLocal(ctx, ResumeSessionRequest{
 		SessionId:  string(params.SessionId),
 		Cwd:        params.Cwd,
 		McpServers: params.McpServers,
 		Meta:       params.Meta,
+		At:         at,
 	})
 	if err != nil {
 		return acpsdk.ResumeSessionResponse{}, err
+	}
+	if resp.SessionId != "" {
+		// Forked child: the spec response has no sessionId, so name it in _meta.
+		return acpsdk.ResumeSessionResponse{Meta: map[string]any{"sessionId": resp.SessionId}}, nil
 	}
 	return acpsdk.ResumeSessionResponse{}, nil
 }

@@ -81,10 +81,17 @@ type ResumeSessionRequest struct {
 	McpServers []acpsdk.McpServer `json:"mcpServers,omitempty"`
 	// Meta is the client's _meta, persisted with the session setup.
 	Meta map[string]any `json:"_meta,omitempty"`
+	// At, when set, forks a child session whose leaf is this entry id (the
+	// equivalent of /resume then /tree to that entry). The source session
+	// file is left untouched; the response's sessionId names the child.
+	At string `json:"at,omitempty"`
 }
 
 // ResumeSessionResponse is the response for session/resume.
 type ResumeSessionResponse struct {
+	// SessionId is set when the request forked a child (At was given):
+	// the id the client must use for the child from now on.
+	SessionId string `json:"sessionId,omitempty"`
 	// Models is the current model state for the resumed session.
 	Models interface{} `json:"models,omitempty"`
 }

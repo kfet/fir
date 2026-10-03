@@ -95,7 +95,17 @@ func setupSession(args *Args, deferExtensions bool) (*sessionSetup, error) {
 	// resumed sessions detect a version change) before the store is created.
 	store.SetFirVersion(version)
 
-	sessionStore, isResumed := createSessionStore(args, cwd, agentDir)
+	var sessionStore *store.SessionStore
+	isResumed := false
+	if args.Seen["--at"] {
+		sessionStore, err = forkSessionStoreAt(args, cwd, agentDir)
+		if err != nil {
+			return nil, err
+		}
+		isResumed = true
+	} else {
+		sessionStore, isResumed = createSessionStore(args, cwd, agentDir)
+	}
 	maybeRestoreInvocation(args, sessionStore, isResumed, os.Stderr)
 
 	// If this resumed an existing session created by a different fir version,
@@ -968,6 +978,35 @@ func createSessionStore(args *Args, cwd, agentDir string) (*store.SessionStore, 
 		return sm, sm.WasResumed()
 	}
 	return store.NewSessionStore(cwd, sessionDir), false
+}
+
+// forkSessionStoreAt implements `--resume <session> --at <entry-id>` (or
+// `--session <path> --at <entry-id>`): a new child session branched at the
+// entry, written next to the current project's sessions. The source session
+// file is only read.
+func forkSessionStoreAt(args *Args, cwd, agentDir string) (*store.SessionStore, error) {
+	if args.At == "" {
+		return nil, fmt.Errorf("--at requires an entry id")
+	}
+	ref := args.ResumeRef
+	if ref == "" {
+		ref = args.Session
+	}
+	if ref == "" {
+		return nil, fmt.Errorf("--at requires --resume <session> or --session <path>")
+	}
+	if args.NoSession {
+		return nil, fmt.Errorf("--at cannot be combined with --no-session")
+	}
+	sessionDir := args.SessionDir
+	if sessionDir == "" {
+		sessionDir = store.DefaultSessionDir(agentDir, cwd)
+	}
+	src := store.ResolveSessionRef(ref, sessionDir, store.SessionsDir(agentDir))
+	if src == "" {
+		return nil, fmt.Errorf("session %q not found", ref)
+	}
+	return store.ForkAt(src, args.At, cwd, sessionDir)
 }
 
 // resolveAgentDir returns the agent directory, honouring FIR_AGENT_DIR if set.

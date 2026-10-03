@@ -97,6 +97,24 @@ fleet prompt worker-2 "$TASK_B" &
 wait
 ```
 
+### Forking a child at a turn
+
+To branch an agent from an earlier point (A/B a different instruction from the
+same history, or retry a turn) without touching the original session, open a
+child at an entry id with `session/load` (or `session/resume`) plus `at`:
+
+```json
+{"method":"session/load","params":{"sessionId":"<parent file or id>","cwd":"...","mcpServers":[],"at":"<entry-id>"}}
+```
+
+The response carries `sessionId` — the child's id; use it for all further
+prompts. The parent file is only read. The child's history is a byte-identical
+prefix of the parent's, so on the same model/tools the prompt cache hits.
+Entry ids come from the transcript jsonl (`id` field) or, from inside an
+agent, `agent_introspect` → `session.file` / `session.forkAt`. An entry that
+leaves a tool call without its result is rejected. The CLI equivalent is
+`fir --resume <session> --at <entry-id>`.
+
 ## Observing
 
 ```bash

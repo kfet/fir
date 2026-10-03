@@ -2065,6 +2065,12 @@ type Introspection struct {
 		ID   string `json:"id"`
 		File string `json:"file"`
 		Name string `json:"name"`
+		// LeafID is the current entry id (the tip of the active branch).
+		LeafID string `json:"leafId"`
+		// ForkAt is the newest entry id that `fir --resume <file> --at <id>`
+		// accepts: LeafID unless the leaf is mid tool call (e.g. while this
+		// very tool call is running), then the entry before that turn.
+		ForkAt string `json:"forkAt"`
 	} `json:"session"`
 	Model struct {
 		ID            string `json:"id"`
@@ -2131,6 +2137,8 @@ func (s *AgentSession) Introspect(opts IntrospectOptions) Introspection {
 	stats := s.GetSessionStats()
 	out.Session.ID = stats.SessionID
 	out.Session.File = stats.SessionFile
+	out.Session.LeafID = s.SessionStore.GetLeafID()
+	out.Session.ForkAt = s.SessionStore.ForkableLeafID()
 	out.Session.Name = s.SessionStore.GetSessionName()
 
 	if m := s.Model(); m != nil {

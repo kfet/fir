@@ -31,20 +31,25 @@ type Args struct {
 	Thinking           agent.ThinkingLevel
 	Continue           bool
 	Resume             bool
-	Help               bool
-	Version            bool
-	OutputMode         Mode
-	NoSession          bool
-	Session            string
-	SessionName        string
-	SessionDir         string
-	AgentDir           string
-	Models             []string
-	Tools              []string
-	NoTools            bool
-	NoMCP              bool
-	MCPConfig          string
-	WaitMCP            bool
+	// ResumeRef is the session named by `--resume <session>` (only taken
+	// as a value when --at is also given).
+	ResumeRef string
+	// At forks the resumed session at this entry id into a new child.
+	At          string
+	Help        bool
+	Version     bool
+	OutputMode  Mode
+	NoSession   bool
+	Session     string
+	SessionName string
+	SessionDir  string
+	AgentDir    string
+	Models      []string
+	Tools       []string
+	NoTools     bool
+	NoMCP       bool
+	MCPConfig   string
+	WaitMCP     bool
 	// ACPSessionIdleTTL is how long an ACP in-memory session may sit idle
 	// before the background reaper tears it down. Defaults to 1h; 0 disables.
 	ACPSessionIdleTTL  time.Duration
@@ -120,6 +125,12 @@ func ParseArgs(args []string) *Args {
 		ACPSessionIdleTTL: 15 * time.Minute,
 	}
 	mark := func(flag string) { result.Seen[flag] = true }
+	hasAt := false
+	for _, a := range args {
+		if a == "--at" {
+			hasAt = true
+		}
+	}
 
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
@@ -151,6 +162,17 @@ func ParseArgs(args []string) *Args {
 		case arg == "--resume" || arg == "-r":
 			result.Resume = true
 			mark("--resume")
+			if hasAt && i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+				i++
+				result.ResumeRef = args[i]
+			}
+
+		case arg == "--at":
+			mark("--at")
+			if i+1 < len(args) {
+				i++
+				result.At = args[i]
+			}
 
 		case arg == "--no-restore-config":
 			result.NoRestoreConfig = true
@@ -407,6 +429,10 @@ Options:
                                  --model / etc. by default; pass
                                  --no-restore-config to opt out)
   --resume, -r                   Select a session to resume
+  --resume <session> --at <id>   Fork <session> (path, file name or id) at
+                                 entry <id> into a new child session; the
+                                 parent file is untouched. Also works as
+                                 --session <path> --at <id>
   --no-restore-config            With -c / -r / /resume, do not re-apply
                                  the resumed session's recorded invocation
                                  config (start with only the current argv)
