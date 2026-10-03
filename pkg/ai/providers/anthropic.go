@@ -1024,13 +1024,25 @@ func buildAnthropicParams(model *ai.Model, ctx ai.Context, oauthToken bool, opti
 		}
 		systemBlocks = append(systemBlocks, block)
 	}
-	if ctx.SystemPrompt != "" {
+	// The system prompt is split at ai.SystemPromptCacheBoundary into a
+	// stable prefix (identical across sessions) and a volatile suffix
+	// (cwd, date, host, context files). Each gets its own breakpoint so the
+	// prefix is a cache hit on turn one of a fresh session even when the
+	// suffix differs. Empty halves are skipped: the API rejects empty text
+	// blocks.
+	var systemCached []map[string]any
+	stable, volatile := ai.SplitSystemPrompt(ctx.SystemPrompt)
+	for _, text := range []string{stable, volatile} {
+		if strings.TrimSpace(text) == "" {
+			continue
+		}
 		block := map[string]any{
 			"type": "text",
-			"text": ctx.SystemPrompt,
+			"text": text,
 		}
 		if retention != ai.CacheNone {
 			block["cache_control"] = cacheControlBlock(model, retention)
+			systemCached = append(systemCached, block)
 		}
 		systemBlocks = append(systemBlocks, block)
 	}
@@ -1055,6 +1067,7 @@ func buildAnthropicParams(model *ai.Model, ctx ai.Context, oauthToken bool, opti
 		applySideQueryCacheControl(msgs, model, retention, options.SessionID)
 	}
 	markSectionsBreakpoint(msgs, model, retention)
+	trimSystemBreakpoints(systemCached, countMessageBreakpoints(msgs))
 	params["messages"] = msgs
 
 	// Check prefix stability for cache preservation
@@ -1370,6 +1383,36 @@ func markSectionsBreakpoint(msgs []map[string]any, model *ai.Model, retention ai
 		return
 	}
 	content[len(content)-1]["cache_control"] = cacheControlBlock(model, retention)
+}
+
+// maxCacheBreakpoints is Anthropic's per-request cache_control limit.
+const maxCacheBreakpoints = 4
+
+// countMessageBreakpoints counts cache_control markers on message blocks.
+func countMessageBreakpoints(msgs []map[string]any) int {
+	n := 0
+	for _, m := range msgs {
+		content, _ := m["content"].([]map[string]any)
+		for _, c := range content {
+			if _, ok := c["cache_control"]; ok {
+				n++
+			}
+		}
+	}
+	return n
+}
+
+// trimSystemBreakpoints drops system-block breakpoints, latest first, until
+// the request fits within maxCacheBreakpoints. The volatile system block is
+// always followed by message breakpoints (sections, tail, side-query
+// anchors) that cover it as a prefix, so its breakpoint is the cheapest to
+// lose; the stable block's breakpoint is kept as long as possible because
+// it is the one that hits across sessions.
+func trimSystemBreakpoints(system []map[string]any, msgBreakpoints int) {
+	for i := len(system) - 1; i >= 0 && len(system)+msgBreakpoints > maxCacheBreakpoints; i-- {
+		delete(system[i], "cache_control")
+		system = system[:i]
+	}
 }
 
 // pruneEmptyAssistantTextBlocks removes text blocks whose accumulated text is

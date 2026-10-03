@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Changed
+- **Anthropic system prompt now sent as two cached blocks**: a stable prefix (core text, guidelines, skills list) and a per-session suffix (context files, appended prompts, date, cwd, host), each with its own breakpoint, so turn one of a fresh session hits the prompt cache instead of rewriting ~30k tokens. The volatile breakpoint is dropped when needed to stay within the 4-breakpoint limit.
+
 ## [1.24.4] - 2026-10-03
 
 ### Changed

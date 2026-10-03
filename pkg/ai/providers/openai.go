@@ -960,7 +960,7 @@ func convertOpenAIMessages(ctx ai.Context, model *ai.Model, compat resolvedCompa
 		}
 		messages = append(messages, map[string]any{
 			"role":    role,
-			"content": ctx.SystemPrompt,
+			"content": ai.FlattenSystemPrompt(ctx.SystemPrompt),
 		})
 	}
 

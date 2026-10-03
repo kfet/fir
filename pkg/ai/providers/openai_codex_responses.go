@@ -330,7 +330,7 @@ func buildCodexRequestBody(model *ai.Model, ctx ai.Context, options *ai.StreamOp
 		"model":               model.ID,
 		"store":               false,
 		"stream":              true,
-		"instructions":        ctx.SystemPrompt,
+		"instructions":        ai.FlattenSystemPrompt(ctx.SystemPrompt),
 		"input":               input,
 		"text":                map[string]any{"verbosity": "low"},
 		"include":             []string{"reasoning.encrypted_content"},

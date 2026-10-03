@@ -327,7 +327,7 @@ func convertResponsesInput(model *ai.Model, ctx ai.Context) []any {
 		}
 		input = append(input, map[string]any{
 			"role":    role,
-			"content": ctx.SystemPrompt,
+			"content": ai.FlattenSystemPrompt(ctx.SystemPrompt),
 		})
 	}
 

@@ -412,7 +412,7 @@ func buildGoogleRequestBody(model *ai.Model, ctx ai.Context, options *ai.StreamO
 	if ctx.SystemPrompt != "" {
 		body["systemInstruction"] = map[string]any{
 			"parts": []map[string]any{
-				{"text": ctx.SystemPrompt},
+				{"text": ai.FlattenSystemPrompt(ctx.SystemPrompt)},
 			},
 		}
 	}

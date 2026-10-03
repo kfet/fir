@@ -430,7 +430,7 @@ func buildConverseStreamInput(model *ai.Model, ctx ai.Context, options *ai.Strea
 	// System prompt
 	if ctx.SystemPrompt != "" {
 		input.System = []skipstone.SystemBlock{
-			{Text: ctx.SystemPrompt},
+			{Text: ai.FlattenSystemPrompt(ctx.SystemPrompt)},
 		}
 		if canCache {
 			input.System = append(input.System, skipstone.SystemBlock{

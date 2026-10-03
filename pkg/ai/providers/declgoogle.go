@@ -422,7 +422,7 @@ func buildDeclGoogleInner(
 	}
 	if ctx.SystemPrompt != "" {
 		req.SystemInstruction = &googleSysInstr{
-			Parts: []googleSysInstrPart{{Text: SanitizeSurrogates(ctx.SystemPrompt)}},
+			Parts: []googleSysInstrPart{{Text: SanitizeSurrogates(ai.FlattenSystemPrompt(ctx.SystemPrompt))}},
 		}
 	}
 	if len(genConfig) > 0 {

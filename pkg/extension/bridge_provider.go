@@ -246,6 +246,7 @@ func newExtStreamAdapter(b *Bridge, providerID string) ai.StreamFunction {
 	return func(ctx context.Context, model *ai.Model, prompt ai.Context, options *ai.StreamOptions) *ai.AssistantMessageEventStream {
 		out := ai.NewAssistantMessageEventStream()
 		streamID := newStreamID()
+		prompt.SystemPrompt = ai.FlattenSystemPrompt(prompt.SystemPrompt)
 		b.activeStreams.Store(streamID, out)
 
 		// Marshal model+prompt+options as opaque JSON — the extension is free

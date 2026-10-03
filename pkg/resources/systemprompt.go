@@ -9,6 +9,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/kfet/fir/pkg/ai"
 )
 
 // hostnameFunc resolves the current machine's short kernel hostname.
@@ -80,26 +82,39 @@ func BuildSystemPrompt(opts BuildSystemPromptOptions) string {
 }
 
 func buildCustomPrompt(opts BuildSystemPromptOptions, promptCwd, date, host, appendSection string) string {
-	prompt := opts.CustomPrompt + appendSection
-
-	if len(opts.ContextFiles) > 0 {
-		prompt += "\n\n# Project Context\n\nProject-specific instructions and guidelines:\n\n"
-		for _, cf := range opts.ContextFiles {
-			prompt += fmt.Sprintf("## %s\n\n%s\n\n", cf.Path, cf.Content)
-		}
-	}
+	prompt := opts.CustomPrompt
 
 	hasRead := len(opts.SelectedTools) == 0 || slices.Contains(opts.SelectedTools, "read")
 	if hasRead && len(opts.Skills) > 0 {
 		prompt += FormatSkillsForPrompt(opts.Skills)
 	}
 
-	prompt += fmt.Sprintf("\nCurrent date: %s", date)
-	prompt += fmt.Sprintf("\nCurrent working directory: %s", promptCwd)
-	if host != "" {
-		prompt += fmt.Sprintf("\nCurrent host: %s", host)
+	return prompt + volatileSuffix(opts, promptCwd, date, host, appendSection)
+}
+
+// volatileSuffix renders the per-session part of the system prompt, led by
+// the cache boundary: everything before the boundary must be byte-identical
+// across sessions so it hits the Anthropic prompt cache (see
+// ai.SystemPromptCacheBoundary). Anything that varies with cwd, project,
+// date, host or caller-supplied text belongs here.
+func volatileSuffix(opts BuildSystemPromptOptions, promptCwd, date, host, appendSection string) string {
+	var b strings.Builder
+	b.WriteString(ai.SystemPromptCacheBoundary)
+	b.WriteString(appendSection)
+
+	if len(opts.ContextFiles) > 0 {
+		b.WriteString("\n\n# Project Context\n\nProject-specific instructions and guidelines:\n\n")
+		for _, cf := range opts.ContextFiles {
+			fmt.Fprintf(&b, "## %s\n\n%s\n\n", cf.Path, cf.Content)
+		}
 	}
-	return prompt
+
+	fmt.Fprintf(&b, "\nCurrent date: %s", date)
+	fmt.Fprintf(&b, "\nCurrent working directory: %s", promptCwd)
+	if host != "" {
+		fmt.Fprintf(&b, "\nCurrent host: %s", host)
+	}
+	return b.String()
 }
 
 func buildDefaultPrompt(opts BuildSystemPromptOptions, promptCwd, date, host, appendSection string) string {
@@ -137,23 +152,9 @@ func buildDefaultPrompt(opts BuildSystemPromptOptions, promptCwd, date, host, ap
 Guidelines:
 %s`, guidelinesStr)
 
-	prompt += appendSection
-
-	if len(opts.ContextFiles) > 0 {
-		prompt += "\n\n# Project Context\n\nProject-specific instructions and guidelines:\n\n"
-		for _, cf := range opts.ContextFiles {
-			prompt += fmt.Sprintf("## %s\n\n%s\n\n", cf.Path, cf.Content)
-		}
-	}
-
 	if toolSet["read"] && len(opts.Skills) > 0 {
 		prompt += FormatSkillsForPrompt(opts.Skills)
 	}
 
-	prompt += fmt.Sprintf("\nCurrent date: %s", date)
-	prompt += fmt.Sprintf("\nCurrent working directory: %s", promptCwd)
-	if host != "" {
-		prompt += fmt.Sprintf("\nCurrent host: %s", host)
-	}
-	return prompt
+	return prompt + volatileSuffix(opts, promptCwd, date, host, appendSection)
 }

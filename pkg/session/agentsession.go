@@ -1142,7 +1142,7 @@ func (s *AgentSession) Hooks() *AgentSessionHooks {
 
 // GetSystemPrompt returns the current base system prompt.
 func (s *AgentSession) GetSystemPrompt() string {
-	return s.baseSystemPrompt
+	return ai.FlattenSystemPrompt(s.baseSystemPrompt)
 }
 
 // PrependContext injects a [SYS_EXT]-tagged user-role message into the
