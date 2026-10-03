@@ -97,6 +97,15 @@ fleet prompt worker-2 "$TASK_B" &
 wait
 ```
 
+### Subagent with context: fork yourself
+
+Default way to start a subagent that needs this session's context (instead of a fresh session or an `aside` delegate that re-explores):
+1. `agent_introspect` → `session.file`, `session.forkAt`.
+2. In the SAME cwd on the SAME model: `fir --resume <file> --at <forkAt> --model <same> -p '<task; return a short summary>'` (ACP: `session/load` with `at`).
+3. Use only the child's summary; the parent file is untouched.
+
+Rules: same model and tool set or the cache misses (an `aside` delegate on a cheaper model always misses); fork promptly (5-min cache TTL); the child inherits the full context, so don't fork near the context limit; children that write files need their own worktree; prefer it when the parent holds >~30k tokens of useful context, use a fresh session for unrelated work. Measured 2026-10-03 on fir 1.25.0: forking a 97.7k-token session gave first-turn cacheRead 96,131 / cacheWrite 711 (~98% cached); on 1.24.4 (before the prompt split) cacheRead was 0.
+
 ### Forking a child at a turn
 
 To branch an agent from an earlier point (A/B a different instruction from the

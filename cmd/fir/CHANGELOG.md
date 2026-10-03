@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- `self` and `acp-shepherd` skills: "Subagent with context: fork yourself" recipe is now the default way to start a context-needing subagent.
+
 ## [1.25.0] - 2026-10-03
 
 ### Changed
