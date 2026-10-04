@@ -137,11 +137,17 @@ type errExitCode int
 func (e errExitCode) Error() string { return fmt.Sprintf("exit status %d", int(e)) }
 
 func main() {
-	if err := applyChdirFlag(); err != nil {
+	if err := applyAgentDirFlag(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
-	if err := applyAgentDirFlag(); err != nil {
+	// An extension CLI verb named as the first argument owns the rest of
+	// argv — `fir observe --cwd .` means the verb's own --cwd, not the
+	// global -C/--cwd chdir flag. Dispatch it before the chdir flag is
+	// applied and stripped. (`fir -C dir observe` still chdirs first: the
+	// verb is then dispatched from run().)
+	runLeadingExtensionVerb()
+	if err := applyChdirFlag(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}

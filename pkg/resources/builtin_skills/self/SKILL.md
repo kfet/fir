@@ -151,33 +151,52 @@ Slash commands and tools take **snapshots** (last N transcript lines) and send s
 The `observe` extension is a builtin and loads automatically in every session — no special flags needed. Observation commands run from any other terminal:
 
 ```
-fir observe                        # list LIVE sessions (running/idle) across all fir processes
+fir observe                        # list LIVE sessions (status idle/running/error/no-model)
 fir observe --all                  # include ended + crashed sessions
-fir observe <id-prefix>            # LIVE tail-and-format the transcript (follows in real time; Ctrl-\ to detach)
-fir observe <id-prefix> --json     # raw JSONL passthrough
-fir observe --cwd .                # resolve by current directory
-fir observe <id> --interact        # also pipe stdin to session (single-pane convenience)
+fir observe --json                 # the list as JSON (one status object per session)
+fir observe <id-prefix>            # status + last 50 entries, then exit (on a TTY: follow live)
+fir observe <id> -n 200            # snapshot of the last 200 entries; always exits
+fir observe <id> -f                # follow live until the session ends (Ctrl-C / Ctrl-\ to stop)
+fir observe <id> --status [--json] # status only: idle|running|error|no-model|ended|crashed,
+                                   #   model, current tool, run count, last error, startup notice
+fir observe <id> --wait [--timeout S]  # block until the current run ends (124 on timeout)
+fir observe <id-prefix> --json     # raw JSONL (snapshot; with -f a raw tail)
+fir observe --cwd .                # resolve by directory (symlinks resolved)
+fir observe <id> --interact        # follow + pipe stdin to the session
 
-fir send <id-prefix>               # send messages interactively (Enter to send each line)
-fir send <id-prefix> --steer       # all messages sent as steer (interrupt)
-fir send <id-prefix> --follow      # all messages sent as followUp (queue)
-echo "nudge" | fir send <id>       # pipe a single message
+fir send <id> 'message'            # send one message (args joined)
+fir send <id> --wait 'message'     # send, block until that turn ends, print the final reply
+                                   #   (exit 1 if the turn failed, 124 on --timeout S)
+echo "brief" | fir send <id>       # piped stdin = ONE message (multi-line ok)
+fir send <id-prefix>               # on a TTY: interactive, Enter sends each line
+fir send <id> --steer|--follow ... # deliver as steer (interrupt) / followUp (queue)
+fir send <id> --abort              # cancel the current turn
 ```
 
-`<id-prefix>` prefix-matches against session id, session name, or basename(cwd). First-line sigils in `fir send`: `!message` → steer, `+message` → followUp, `\!`/`\+` to escape. `Ctrl-\` detaches.
+`<id-prefix>` prefix-matches against session id, session name, or basename(cwd). First-line sigils in `fir send`: `!message` → steer, `+message` → followUp, `~` → abort, `\!`/`\+`/`\~` to escape. `Ctrl-\` detaches.
+
+Status comes from the core-owned **`session/status` observable card** (`<transcript>.cards`), which `AgentSession` writes in agent-loop order on every lifecycle transition (`pkg/session/statuscard.go`): `idle`, `running` (from prompt acceptance to `agent_end`; detail names the running tool), `error` (last run ended with a provider/auth error — the message is in `error:`), `no-model` (prompts are refused; the startup "No models available…" notice is in `notice:`). Detail is `key: value` lines (`status`, `model`, `tool`, `runs`, `error`, `notice`). Liveness additionally probes the session's input socket, so a reused pid does not resurrect a dead session.
 
 **Note**: when using `-e <name>` flags to selectively enable extensions, include all required auth extensions too (e.g. `-d auto-namer -d notify` to suppress noise without blocking auth). Using `-e observe` alone blocks auth extensions.
 
-For multi-pane monitoring: run `fir observe <id>` in one tmux pane and `fir send <id>` in another.
+For multi-pane monitoring: run `fir observe <id> -f` in one tmux pane and `fir send <id>` in another.
 
-## Remote observation over SSH
+## Driving a fir agent on another host
 
-- `fir observe <id>` LIVE-tails by default — no `watch` loop needed.
-- Wrap in tmux so a dropped SSH link does not kill the view:
-  `ssh -t HOST 'tmux new -As watch "fir observe <id>"'`
-  `-t` allocates the PTY tmux needs; `Ctrl-\` detaches.
-- To steer (not just watch): `fir send <id>` or the `send_session` tool.
-- Reminder: the CLI is the LIVE path; tools/slash-commands are snapshots.
+`observe_session` / `send_session` / `stop_session` see only sessions on the local machine. For a session on another host, run the CLI there over ssh (`rexec`) — snapshots need no TTY and always exit:
+
+```
+# start a named, headless-ish agent (tmux is just the process holder)
+ssh HOST "tmux new -d -s w1 -c ~/proj 'fir --session-name w1'"
+
+ssh HOST fir observe                       # what is running there, with status
+ssh HOST fir observe w1 --status --json    # machine-readable status / last error
+ssh HOST fir send w1 --wait --timeout 30m < brief.md  # send, wait for the turn, get the reply
+ssh HOST fir observe w1 -n 40              # what it did
+ssh HOST "fir send w1 '!new direction'"    # steer;  fir send w1 --abort  cancels
+```
+
+Scraping the tmux screen is a fallback only. For a long-lived human view: `ssh -t HOST 'tmux new -As watch "fir observe <id> -f"'`.
 
 ## Environment Variables
 

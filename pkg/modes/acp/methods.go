@@ -284,7 +284,7 @@ func (pa *firAgent) Cancel(_ context.Context, params acpsdk.CancelNotification) 
 	if !ok {
 		return newSessionNotFound(string(params.SessionId))
 	}
-	entry.session.Agent.Abort()
+	entry.session.Abort()
 	CleanupPendingBashTerminals(context.Background(), pa.conn, entry.termState, string(params.SessionId))
 	CleanupBackgroundTerminals(context.Background(), pa.conn, entry.termState, string(params.SessionId))
 	return nil

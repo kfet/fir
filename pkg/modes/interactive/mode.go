@@ -884,7 +884,7 @@ func (m *InteractiveMode) setupEditorHandlers() {
 
 		// If streaming, interrupt/abort
 		if m.session != nil && m.session.IsStreaming() {
-			m.session.Agent.Abort()
+			m.session.Abort()
 			return
 		}
 

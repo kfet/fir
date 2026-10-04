@@ -491,19 +491,10 @@ func run() error {
 		if h := dispatchSubcommand(os.Args[1]); h != nil {
 			return h()
 		}
-		// Extension-registered CLI verbs (frontmatter `cli_verbs:`).
-		// Reserved subcommands take precedence above; unknown verbs fall
-		// through to ParseArgs as today. Skip lookup for flags — they
-		// can never be a verb, and discovery walks the extension tree.
-		first := os.Args[1]
-		if first != "" && first[0] != '-' {
-			if code, ok, err := tryRunExtensionVerb(first, os.Args[2:]); ok {
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-				}
-				os.Exit(code)
-			}
-		}
+		// Extension-registered CLI verbs reached after global flags
+		// (`fir -C dir observe …`); a leading verb was already dispatched
+		// by main.runLeadingExtensionVerb.
+		runExtensionVerbAt1()
 	}
 
 	// Register built-in API providers (Anthropic, OpenAI, Google, Bedrock)

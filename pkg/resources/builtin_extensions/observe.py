@@ -42,10 +42,12 @@ import calendar
 import contextlib
 import json
 import os
+import re
 import socket
 import sys
 import threading
 import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -246,7 +248,9 @@ def _bind_socket(path: Path) -> socket.socket | None:
     try:
         sock.bind(str(path))
         os.chmod(str(path), 0o600)
-        sock.listen(8)
+        # Liveness probes from `fir observe` / htop / observe_session
+        # connect and hang up; leave room so they never crowd out a send.
+        sock.listen(32)
     except OSError as e:
         sock.close()
         print(f"observe: bind {path} failed: {e}", file=sys.stderr)
@@ -463,7 +467,11 @@ def on_session_shutdown(params: dict[str, Any], ctx: fir_ext.Context) -> None:
 # running/idle) are both unobservable — the socket is closed and no further
 # transcript bytes will appear. We keep their sidecars for post-mortem tail
 # but hide them from default listings.
-_LIVE_STATUSES = ("running", "idle")
+#
+# `error` and `no-model` come from the core-owned session/status card (see
+# _apply_status_card): the session is alive and accepting input, but its last
+# run failed / it has no usable model.
+_LIVE_STATUSES = ("running", "idle", "error", "no-model")
 
 
 def _is_live(s: dict[str, Any]) -> bool:
@@ -485,30 +493,201 @@ def _read_sidecars(include_all: bool = True) -> list[dict[str, Any]]:
     for entry in os.listdir(d):
         if not entry.endswith(".json"):
             continue
-        full = d / entry
-        try:
-            with open(full, encoding="utf-8") as f:
-                s = json.load(f)
-        except (OSError, ValueError):
+        s = _load_sidecar(d / entry)
+        if s is None:
             continue
-        if not isinstance(s, dict):
-            continue
-        s["_sidecar_path"] = str(full)
-        status = s.get("status", "")
-        if status in _LIVE_STATUSES:
-            try:
-                os.kill(int(s.get("pid") or 0), 0)
-            except (ProcessLookupError, ValueError, OverflowError):
-                s["status"] = "crashed"
-            except PermissionError:
-                pass  # process exists, just not ours; treat as alive
-            except OSError:
-                s["status"] = "crashed"
         if not include_all and not _is_live(s):
             continue
         out.append(s)
     out.sort(key=lambda s: s.get("started_at", ""), reverse=True)
     return out
+
+
+def _load_sidecar(full: Path, probe_socket: bool = True) -> dict[str, Any] | None:
+    """Read one sidecar; reclassify a dead pid as 'crashed' and overlay the
+    core status card for live sessions. None if unreadable.
+
+    ``probe_socket=False`` skips the socket liveness probe — used by the
+    --wait poll loops, which already resolved a live session and must not
+    misread a momentarily full listen backlog as death."""
+    try:
+        with open(full, encoding="utf-8") as f:
+            s = json.load(f)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(s, dict):
+        return None
+    s["_sidecar_path"] = str(full)
+    if s.get("status", "") in _LIVE_STATUSES:
+        try:
+            os.kill(int(s.get("pid") or 0), 0)
+        except (ProcessLookupError, ValueError, OverflowError):
+            s["status"] = "crashed"
+        except PermissionError:
+            pass  # process exists, just not ours; treat as alive
+        except OSError:
+            s["status"] = "crashed"
+    if probe_socket and s.get("status", "") in _LIVE_STATUSES and not _socket_alive(s):
+        s["status"] = "crashed"
+    if s.get("status", "") in _LIVE_STATUSES:
+        _apply_status_card(s)
+    return s
+
+
+# A freshly started session writes its sidecar a moment before binding its
+# socket; don't call it dead during that window.
+_SOCKET_GRACE_S = 15.0
+
+
+def _socket_alive(s: dict[str, Any]) -> bool:
+    """Second liveness check behind the pid probe. PIDs get reused (after a
+    reboot every old sidecar's pid may belong to some unrelated daemon), so
+    a session whose input socket is gone or refuses connections is dead
+    even if ``kill(pid, 0)`` succeeds. Unknown outcomes count as alive."""
+    path = s.get("socket_path", "") or ""
+    if not path:
+        return True  # never bound (bind failed) — rely on the pid check
+    # A refusal can also mean a briefly full backlog, so it must repeat
+    # before we believe it; a missing socket file is definitive.
+    for attempt in range(2):
+        result = _probe_socket(path)
+        if result is None:
+            return True
+        if result == "missing":
+            break
+        if attempt == 0:
+            time.sleep(0.05)
+    started = _parse_card_ts(s.get("started_at", "") or "")
+    return bool(started) and time.time() - started < _SOCKET_GRACE_S
+
+
+def _probe_socket(path: str) -> str | None:
+    """Connect-and-hang-up. None = alive or unknown; "missing" = no socket
+    file; "refused" = nothing accepting."""
+    try:
+        conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    except OSError:
+        return None
+    try:
+        conn.settimeout(0.5)
+        conn.connect(path)
+        return None
+    except FileNotFoundError:
+        return "missing"
+    except ConnectionRefusedError:
+        return "refused"
+    except OSError:
+        return None
+    finally:
+        with contextlib.suppress(OSError):
+            conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Session status — core-owned session/status card
+# ---------------------------------------------------------------------------
+#
+# fir core publishes a "session/status" observable card from the agent loop's
+# own (ordered) event handler: status idle/running/error/no-model, the model,
+# the running tool, the completed-run count, and the last error / startup
+# notice. It is authoritative for live sessions. The sidecar's own status
+# (written from this extension's per-event threads, which can apply out of
+# order) is only a fallback for hosts that predate the card.
+
+_STATUS_CARD_SOURCE = "session"
+_STATUS_CARD_KEY = "status"
+
+
+def _parse_status_card(cards: list[dict[str, Any]]) -> dict[str, str]:
+    """Return the session/status card as a dict of its "key: value" detail
+    lines plus ``ts`` and ``slug``. Empty dict when no such card exists."""
+    for c in cards:
+        if c.get("source") != _STATUS_CARD_SOURCE or c.get("key") != _STATUS_CARD_KEY:
+            continue
+        out: dict[str, str] = {"ts": c.get("ts") or "", "slug": c.get("slug") or ""}
+        for ln in str(c.get("detail") or "").splitlines():
+            k, sep, v = ln.partition(": ")
+            if sep and k:
+                out[k.strip()] = v.strip()
+        return out
+    return {}
+
+
+def _apply_status_card(s: dict[str, Any]) -> None:
+    """Overlay the core status card onto a live sidecar dict (in place)."""
+    card = _parse_status_card(_read_cards(s.get("cards_path", "") or ""))
+    s["_status_card"] = card
+    st = card.get("status", "")
+    if st:
+        s["status"] = st
+
+
+_CARD_TS_RE = re.compile(r"^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)(?:\.(\d+))?(Z|[+-]\d\d:\d\d)$")
+
+
+def _parse_card_ts(ts: str) -> float:
+    """Parse a Go RFC3339Nano card timestamp to epoch seconds (0 on failure).
+    Python 3.9's fromisoformat handles neither 'Z' nor 9-digit fractions."""
+    m = _CARD_TS_RE.match((ts or "").strip())
+    if not m:
+        return 0.0
+    # Go trims trailing zeros ("…:21.5Z"); 3.9's fromisoformat only takes
+    # exactly 3 or 6 fractional digits.
+    base, frac, tz = m.group(1), (m.group(2) or "")[:6].ljust(6, "0"), m.group(3)
+    if tz == "Z":
+        tz = "+00:00"
+    try:
+        return datetime.fromisoformat(base + "." + frac + tz).timestamp()
+    except ValueError:
+        return 0.0
+
+
+def _session_status(s: dict[str, Any]) -> dict[str, Any]:
+    """Operator-facing status summary for one sidecar (as returned by
+    _read_sidecars). Stable keys — this is the `--status --json` schema."""
+    card = s.get("_status_card") or {}
+    model_d = s.get("model") or {}
+    model = card.get("model", "")
+    if not model:
+        m = _format_model(model_d.get("provider", "") or "", model_d.get("id", "") or "")
+        model = "" if m == "-" else m
+    runs = card.get("runs", "")
+    return {
+        "session_id": s.get("session_id", "") or "",
+        "name": s.get("session_name", "") or "",
+        "cwd": s.get("cwd", "") or "",
+        "status": s.get("status", "") or "",
+        "live": _is_live(s),
+        "model": model,
+        "tool": card.get("tool", ""),
+        "runs": int(runs) if runs.isdigit() else None,
+        "error": card.get("error", ""),
+        "notice": card.get("notice", ""),
+        "updated_at": card.get("ts", ""),
+        "started_at": s.get("started_at", "") or "",
+        "host_pid": int(s.get("host_pid") or s.get("pid") or 0),
+        "store_path": s.get("store_path", "") or "",
+    }
+
+
+def _render_status(st: dict[str, Any]) -> str:
+    """Human status block: one summary line plus error/notice lines."""
+    sid8 = (st.get("session_id") or "")[:8]
+    head = f"session {sid8}"
+    if st.get("name"):
+        head += f" ({st['name']})"
+    parts = [head, f"status: {st.get('status') or '?'}"]
+    if st.get("tool"):
+        parts.append(f"tool: {st['tool']}")
+    parts.append(f"model: {st.get('model') or '(none)'}")
+    if st.get("runs") is not None:
+        parts.append(f"runs: {st['runs']}")
+    lines = ["  ·  ".join(parts)]
+    if st.get("error"):
+        lines.append(f"error: {st['error']}")
+    if st.get("notice"):
+        lines.append(f"notice: {st['notice']}")
+    return "\n".join(lines)
 
 
 def _resolve_sidecar(id_prefix: str, cwd_flag: str) -> dict[str, Any]:
@@ -522,13 +701,13 @@ def _resolve_sidecar(id_prefix: str, cwd_flag: str) -> dict[str, Any]:
         want = cwd_flag
         if want == ".":
             want = os.getcwd()
-        want = os.path.abspath(want)
-        matches = [s for s in all_sidecars if s.get("cwd") == want]
+        want = os.path.realpath(want)  # /tmp vs /private/tmp on macOS
+        matches = [
+            s for s in all_sidecars if os.path.realpath(s.get("cwd", "") or "/nonexistent") == want
+        ]
         if not matches:
             raise ValueError(f"no session in cwd {want}")
-        if len(matches) > 1:
-            raise ValueError(_ambiguity_message(matches))
-        return matches[0]
+        return _pick_match(matches)
 
     matches = []
     for s in all_sidecars:
@@ -543,8 +722,22 @@ def _resolve_sidecar(id_prefix: str, cwd_flag: str) -> dict[str, Any]:
             matches.append(s)
     if not matches:
         raise ValueError(f"no session matching {id_prefix!r}")
-    if len(matches) > 1:
-        raise ValueError(_ambiguity_message(matches))
+    return _pick_match(matches)
+
+
+def _pick_match(matches: list[dict[str, Any]]) -> dict[str, Any]:
+    """Choose among sidecars matching a prefix/name/cwd. A live session wins
+    over ended/crashed ones — re-spawning a worker under the same name or in
+    the same directory must not make it unaddressable. Two live matches are
+    ambiguous; with none live, the newest post-mortem record is used
+    (``matches`` is sorted newest first)."""
+    if len(matches) == 1:
+        return matches[0]
+    live = [s for s in matches if _is_live(s)]
+    if len(live) == 1:
+        return live[0]
+    if len(live) > 1:
+        raise ValueError(_ambiguity_message(live))
     return matches[0]
 
 
@@ -590,6 +783,36 @@ def _trunc_one_line(s: str, max_runes: int) -> str:
     return _trunc(s, max_runes)
 
 
+# Tool results are summarised to this many runes — enough to see what came
+# back without one `cat` drowning the snapshot.
+_TOOL_RESULT_MAX = 200
+_TOOL_ARGS_MAX = 160
+
+
+def _summarise_tool_call(item: dict[str, Any]) -> str:
+    """ "→ name  <args>" for a toolCall / tool_use block. Prefers the obvious
+    single argument (command, path, …) over a JSON dump."""
+    name = str(item.get("name", ""))
+    args = item.get("arguments")
+    if args is None:
+        args = item.get("input")
+    summary = ""
+    if isinstance(args, dict):
+        for k in ("command", "path", "pattern", "query", "url", "goal", "title"):
+            v = args.get(k)
+            if isinstance(v, str) and v:
+                summary = v
+                break
+        if not summary and args:
+            summary = json.dumps(args, ensure_ascii=False)
+    elif isinstance(args, str):
+        summary = args
+    out = "→ " + name
+    if summary:
+        out += "  " + _trunc_one_line(summary, _TOOL_ARGS_MAX)
+    return out
+
+
 def _summarise_content(content: Any) -> str:
     """Reduce a Message.Content blob (string or list of blocks) to one line."""
     limit = 0
@@ -605,8 +828,8 @@ def _summarise_content(content: Any) -> str:
                 txt = item.get("text", "")
                 if txt:
                     parts.append(_trunc_one_line(txt, limit))
-            elif t == "tool_use":
-                parts.append("→ " + str(item.get("name", "")))
+            elif t in ("tool_use", "toolCall"):
+                parts.append(_summarise_tool_call(item))
             elif t == "tool_result":
                 r_limit = 100 if (limit and limit > 100) else limit
                 parts.append("← " + _trunc_one_line(str(item.get("content", "")), r_limit))
@@ -691,9 +914,34 @@ class _Formatter:
         if role == "user":
             return self._wrap("▸ user", "cyan") + "  " + body
         if role == "assistant":
-            return self._wrap("◆ assistant", "green") + "  " + body
-        if role == "tool":
-            return self._wrap("✓ tool", "magenta") + "  " + body
+            out = self._wrap("◆ assistant", "green")
+            if body:
+                out += "  " + body
+            # A failed turn persists an assistant message with no content and
+            # the reason in errorMessage — surface it, or the observer sees
+            # an empty line while the TUI shows the real problem.
+            stop = raw.get("stopReason", "")
+            err_msg = str(raw.get("errorMessage") or "")
+            if stop == "error" and "context canceled" in err_msg:
+                # Almost always an abort landing mid-request; keep the text
+                # since the transcript can't prove it was requested.
+                out += "  " + self._wrap(
+                    "(cancelled: " + _trunc_one_line(err_msg, 0) + ")", "yellow"
+                )
+            elif stop == "error":
+                msg = err_msg or "provider error"
+                out += "  " + self._wrap("✗ error: " + _trunc_one_line(msg, 0), "red")
+            elif stop == "aborted":
+                out += "  " + self._wrap("(aborted)", "yellow")
+            return out
+        if role in ("tool", "toolResult"):
+            name = str(raw.get("toolName", "") or "")
+            body = _trunc_one_line(body, _TOOL_RESULT_MAX)
+            if raw.get("isError"):
+                label = self._wrap("✗ " + (name or "tool"), "red")
+            else:
+                label = self._wrap("✓ " + (name or "tool"), "magenta")
+            return label + "  " + body
         if role == "system":
             return self._wrap("· system  ", "dim") + body
         return self._wrap(f"· {role} ", "dim") + body
@@ -916,6 +1164,8 @@ def _render_cards_header(cards: list[dict[str, Any]]) -> str:
     slugs_by_source: dict[str, str] = {}
     for c in _sort_cards(cards):
         src = c.get("source") or ""
+        if src == _STATUS_CARD_SOURCE and c.get("key") == _STATUS_CARD_KEY:
+            continue  # shown as the status block instead
         if src in slugs_by_source:
             continue
         slug = (c.get("slug") or "").strip()
@@ -993,14 +1243,19 @@ def _snapshot_transcript(
         sid8 = (s.get("session_id", "") or "")[:8]
         raise ValueError(f"session {sid8} has no transcript on disk (in-memory)")
     cards = _read_cards(s.get("cards_path", "") or "")
+    status = _session_status(s)
 
     sections: list[str] = []
 
     if raw_json:
-        # Emit cards as a structured JSON object the model can parse,
-        # alongside the (raw) transcript lines.
-        sections.append(json.dumps({"cards": cards}, indent=2))
+        # Emit status + cards as a structured JSON object the model can
+        # parse, alongside the (raw) transcript lines.
+        sections.append(json.dumps({"status": status, "cards": cards}, indent=2))
     else:
+        # Status first: it is what the TUI shows and what an operator
+        # needs before reading any transcript (no model, auth failure,
+        # still running, crashed).
+        sections.append(_render_status(status))
         header = _render_cards_header(cards)
         if header:
             sections.append(header)
@@ -1230,7 +1485,16 @@ def cmd_send(args: list[str], ctx: fir_ext.Context) -> dict[str, Any]:
         "to fetch a partial transcript line range instead of the tail — handy "
         "for paging through a long session. Useful for checking what a "
         "sibling agent is doing or auditing a long-running session. "
-        "id_prefix matches the session id, session name, or basename(cwd)."
+        "id_prefix matches the session id, session name, or basename(cwd). "
+        "Every snapshot starts with a status line — status idle | running | "
+        "error | no-model | ended | crashed, model, current tool, last error "
+        "and startup notice (e.g. 'No models available') — so you can tell "
+        "a busy agent from a broken one. "
+        "LOCAL ONLY: sees sessions on this machine. For a fir session on "
+        "another host, run the CLI over ssh (rexec): `fir observe` (list), "
+        "`fir observe <id> --status --json`, `fir observe <id> -n 40` "
+        "(snapshot, exits — no TTY needed). Do not scrape a tmux screen "
+        "for this."
     ),
     parameters={
         "type": "object",
@@ -1317,7 +1581,14 @@ def tool_observe(params: dict[str, Any], ctx: fir_ext.Context) -> str:
         "interrupt the target's current turn, or 'followUp' to queue after "
         "it. Connects to the target's per-session Unix socket; the target "
         "must be live (not ended). Use to coordinate with sibling agents — "
-        "e.g. 'review this branch when done', or to nudge a stuck session."
+        "e.g. 'review this branch when done', or to nudge a stuck session. "
+        "LOCAL ONLY: reaches sessions on this machine. For a fir session on "
+        "another host, run the CLI over ssh (rexec): "
+        "`fir send <id> --wait --timeout 10m 'message'` sends, blocks until that turn "
+        "finishes and prints the agent's final reply (exit 1 if the turn "
+        "failed); `fir send <id> '!steer text'` interrupts; "
+        "`fir send <id> --abort` cancels the turn. Prefer this to typing "
+        "into a tmux pane."
     ),
     parameters={
         "type": "object",
@@ -1407,15 +1678,30 @@ def tool_stop(params: dict[str, Any], ctx: fir_ext.Context) -> dict[str, Any]:
 # CLI verb: `fir observe`
 # ---------------------------------------------------------------------------
 
-_OBSERVE_USAGE = """usage: fir observe [<id-prefix>] [--cwd <path>] [--all] [--json] [--interact]
+_OBSERVE_USAGE = """usage: fir observe [<id-prefix>] [--cwd <path>] [--all] [--json]
+                   [-n N | --lines N] [-f | --follow] [--status] [--wait] [--timeout S]
+                   [--interact]
 
-  fir observe                  list LIVE sessions across all running fir processes
+  fir observe                  list LIVE sessions (status: idle/running/error/no-model)
   fir observe --all            include ended and crashed sessions in the list
-  fir observe <id-prefix>      tail-and-format the matching session's transcript
-  fir observe --cwd <path>     resolve session by working directory
-  fir observe --cwd .          session in current directory (error if 0/many)
-  fir observe <id> --json      raw JSONL transcript — no formatting
-  fir observe <id> --interact  also pipe stdin to session as input (Enter to send)
+  fir observe --json           the session list as JSON (one status object per session)
+  fir observe <id-prefix>      status + last 50 transcript entries, then exit
+                               (on a TTY without -n: follow the transcript live)
+  fir observe <id> -n 200      status + last 200 entries, then exit (snapshot)
+  fir observe <id> -f          follow the transcript live until the session ends
+  fir observe <id> --status    status only: idle | running | error | no-model |
+                               ended | crashed, plus model, current tool, last
+                               error and startup notice (add --json for scripts)
+  fir observe <id> --wait      block until the current run finishes, then print
+                               status + snapshot (--timeout S: give up, exit 124)
+  fir observe --cwd <path>     resolve session by working directory ('.' = here)
+  fir observe <id> --json      raw JSONL (with -f: raw tail; with --status: JSON)
+  fir observe <id> --interact  follow, and pipe stdin to the session as input
+
+Snapshots are made for scripts and remote use — no TTY needed, always exit:
+  ssh <host> fir observe                       what is running there
+  ssh <host> fir observe <id> --status --json  machine-readable status
+  ssh <host> fir observe <id> -n 40            what it is doing / why it stopped
 
 With --interact, each line you type is sent as one message (Enter sends it).
 First-line sigils control delivery:
@@ -1426,35 +1712,55 @@ First-line sigils control delivery:
                  without killing the session (text after ~ is ignored)
   \\!message    → literal '!' (escaped); likewise \\+ for '+', \\~ for '~'
 
-To steer or abort a running turn one-shot without attaching, use `fir send`:
+To message a session without attaching, use `fir send`:
+  fir send <id> 'run the tests'          send a prompt
+  fir send <id> --wait --timeout 10m 'run the tests'
+                                         send, wait for the turn, print the reply
   fir send <id> '!stop and reconsider'   interrupt the current turn now
   fir send <id> --abort                  cancel the current turn now
 See `fir send --help` for the full sender interface.
 """
 
-_SEND_USAGE = """usage: fir send <id-prefix> [--steer | --follow | --abort] [--cwd <path>]
+_SEND_USAGE = """usage: fir send <id-prefix> [--steer | --follow | --abort] [--wait] [--timeout S]
+                [--cwd <path>] [message...]
 
-  fir send <id-prefix>            interactive: Enter to send each line, Ctrl-\\ to disconnect
-  fir send <id-prefix> --steer    all messages sent as steer (interrupt)
-  fir send <id-prefix> --follow   all messages sent as followUp (queue)
-  fir send <id-prefix> --abort    one-shot: cancel the current turn, then exit
-  fir send --cwd .                resolve session by current directory
-  echo "fix the bug" | fir send <id>   pipe a single message
+  fir send <id> 'fix the bug'          send one message (all args joined with spaces)
+  fir send <id> --wait 'fix the bug'   send, block until the turn finishes, print the
+                                       final assistant reply (exit 1 if the run
+                                       failed, 124 on --timeout S)
+  echo "fix the bug" | fir send <id>   piped stdin is sent as ONE message
+                                       (multi-line is fine)
+  fir send <id>                        on a TTY: interactive, Enter sends each line,
+                                       Ctrl-\\ to disconnect
+  fir send <id> --steer ...            deliver as steer (interrupt the current turn)
+  fir send <id> --follow ...           deliver as followUp (queue after the turn)
+                                       (both start a normal turn if the agent is idle)
+  fir send <id> --abort                cancel the current turn, then exit
+  fir send --cwd . ...                 resolve session by current directory
 
-First-line sigils (override per-message):
+Driving a session on another host (no TTY needed):
+  ssh <host> fir send <id> --wait --timeout 30m 'run make test and report'
+  ssh <host> fir send <id> --wait --timeout 30m < brief.md
+
+Always give --wait a --timeout when a caller can't afford to hang (a stuck
+tool means a stuck ssh); 124 means still running — check with
+`fir observe <id> --status` and wait again with `fir observe <id> --wait`.
+
+First-line sigils (override the default delivery per message):
   message      → new prompt (default)
   !message     → steer: INTERRUPTS the current turn
   +message     → followUp: queued after the current turn
   ~            → abort: CANCELS the current turn (including a stuck tool),
                  without killing the session (text after ~ is ignored)
   \\!message    → literal '!' (escaped); likewise \\+ for '+', \\~ for '~'
-
-One-shot steer / abort (no interactive attach):
-  echo '!stop and reconsider' | fir send <id>
-  printf '!reconsider\\n' | fir send <id>
-  fir send <id> --abort                  cancel the current turn now
-  echo '~' | fir send <id>               same, via the abort sigil
 """
+
+# Exit code for --timeout expiry, matching coreutils `timeout`.
+_EXIT_TIMEOUT = 124
+
+# Set by the cli_signal handler (Ctrl-C / SIGTERM / SIGHUP) so follow and
+# wait loops end promptly and cleanly instead of being killed mid-write.
+_verb_stop = threading.Event()
 
 
 def _age_string(started_at: str, now: float) -> str:
@@ -1475,12 +1781,74 @@ def _age_string(started_at: str, now: float) -> str:
     return f"{int(delta // 86400)}d"
 
 
-def _verb_observe_list(host: fir_ext.Host, include_all: bool = False) -> int:
+def _reload_sidecar(s: dict[str, Any]) -> dict[str, Any]:
+    """Re-read one sidecar (with pid liveness + status card applied).
+    Returns the previous dict marked crashed if the file vanished."""
+    path = s.get("_sidecar_path", "") or ""
+    fresh = _load_sidecar(Path(path), probe_socket=False) if path else None
+    if fresh is None:
+        gone = dict(s)
+        gone["status"] = "crashed"
+        return gone
+    return fresh
+
+
+def _wait_not_running(s: dict[str, Any], timeout: float) -> tuple[dict[str, Any], bool]:
+    """Poll until the session is no longer running. Returns (fresh sidecar,
+    completed); completed is False on timeout or signal."""
+    deadline = time.monotonic() + timeout if timeout > 0 else None
+    while True:
+        s = _reload_sidecar(s)
+        if s.get("status") != "running":
+            return s, True
+        if deadline is not None and time.monotonic() >= deadline:
+            return s, False
+        if _verb_stop.wait(0.25):
+            return s, False
+
+
+def _verb_observe_list(
+    host: fir_ext.Host, include_all: bool = False, json_out: bool = False
+) -> int:
+    if json_out:
+        rows = [_session_status(s) for s in _read_sidecars(include_all=include_all)]
+        host.println(json.dumps(rows, indent=2))
+        return 0
     out = _snapshot_session_list(include_all=include_all)
     if out == _NO_SESSIONS_NOTICE:
         host.eprintln(out)
         return 0
     host.println(out)
+    return 0
+
+
+def _verb_observe_one(host: fir_ext.Host, o: _ObserveOpts) -> int:
+    """Non-follow paths: --status, --wait, and the snapshot."""
+    try:
+        s = _resolve_sidecar(o.id_prefix, o.cwd)
+    except ValueError as e:
+        host.eprintln(str(e))
+        return 1
+    timed_out = False
+    if o.wait:
+        s, done = _wait_not_running(s, o.timeout)
+        if _verb_stop.is_set():
+            return 130
+        timed_out = not done
+    if o.status:
+        st = _session_status(s)
+        host.println(json.dumps(st, indent=2) if o.json_out else _render_status(st))
+    else:
+        sid = s.get("session_id", "") or o.id_prefix
+        try:
+            out = _snapshot_transcript(sid, "", o.lines, o.json_out)
+        except ValueError as e:
+            host.eprintln(str(e))
+            return 1
+        host.println(out)
+    if timed_out:
+        host.eprintln("timed out waiting for the run to finish (still running)")
+        return _EXIT_TIMEOUT
     return 0
 
 
@@ -1531,6 +1899,9 @@ def _verb_observe_tail(
     color = host.stdout_is_tty and not os.environ.get("NO_COLOR")
     fmt = _Formatter(raw_json=json_out, color=color)
 
+    if not json_out:
+        host.println(_render_status(_session_status(s)))
+
     # Tail loop. ~10 syscalls/sec when idle.
     try:
         f = open(store_path, "rb")  # noqa: SIM115 — closed in finally
@@ -1542,7 +1913,7 @@ def _verb_observe_tail(
     sidecar_path = s.get("_sidecar_path", "") or ""
     pending = b""
     try:
-        while True:
+        while not _verb_stop.is_set():
             chunk = f.readline()
             if chunk:
                 pending += chunk
@@ -1557,8 +1928,9 @@ def _verb_observe_tail(
                 # appends bytes without newlines can't pin a CPU.
                 time.sleep(0.01)
                 continue
-            # EOF — poll for growth.
-            time.sleep(0.1)
+            # EOF — poll for growth (woken early by a signal).
+            if _verb_stop.wait(0.1):
+                break
             try:
                 cur_size = os.stat(store_path).st_size
             except FileNotFoundError:
@@ -1574,6 +1946,7 @@ def _verb_observe_tail(
                         return 0
                 except (OSError, ValueError):
                     pass
+        return 0
     finally:
         interact_stop.set()
         with contextlib.suppress(Exception):
@@ -1588,7 +1961,7 @@ def _interact_send_loop(host: fir_ext.Host, conn: socket.socket, stop: threading
             line = host.readline(timeout=0.5)
             if line is None:
                 # EOF or timeout. distinguish via stop event.
-                if stop.is_set():
+                if stop.is_set() or _verb_stop.is_set():
                     return
                 continue
             line = line.rstrip("\n")
@@ -1607,54 +1980,115 @@ def _interact_send_loop(host: fir_ext.Host, conn: socket.socket, stop: threading
             conn.close()
 
 
-def _parse_observe_args(argv: list[str]) -> tuple[str, str, bool, bool, bool, str | None]:
-    """Returns (id_prefix, cwd_flag, json_out, interact, include_all, error_message)."""
-    id_prefix = ""
-    cwd_flag = ""
-    json_out = False
-    interact = False
-    include_all = False
+@dataclass
+class _ObserveOpts:
+    id_prefix: str = ""
+    cwd: str = ""
+    json_out: bool = False
+    interact: bool = False
+    include_all: bool = False
+    lines: int = 0  # 0 = not given (default 50 for snapshots)
+    follow: bool = False
+    status: bool = False
+    wait: bool = False
+    timeout: float = 0.0  # 0 = no limit
+    error: str | None = None
+
+
+def _take_value(argv: list[str], i: int, flag: str) -> tuple[str | None, int]:
+    """Return (value, new_index) for `--flag value` / `--flag=value`."""
+    a = argv[i]
+    if a.startswith(flag + "="):
+        return a[len(flag) + 1 :], i
+    if i + 1 >= len(argv):
+        return None, i
+    return argv[i + 1], i + 1
+
+
+def _parse_timeout(v: str) -> float:
+    t = _parse_duration(v)
+    if t < 0:
+        raise ValueError("must be >= 0")
+    return t
+
+
+def _parse_observe_args(argv: list[str]) -> _ObserveOpts:
+    o = _ObserveOpts()
     i = 0
     while i < len(argv):
         a = argv[i]
         if a == "--json":
-            json_out = True
+            o.json_out = True
         elif a == "--interact":
-            interact = True
+            o.interact = True
         elif a == "--all":
-            include_all = True
-        elif a == "--cwd":
-            if i + 1 >= len(argv):
-                return ("", "", False, False, False, "--cwd requires an argument (path or '.')")
-            cwd_flag = argv[i + 1]
-            i += 1
-        elif a.startswith("--cwd="):
-            cwd_flag = a[len("--cwd=") :]
+            o.include_all = True
+        elif a in ("-f", "--follow"):
+            o.follow = True
+        elif a == "--status":
+            o.status = True
+        elif a == "--wait":
+            o.wait = True
+        elif a in ("-n", "--lines") or a.startswith("--lines="):
+            v, i = _take_value(argv, i, "--lines")
+            try:
+                o.lines = int(v) if v is not None else -1
+            except ValueError:
+                o.lines = -1
+            if o.lines <= 0:
+                o.error = f"{a.split('=')[0]} requires a positive number"
+                return o
+        elif a == "--timeout" or a.startswith("--timeout="):
+            v, i = _take_value(argv, i, "--timeout")
+            try:
+                o.timeout = _parse_timeout(v or "")
+            except ValueError:
+                o.error = "--timeout requires a duration (e.g. 90, 90s, 5m)"
+                return o
+        elif a == "--cwd" or a.startswith("--cwd="):
+            v, i = _take_value(argv, i, "--cwd")
+            if not v:
+                o.error = "--cwd requires an argument (path or '.')"
+                return o
+            o.cwd = v
         elif a in ("--help", "-h"):
-            return ("", "", False, False, False, "__HELP__")
-        elif a.startswith("--"):
-            return ("", "", False, False, False, f"unknown flag: {a}")
+            o.error = "__HELP__"
+            return o
+        elif a.startswith("-"):
+            o.error = f"unknown flag: {a}"
+            return o
         else:
-            if id_prefix:
-                return ("", "", False, False, False, f"unexpected extra argument: {a}")
-            id_prefix = a
+            if o.id_prefix:
+                o.error = f"unexpected extra argument: {a}"
+                return o
+            o.id_prefix = a
         i += 1
-    return (id_prefix, cwd_flag, json_out, interact, include_all, None)
+    if (o.follow or o.interact) and (o.status or o.wait):
+        o.error = "--follow/--interact cannot be combined with --status or --wait"
+    return o
 
 
 @fir_ext.cli_verb("observe")
 def cli_observe(argv: list[str], host: fir_ext.Host) -> int:
-    id_prefix, cwd_flag, json_out, interact, include_all, err = _parse_observe_args(argv)
-    if err == "__HELP__":
+    o = _parse_observe_args(argv)
+    if o.error == "__HELP__":
         host.eprint(_OBSERVE_USAGE)
         return 0
-    if err is not None:
-        host.eprintln(err)
+    if o.error is not None:
+        host.eprintln(o.error)
         host.eprint(_OBSERVE_USAGE)
         return 1
-    if not id_prefix and not cwd_flag:
-        return _verb_observe_list(host, include_all=include_all)
-    return _verb_observe_tail(host, id_prefix, cwd_flag, json_out, interact)
+    if not o.id_prefix and not o.cwd:
+        return _verb_observe_list(host, include_all=o.include_all, json_out=o.json_out)
+    # Follow only when asked, or interactively on a terminal. Without a TTY
+    # (scripts, `ssh host fir observe <id>`) the default is a snapshot that
+    # exits — a non-interactive caller must never hang on a live tail.
+    follow = o.follow or o.interact or (host.stdout_is_tty and not (o.lines or o.status or o.wait))
+    if follow:
+        return _verb_observe_tail(host, o.id_prefix, o.cwd, o.json_out, o.interact)
+    if o.lines == 0:
+        o.lines = 50
+    return _verb_observe_one(host, o)
 
 
 # ---------------------------------------------------------------------------
@@ -1662,121 +2096,333 @@ def cli_observe(argv: list[str], host: fir_ext.Host) -> int:
 # ---------------------------------------------------------------------------
 
 
-def _parse_send_args(argv: list[str]) -> tuple[str, str, str, str | None]:
-    """Returns (id_prefix, cwd_flag, default_deliver_as, error_message)."""
-    id_prefix = ""
-    cwd_flag = ""
-    steer = False
-    follow = False
-    abort = False
+@dataclass
+class _SendOpts:
+    id_prefix: str = ""
+    cwd: str = ""
+    deliver_as: str = ""
+    message: str = ""  # positional message (args joined); "" = read stdin
+    wait: bool = False
+    timeout: float = 0.0
+    error: str | None = None
+
+
+def _parse_send_args(argv: list[str]) -> _SendOpts:
+    o = _SendOpts()
+    steer = follow = abort = False
+    msg_parts: list[str] = []
     i = 0
     while i < len(argv):
         a = argv[i]
-        if a == "--steer":
+        if msg_parts:
+            # Everything after the first message word is message text, so
+            # `fir send id fix --steer handling` sends that literally.
+            msg_parts.append(a)
+        elif a == "--":
+            msg_parts.extend(argv[i + 1 :])
+            break
+        elif a == "--steer":
             steer = True
         elif a == "--follow":
             follow = True
         elif a == "--abort":
             abort = True
-        elif a == "--cwd":
-            if i + 1 >= len(argv):
-                return ("", "", "", "--cwd requires an argument")
-            cwd_flag = argv[i + 1]
-            i += 1
-        elif a.startswith("--cwd="):
-            cwd_flag = a[len("--cwd=") :]
+        elif a == "--wait":
+            o.wait = True
+        elif a == "--timeout" or a.startswith("--timeout="):
+            v, i = _take_value(argv, i, "--timeout")
+            try:
+                o.timeout = _parse_timeout(v or "")
+            except ValueError:
+                o.error = "--timeout requires a duration (e.g. 90, 90s, 5m)"
+                return o
+        elif a == "--cwd" or a.startswith("--cwd="):
+            v, i = _take_value(argv, i, "--cwd")
+            if not v:
+                o.error = "--cwd requires an argument"
+                return o
+            o.cwd = v
         elif a in ("--help", "-h"):
-            return ("", "", "", "__HELP__")
+            o.error = "__HELP__"
+            return o
         elif a.startswith("--"):
-            return ("", "", "", f"unknown flag: {a}")
+            o.error = f"unknown flag: {a}"
+            return o
+        elif not o.id_prefix and not o.cwd:
+            o.id_prefix = a
         else:
-            if id_prefix:
-                return ("", "", "", f"unexpected extra argument: {a}")
-            id_prefix = a
+            msg_parts.append(a)
         i += 1
     if sum((steer, follow, abort)) > 1:
-        return ("", "", "", "--steer, --follow, and --abort are mutually exclusive")
-    if not id_prefix and not cwd_flag:
-        return ("", "", "", "session id or --cwd required")
-    default_deliver_as = (
-        "abort" if abort else ("steer" if steer else ("followUp" if follow else ""))
-    )
-    return (id_prefix, cwd_flag, default_deliver_as, None)
+        o.error = "--steer, --follow, and --abort are mutually exclusive"
+        return o
+    if not o.id_prefix and not o.cwd:
+        o.error = "session id or --cwd required"
+        return o
+    if abort and msg_parts:
+        o.error = "--abort takes no message"
+        return o
+    o.deliver_as = "abort" if abort else ("steer" if steer else ("followUp" if follow else ""))
+    o.message = " ".join(msg_parts)
+    return o
+
+
+class _TranscriptReader:
+    """Incrementally parse JSONL records appended to a transcript after a
+    given byte offset. Partial trailing lines are held until complete."""
+
+    def __init__(self, path: str, offset: int) -> None:
+        self.path = path
+        self.offset = offset
+        self._pending = b""
+
+    def read_new(self) -> list[dict[str, Any]]:
+        try:
+            with open(self.path, "rb") as f:
+                f.seek(self.offset)
+                data = f.read()
+        except OSError:
+            return []
+        self.offset += len(data)
+        buf = self._pending + data
+        lines = buf.split(b"\n")
+        self._pending = lines.pop()
+        out: list[dict[str, Any]] = []
+        for ln in lines:
+            try:
+                rec = json.loads(ln.decode("utf-8", errors="replace"))
+            except ValueError:
+                continue
+            if isinstance(rec, dict):
+                out.append(rec)
+        return out
+
+
+def _assistant_text(msg: dict[str, Any]) -> str:
+    content = msg.get("content")
+    if isinstance(content, str):
+        return content.strip()
+    if not isinstance(content, list):
+        return ""
+    parts = [
+        str(b.get("text", ""))
+        for b in content
+        if isinstance(b, dict) and b.get("type") == "text" and b.get("text")
+    ]
+    return "\n".join(parts).strip()
+
+
+def _user_text(msg: dict[str, Any]) -> str:
+    content = msg.get("content")
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        return "".join(
+            str(b.get("text", ""))
+            for b in content
+            if isinstance(b, dict) and b.get("type") == "text"
+        ).strip()
+    return ""
+
+
+def _wait_for_reply(
+    host: fir_ext.Host,
+    s: dict[str, Any],
+    offset0: int,
+    t_send: float,
+    timeout: float,
+    abort: bool,
+    sent: str = "",
+) -> int:
+    """Block until the run that consumed our message has finished, then print
+    the final assistant reply. See `fir send --help` for exit codes.
+
+    Completion rule: a user message has been appended to the transcript since
+    we sent (ours: same text, unless it was a /command that expands), AND —
+    read afterwards — the core status card says the session is
+    no longer running. The card goes `running` at agent_start, which precedes
+    persisting the run's user message, so seeing the message and then a
+    non-running status means that run has ended. A prompt refused before it
+    ever reached the agent (no model) shows up as a status card written after
+    we sent.
+    """
+    store = s.get("store_path", "") or ""
+    reader = _TranscriptReader(store, offset0) if store else None
+    saw_user = False
+    reply = ""
+    run_error = ""
+    deadline = time.monotonic() + timeout if timeout > 0 else None
+    while True:
+        # Transcript first, then status — the order the rule above needs.
+        for rec in reader.read_new() if reader else []:
+            if rec.get("type") != "message":
+                continue
+            m = rec.get("message") or {}
+            role = m.get("role")
+            if role == "user":
+                text = _user_text(m)
+                if not sent or sent.startswith("/") or text == sent.strip():
+                    saw_user = True
+            elif role == "assistant" and saw_user:
+                text = _assistant_text(m)
+                if text:
+                    reply = text
+                if m.get("stopReason") == "error":
+                    run_error = str(m.get("errorMessage") or "provider error")
+                else:
+                    run_error = ""
+        s = _reload_sidecar(s)
+        status = s.get("status", "")
+        card = s.get("_status_card") or {}
+        if status in ("ended", "crashed"):
+            host.eprintln(f"session {status} before the turn finished")
+            return 1
+        done = False
+        if abort or saw_user:
+            done = status != "running"
+        elif status in ("error", "no-model") and _parse_card_ts(card.get("ts", "")) >= t_send:
+            done = True  # refused before reaching the agent loop
+        if done:
+            break
+        if deadline is not None and time.monotonic() >= deadline:
+            host.eprintln("timed out waiting for the turn to finish (still running)")
+            if reply:
+                host.println(reply)
+            return _EXIT_TIMEOUT
+        if _verb_stop.wait(0.25):
+            return 130
+    if abort:
+        return 0
+    if reply:
+        host.println(reply)
+    if status in ("error", "no-model"):
+        err = run_error or card.get("error", "") or card.get("notice", "") or status
+        host.eprintln(f"turn failed ({status}): {err}")
+        return 1
+    return 0
 
 
 @fir_ext.cli_verb("send")
 def cli_send(argv: list[str], host: fir_ext.Host) -> int:
-    id_prefix, cwd_flag, default_deliver_as, err = _parse_send_args(argv)
-    if err == "__HELP__":
+    o = _parse_send_args(argv)
+    if o.error == "__HELP__":
         host.eprint(_SEND_USAGE)
         return 0
-    if err is not None:
-        host.eprintln(err)
+    if o.error is not None:
+        host.eprintln(o.error)
         host.eprint(_SEND_USAGE)
         return 1
 
     try:
-        s = _resolve_sidecar(id_prefix, cwd_flag)
+        s = _resolve_sidecar(o.id_prefix, o.cwd)
     except ValueError as e:
         host.eprintln(str(e))
         return 1
+    sid8 = (s.get("session_id", "") or "")[:8]
     sock_path = s.get("socket_path", "") or ""
-    if not sock_path:
-        sid8 = (s.get("session_id", "") or "")[:8]
-        host.eprintln(f"session {sid8} has no input socket (ended or not started)")
+    if not _is_live(s):
+        host.eprintln(f"session {sid8} is {s.get('status') or 'not running'} — nothing to send to")
         return 1
+    if not sock_path:
+        host.eprintln(f"session {sid8} has no input socket (bind failed at startup?)")
+        return 1
+
+    # Collect the message(s) up front so --wait can mark the transcript
+    # position right before the send.
+    payloads: list[bytes] = []
+    interactive = False
+    if o.deliver_as == "abort":
+        payloads.append((json.dumps({"deliver_as": "abort", "content": ""}) + "\n").encode())
+    elif o.message:
+        p = _encode_send(o.message, o.deliver_as)
+        if p is None:
+            host.eprintln("message is empty")
+            return 1
+        payloads.append(p)
+    elif not host.stdin_is_tty:
+        # Piped stdin is one message — a multi-line brief must not become
+        # one prompt per line.
+        chunks: list[str] = []
+        while True:
+            line = host.readline()
+            if line is None:
+                break
+            chunks.append(line)
+        if _verb_stop.is_set():
+            return 130  # interrupted mid-read: don't send a truncated brief
+        p = _encode_send("".join(chunks).rstrip("\n"), o.deliver_as)
+        if p is None:
+            host.eprintln("no message on stdin")
+            return 1
+        payloads.append(p)
+    else:
+        interactive = True
+        if o.wait:
+            host.eprintln("--wait needs a message argument or piped stdin")
+            return 1
+
+    store = s.get("store_path", "") or ""
+    offset0 = 0
+    if store:
+        with contextlib.suppress(OSError):
+            offset0 = os.path.getsize(store)
+    t_send = time.time()
+
     try:
         conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         conn.connect(sock_path)
     except OSError as e:
-        sid8 = (s.get("session_id", "") or "")[:8]
         host.eprintln(f"connect to session {sid8}: {e}\n(is the session still running?)")
         return 1
 
-    # --abort is a one-shot: fire the ESC-equivalent and exit without
-    # reading any input. Cancels the current turn (including a stuck tool)
-    # without killing the session.
-    if default_deliver_as == "abort":
-        try:
-            conn.sendall((json.dumps({"deliver_as": "abort", "content": ""}) + "\n").encode())
-        except OSError as e:
-            host.eprintln(f"send: {e}")
-            return 1
-        finally:
-            with contextlib.suppress(Exception):
-                conn.close()
-        sid8 = (s.get("session_id", "") or "")[:8]
-        host.eprintln(f"aborted current turn of session {sid8}")
-        return 0
-
-    if host.stdin_is_tty:
-        sid8 = (s.get("session_id", "") or "")[:8]
-        name = s.get("session_name", "") or sid8
-        suffix = f" ({sid8})" if s.get("session_name") else ""
-        host.eprintln(f"Connected to session {name}{suffix}. Enter to send. Ctrl-\\ to disconnect.")
-        host.eprintln(
-            "  ! prefix → steer (interrupt)   + prefix → followUp (queue)   ~ → abort turn"
-        )
-
     try:
-        while True:
-            line = host.readline()
-            if line is None:
-                return 0
-            line = line.rstrip("\n")
-            if not line.strip():
-                continue
-            payload = _encode_send(line, default_deliver_as)
-            if payload is None:
-                continue
+        if not interactive:
             try:
-                conn.sendall(payload)
+                for p in payloads:
+                    conn.sendall(p)
             except OSError as e:
                 host.eprintln(f"send: {e}")
                 return 1
+        else:
+            name = s.get("session_name", "") or sid8
+            suffix = f" ({sid8})" if s.get("session_name") else ""
+            host.eprintln(
+                f"Connected to session {name}{suffix}. Enter to send. Ctrl-\\ to disconnect."
+            )
+            host.eprintln(
+                "  ! prefix → steer (interrupt)   + prefix → followUp (queue)   ~ → abort turn"
+            )
+            while True:
+                line = host.readline()
+                if line is None:
+                    break
+                line = line.rstrip("\n")
+                if not line.strip():
+                    continue
+                payload = _encode_send(line, o.deliver_as)
+                if payload is None:
+                    continue
+                try:
+                    conn.sendall(payload)
+                except OSError as e:
+                    host.eprintln(f"send: {e}")
+                    return 1
     finally:
         with contextlib.suppress(Exception):
             conn.close()
+
+    if o.deliver_as == "abort" and not o.wait:
+        host.eprintln(f"aborted current turn of session {sid8}")
+        return 0
+    if o.wait and not interactive:
+        sent = ""
+        if payloads:
+            with contextlib.suppress(ValueError, KeyError):
+                sent = json.loads(payloads[0].decode())["content"]
+        return _wait_for_reply(
+            host, s, offset0, t_send, o.timeout, o.deliver_as == "abort", sent=sent
+        )
+    return 0
 
 
 # ---------------------------------------------------------------------------
@@ -1940,7 +2586,7 @@ def _htop_render(sidecars: list[dict[str, Any]], color: bool) -> str:
     """Build a full-screen frame: cursor-home + clear + table. Single string
     so the whole frame ships in one cli_stdout notification."""
     now = time.time()
-    counts = {"running": 0, "idle": 0, "ended": 0, "crashed": 0}
+    counts = {"running": 0, "idle": 0, "error": 0, "no-model": 0, "ended": 0, "crashed": 0}
     for s in sidecars:
         st = s.get("status", "")
         if st in counts:
@@ -1956,7 +2602,7 @@ def _htop_render(sidecars: list[dict[str, Any]], color: bool) -> str:
             return f"\x1b[32m{line}\x1b[0m"
         if st == "ended":
             return f"\x1b[2m{line}\x1b[0m"
-        if st == "crashed":
+        if st in ("crashed", "error", "no-model"):
             return f"\x1b[31m{line}\x1b[0m"
         return line
 
@@ -1965,6 +2611,7 @@ def _htop_render(sidecars: list[dict[str, Any]], color: bool) -> str:
         f" fir htop  —  {len(sidecars)} session"
         f"{'' if len(sidecars) == 1 else 's'}  "
         f"(live {counts['running']}  idle {counts['idle']}  "
+        f"error {counts['error'] + counts['no-model']}  "
         f"ended {counts['ended']}  crashed {counts['crashed']})  "
         f"{time.strftime('%H:%M:%S')}"
     )
@@ -2086,6 +2733,19 @@ def cli_htop(argv: list[str], host: fir_ext.Host) -> int:
 # Ctrl-\ during `fir send` (interactive): clean detach.
 @fir_ext.on_cli_signal
 def _on_signal(name: str, host: fir_ext.Host) -> None:
+    lname = name.lower()
+    # Ctrl-C / SIGTERM / SIGHUP (e.g. the ssh connection dropped): end any
+    # follow / wait loop cleanly so the verb returns normally.
+    if any(k in lname for k in ("interrupt", "terminated", "hangup")) or name in (
+        "SIGINT",
+        "SIGTERM",
+        "SIGHUP",
+    ):
+        _verb_stop.set()
+        # Unblock a verb waiting on stdin (interactive `fir send`,
+        # `--interact`) so it notices and returns.
+        with contextlib.suppress(Exception):
+            host.wake()
     # SIGQUIT is the conventional clean-detach signal in send-style tools.
     # If htop is the active verb, treat SIGQUIT like SIGINT so the verb's
     # finally block can leave the alt screen before we exit. Otherwise

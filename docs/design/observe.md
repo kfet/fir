@@ -136,7 +136,10 @@ Why each field:
 - `mode` — `acp`/`interactive`/`print`; CLI warns before `send --interact`
   against an interactive session.
 - `status` — UX hint (`running`/`idle`/`ended`/`crashed`); not load-bearing
-  for liveness.
+  for liveness. For live sessions readers overlay the core-owned
+  `session/status` observable card (see *Session status* below), which is
+  authoritative: the extension's own per-event threads can apply
+  `agent_start`/`agent_end` out of order.
 - `session_name` — set on `session_named`.
 - `schema` — sidecars outlive the fir version that wrote them; bake it in.
 
@@ -150,8 +153,10 @@ Why each field:
 
 **Cleanup of stale sidecars:**
 
-- On `fir sessions` read: if `status != ended` AND `kill -0 pid` fails AND
-  socket connect fails → display as `crashed`.
+- On read: if `status != ended` AND (`kill -0 pid` fails OR the input
+  socket is missing / refuses connections) → display as `crashed`. The
+  socket probe matters: after a reboot old pids belong to unrelated
+  processes. A 15 s grace covers the gap between sidecar write and bind.
 - Auto-prune `ended` sidecars older than 7 days on every `fir sessions`
   read. Users won't run a manual command.
 - A new fir-acp on startup reaps any sidecar whose `pid` is dead and whose
@@ -223,15 +228,46 @@ Two primitives plus one convenience. No unified TUI — window management
 belongs to the user's window manager (tmux, terminal app), not to us.
 
 ```
-fir observe                        # list LIVE sessions (no args; running/idle)
+fir observe                        # list LIVE sessions (no args) with status
 fir observe --all                  # include ended + crashed sessions in the list
-fir observe <id-prefix>            # tail -F transcript with formatter
+fir observe --json                 # list as JSON status objects
+fir observe <id-prefix>            # status + last 50 entries; exits (TTY: follow)
+fir observe <id-prefix> -n N       # snapshot of the last N entries; exits
+fir observe <id-prefix> -f         # tail -F transcript with formatter
+fir observe <id-prefix> --status   # status block only (--json for scripts)
+fir observe <id-prefix> --wait     # block until the current run ends
 fir observe <id-prefix> --json     # raw JSONL
-fir observe <id-prefix> --cwd .    # resolve by cwd (error if 0/many)
-fir send    <id-prefix>            # cooked-mode stdin → socket
-fir send    <id-prefix> --steer    # default deliver_as for typed lines
+fir observe --cwd .                # resolve by cwd (error if 0/many)
+fir send    <id-prefix> 'msg'      # one message
+fir send    <id-prefix> --wait 'msg'  # send, wait for the turn, print the reply
+fir send    <id-prefix>            # TTY: cooked-mode stdin → socket; pipe: one message
+fir send    <id-prefix> --steer    # default deliver_as
 fir observe <id-prefix> --interact # convenience: tail + send in one process
 ```
+
+**Non-interactive by default.** Without a TTY (scripts, `ssh host fir
+observe <id>`) `fir observe <id>` prints a snapshot and exits; following
+requires `-f`. This is what makes the CLI usable as the remote control
+plane for agents on other hosts: `ssh host fir send <id> --wait …` then
+`ssh host fir observe <id> --status`, no screen scraping.
+
+**Session status.** fir core writes a `session/status` observable card
+from `AgentSession`'s own event handler (`pkg/session/statuscard.go`),
+so transitions land in agent-loop order. Detail is `key: value` lines:
+`status` (`idle` | `running` | `error` | `no-model`), `model`, `tool`
+(while one runs), `runs` (completed agent runs), `error` (last run's
+provider/auth error; cleared by the next run; aborts are not errors),
+`notice` (startup notice such as "No models available…"). `running` is
+published when a prompt is accepted — before the first turn waits on
+extension startup — so `fir send --wait` can rely on: *a user message has
+appeared since the send, and afterwards the card is not `running`* ⇒ that
+run is over. A prompt refused before the agent loop (no model) is
+detected as an `error`/`no-model` card stamped after the send.
+
+**Global `-C/--cwd` vs the verb's `--cwd`.** fir's global chdir flag is
+applied only after a leading extension verb has been dispatched, so
+`fir observe --cwd .` reaches the verb. `fir -C dir observe` still chdirs
+first.
 
 **Relationship to `fir sessions`:** the existing `fir sessions` lists
 transcript files on disk for the current cwd ("project history"). `fir

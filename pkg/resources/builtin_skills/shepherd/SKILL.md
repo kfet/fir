@@ -78,14 +78,40 @@ Select model according to the tasks.
 PROVIDER="anthropic"         # default — ask user if different
 CHEAP_MODEL="sonnet"
 
-tm-send "$SESSION:$WINDOW" "cd $WORKTREE && fir --provider $PROVIDER --model $CHEAP_MODEL -d auto-namer -d notify -d provider-usage -d tmuxspinner"
+tm-send "$SESSION:$WINDOW" "cd $WORKTREE && fir --session-name $WINDOW --provider $PROVIDER --model $CHEAP_MODEL -d auto-namer -d notify -d provider-usage -d tmuxspinner"
 ```
+
+`--session-name $WINDOW` makes the worker addressable by name from `fir observe` / `fir send` (see *Talk to workers through fir* below).
 
 The four `-d` flags disable builtin extensions that fight with tmux-driver — see the tmux-driver skill "Spawning `fir` Inside a Window" section for why.
 
 Address agents as `SESSION:WINDOW`.
 
 **Never repurpose agents from another project.** `/new` wipes context. If a session belongs to a different project/worktree, leave it alone.
+
+## Talk to workers through fir, not the screen
+
+tmux is only the process holder. Read and steer workers with fir's own
+CLI — structured, no ANSI scraping, no paste/INSERT-mode traps:
+
+```bash
+fir observe                          # all sessions: STATUS idle | running | error | no-model
+fir observe $WINDOW --status         # one worker: status, model, current tool, last error
+fir observe $WINDOW -n 30            # its last 30 transcript entries (snapshot, exits)
+fir send $WINDOW "$TASK"             # send a task (multi-line safe; piped stdin = one message)
+fir send $WINDOW --wait --timeout 5m "status?"  # ask and block for the reply (124 = still busy)
+fir send $WINDOW '!stop, do X'       # steer;  fir send $WINDOW --abort  cancels the turn
+```
+
+`--status` reports what the TUI shows but the transcript may not:
+`no-model` ("No models available…"), an auth failure, a crashed process.
+
+**Workers on another host:** start them in tmux there the same way, then
+run the same `fir observe` / `fir send` commands on that host over ssh
+(`rexec`). The `observe_session` / `send_session` tools are local-only.
+
+Use `tm-capture` only as a fallback — e.g. to see a TUI dialog, or a
+worker running a fir too old for these flags.
 
 ## Plan Tracking
 
@@ -125,7 +151,7 @@ plan:
   - [worker-3] idle, unassigned (low, pending)
 ```
 
-Update worker entries every cycle based on `tm-capture` output — look for spinner (working), error messages (stuck/rate-limited), context %, and the last visible action.
+Update worker entries every cycle from `fir observe <worker> --status` (idle / running / error + last error) and `fir observe <worker> -n 20` (last actions); fall back to `tm-capture` for context % or a TUI dialog.
 
 **Worker self-reported progress:** Workers also have access to the `plan` tool and may use it to report their own progress on sub-tasks. To check a worker's current plan, send `/plan` to their tmux window and capture the output:
 
@@ -151,7 +177,11 @@ Add `FLEET.md` to `.gitignore`. On restart: read the file, check `tm-list`, recr
 
 ## Sending Tasks
 
-Multi-line pastes land in the input buffer and may not auto-submit:
+Prefer `fir send <worker> "$TASK"` (or `fir send <worker> < task.md`): it
+delivers the whole task as one message straight into the session — no
+paste buffer. Confirm with `fir observe <worker> --status` (→ `running`).
+
+If you do type into the pane instead, multi-line pastes land in the input buffer and may not auto-submit:
 
 1. Wait 2–3 seconds, then check `tm-capture` for `[Pasted text #N +M lines]` and `-- INSERT --`.
 2. If stuck in INSERT mode: `tm-sendraw Escape`, `sleep 0.5`, `tm-sendraw Enter`.

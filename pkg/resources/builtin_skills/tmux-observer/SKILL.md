@@ -9,6 +9,31 @@ Attach a tmux window to an **already-running** fir session so you can both obser
 
 The whole skill is three tmux commands plus one fir command. There is no script.
 
+## First: you may not need a window at all
+
+`fir observe` and `fir send` work one-shot, without a TTY, and over ssh.
+For an agent (rather than a human) that is strictly better than reading a
+pane:
+
+```bash
+fir observe <id> --status [--json]   # idle | running | error | no-model | ended | crashed,
+                                     # model, current tool, last error, startup notice
+fir observe <id> -n 40               # status + last 40 transcript entries; exits
+fir observe <id> --wait --timeout 10m  # block until the current run ends, then snapshot
+fir send <id> --wait --timeout 10m 'do X'  # send, block for the turn, print the final reply
+fir send <id> '!stop, read foo.go'   # steer;  fir send <id> --abort  cancels the turn
+```
+
+**Another host:** run exactly the same commands there over ssh — e.g.
+`rexec(host, "fir observe <id> --status")`. The `observe_session` /
+`send_session` tools are local-only. Do not scrape the remote tmux pane to
+learn whether the agent works; `--status` shows things like
+`no-model: No models available…` or an auth error that the transcript
+alone does not.
+
+Use the observer window below when a human wants a live view, or you
+want a persistent `--interact` pane.
+
 ## When to use
 
 - You started or know about another fir session (ACP, interactive, or `-p`) and want to watch what it's doing.
@@ -22,7 +47,7 @@ The whole skill is three tmux commands plus one fir command. There is no script.
 ## Step 1 — discover the session id
 
 ```bash
-fir observe        # table of running sessions: ID NAME CWD STATUS AGE
+fir observe        # table of running sessions: ID PID NAME CWD STATUS AGE
 ```
 
 Pick the 8-char id prefix from the `ID` column. Or resolve by cwd:
@@ -100,5 +125,5 @@ The fir session itself keeps running; you only close your observer.
   EOF
   ```
   (`fir send` is the alternative input path — same socket, no observer pane needed. Use it when send-keys quoting gets ugly.)
-- **Multi-line messages via send-keys.** Each Enter sends a separate message. For multi-line content, pipe via `fir send` instead.
-- **Post-mortem.** If the session has ended, the sidecar still points at its transcript; `fir observe <id>` (no `--interact`) tails the file with no live updates. The window will not accept input.
+- **Multi-line messages via send-keys.** Each Enter sends a separate message. For multi-line content, pipe via `fir send` instead — piped stdin is delivered as one message.
+- **Post-mortem.** If the session has ended, the sidecar still points at its transcript; `fir observe <id> -n 100` prints it. The window will not accept input.

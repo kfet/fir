@@ -50,4 +50,16 @@ Delegate all to a new agent!
 
 5. Report back what the spawn script returned, then every `REPORT` line.
 
+Checking in later: the agent's session is named `<feature-name>`, so talk
+to it through fir, not its tmux screen:
+
+```bash
+fir observe <feature-name> --status     # idle | running | error | no-model, last error
+fir observe <feature-name> -n 40        # snapshot of what it did; exits
+fir send <feature-name> --wait --timeout 5m 'status?'  # ask, block for the reply
+```
+
+The same commands work for an agent on another host — run them there
+over ssh (`rexec`). `observe_session` / `send_session` only see this machine.
+
 The task description usually follows below, after the skill body:

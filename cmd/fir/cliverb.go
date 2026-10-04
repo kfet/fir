@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/kfet/fir/pkg/extension"
@@ -39,4 +40,44 @@ func tryRunExtensionVerb(verb string, argv []string) (int, bool, error) {
 	}
 	code, runErr := extension.RunCLIVerb(binding, argv, cwd, cwd)
 	return code, true, runErr
+}
+
+// runLeadingExtensionVerb dispatches an extension CLI verb when it is the
+// very first argument, before global flags such as -C/--cwd are applied and
+// stripped from os.Args — the verb owns its argv. Reserved subcommands take
+// precedence. Exits the process when a verb ran; returns otherwise.
+func runLeadingExtensionVerb() {
+	if len(os.Args) < 2 || dispatchSubcommand(os.Args[1]) != nil {
+		return
+	}
+	runExtensionVerbAt1()
+}
+
+// verbLookupDone records the (verb, cwd) pair already looked up and found
+// unclaimed, so run() does not repeat extension discovery for every plain
+// `fir "prompt"` invocation. A -C chdir changes cwd and forces a re-check.
+var verbLookupDone struct{ verb, cwd string }
+
+// runExtensionVerbAt1 runs os.Args[1] as an extension-registered CLI verb
+// (frontmatter `cli_verbs:`) and exits, or returns when no extension claims
+// it so the caller can fall through to normal argument parsing. Flags are
+// skipped — they can never be a verb, and discovery walks the extension tree.
+func runExtensionVerbAt1() {
+	first := os.Args[1]
+	if first == "" || first[0] == '-' {
+		return
+	}
+	cwd, _ := os.Getwd()
+	if verbLookupDone.verb == first && verbLookupDone.cwd == cwd {
+		return
+	}
+	code, ok, err := tryRunExtensionVerb(first, os.Args[2:])
+	if !ok {
+		verbLookupDone.verb, verbLookupDone.cwd = first, cwd
+		return
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+	}
+	os.Exit(code)
 }

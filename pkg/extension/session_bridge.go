@@ -128,9 +128,16 @@ func (b *SessionBridge) SendUserMessage(content string, opts *SendUserMessageOpt
 	// session. It carries no content and never enqueues a message.
 	if deliverAs == "abort" {
 		if b.session != nil && b.session.Agent != nil {
-			b.session.Agent.Abort()
+			b.session.Abort()
 		}
 		return
+	}
+	// Steer and followUp only queue into a running loop; with no run in
+	// progress they would sit unseen until some later prompt. Treat them as
+	// a plain prompt then (Prompt itself still queues if a run starts in
+	// the meantime).
+	if deliverAs != "" && !b.session.IsStreaming() {
+		deliverAs = ""
 	}
 	msg := agent.AgentMessage{
 		Message: ai.NewUserMsg(content, time.Now().UnixMilli()),
@@ -471,7 +478,7 @@ func (b *SessionBridge) RestartSession(prompt, prependContext string) error {
 	// Abort synchronously so the tool-result writeback for the calling
 	// extension tool is short-circuited and never lands in the session.
 	if b.session != nil && b.session.Agent != nil {
-		b.session.Agent.Abort()
+		b.session.Abort()
 	}
 	// The rest must run on a goroutine: the bridge dispatch goroutine is
 	// holding the JSON-RPC handler open, and the mode callback may need

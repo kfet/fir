@@ -355,6 +355,12 @@ func CreateAgentSession(ctx context.Context, opts CreateAgentSessionOptions) (*C
 	// Register session-aware tools (plan tool needs a session reference).
 	session.RegisterSessionTools()
 
+	// Surface the startup model notice (e.g. "No models available…") on the
+	// session/status card so remote observers see what the TUI shows.
+	if modelFallbackMessage != "" {
+		session.SetStatusNotice(modelFallbackMessage)
+	}
+
 	// Restore plan state from an existing session without writing a new entry.
 	if hasExistingSession {
 		session.restorePlan(existingSession.PlanTitle, existingSession.PlanEntries, existingSession.PlanMetadata)

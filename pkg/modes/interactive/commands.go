@@ -549,7 +549,7 @@ func (m *InteractiveMode) handleBashCommand(command string, excludeFromContext b
 
 func (m *InteractiveMode) handleCtrlC() {
 	if m.session != nil && m.session.IsStreaming() {
-		m.session.Agent.Abort()
+		m.session.Abort()
 		return
 	}
 	// Clear editor
@@ -735,7 +735,7 @@ func (m *InteractiveMode) handleExternalEditor() {
 
 // handleHandoff is invoked from the extension bridge when an extension
 // triggers a session restart (e.g. via the self_handoff tool). The bridge
-// has already called Agent.Abort() synchronously to short-circuit the
+// has already called session.Abort() synchronously to short-circuit the
 // in-flight tool call's result writeback; this method handles the rest:
 // wait for idle, clear UI, NewSessionCmd, optionally PrependContext, and
 // submit the handoff prompt.
@@ -764,7 +764,7 @@ func (m *InteractiveMode) startNewSession(initialPrompt, prependContext string, 
 	if m.session != nil {
 		// Cancel any in-progress LLM stream before starting a new session.
 		if m.session.IsStreaming() {
-			m.session.Agent.Abort()
+			m.session.Abort()
 			m.session.Agent.WaitForIdle()
 		}
 		_, err := m.session.NewSessionCmd()

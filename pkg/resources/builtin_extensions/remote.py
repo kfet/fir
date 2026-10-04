@@ -1256,7 +1256,8 @@ _BOUNDARY_NOTE = (
     "for short remote commands, inspection, and file transfer. For "
     "substantial work on a host — a build, a refactor, a debugging session — "
     "do NOT drive it 400 calls at a time from here: rput a brief and spawn an "
-    "agent over there (see rtmux new)."
+    "agent over there (see rtmux new), then drive that agent with `fir send` / "
+    "`fir observe` run over rexec — not by scraping its tmux screen."
 )
 
 _REXEC_DESCRIPTION = (
@@ -1650,8 +1651,9 @@ _RPUT_DESCRIPTION = (
     "envelope like rexec.\n\n"
     "This is half of the delegation primitive: when a remote task is "
     "substantial, `rput` a written brief onto the host, `rtmux new` a fir "
-    "agent there with that brief, and steer it with rtmux send/cap — instead "
-    "of teleoperating the work one rexec at a time."
+    "agent there, and drive it with `fir send <name> --wait --timeout 30m < brief.md` and "
+    "`fir observe <name> --status` over rexec — instead of teleoperating the "
+    "work one rexec at a time."
 )
 
 _RGET_DESCRIPTION = (
@@ -1796,8 +1798,18 @@ _RTMUX_DESCRIPTION = (
     "is cheap.\n"
     "  kill — tear the session down.\n\n"
     "DELEGATION: `rtmux new` is the launch primitive for real remote work — "
-    "rput a brief onto the host, `rtmux new` a fir agent there running it, "
-    "then check in with cap. Prefer that over teleoperating a long job."
+    "tmux is just the process holder. Start the agent with a name: "
+    "command `fir --session-name <name>` in the project cwd. Then talk to it "
+    "through fir, not the screen, using rexec on that host:\n"
+    "  fir observe <name> --status        idle | running | error | no-model, "
+    "model, last error (e.g. 'No models available' / auth failure)\n"
+    "  fir send <name> --wait --timeout 30m < brief.md  send the brief, block until the turn "
+    "ends, print the final reply (exit 1 if it failed, 124 = still running; "
+    "give rexec a timeout_s above --timeout, or detach=True)\n"
+    "  fir observe <name> -n 40           what it did (snapshot; exits)\n"
+    "  fir send <name> '!new direction'   steer;  fir send <name> --abort\n"
+    "Use cap only as a fallback (e.g. a fir too old for these flags, or a "
+    "non-fir program). Prefer all of that over teleoperating a long job."
 )
 
 _RTMUX_PARAMETERS: dict[str, Any] = {

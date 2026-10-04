@@ -295,6 +295,9 @@ type AgentSession struct {
 	state    SessionState
 	agentDir string
 	closed   atomic.Bool
+	// status backs the core-owned session/status observable card
+	// (see statuscard.go).
+	status sessionStatus
 }
 
 // WaitExtReady blocks until extensions have finished loading, ctx is done, or
@@ -340,6 +343,9 @@ func NewAgentSession(opts AgentSessionOptions) *AgentSession {
 
 	// Build system prompt (also pushes it onto the agent — see buildSystemPrompt).
 	s.buildSystemPrompt()
+
+	// Publish the initial session/status card (idle or no-model).
+	s.initStatus()
 
 	firlog.Debug("agent session created",
 		"sessionID", opts.SessionStore.GetSessionID(),
@@ -537,6 +543,11 @@ func (s *AgentSession) handleAgentEvent(event agent.AgentEvent) {
 		s.classifyClientVersionGate(event.Message.AsAssistant())
 	}
 
+	// Mirror lifecycle state into the session/status card before any
+	// listener runs, so observers never see a stale status for an event
+	// that has already been delivered.
+	s.statusOnAgentEvent(event)
+
 	// Wrap and emit
 	sessionEvent := AgentSessionEvent{
 		AgentEvent: &event,
@@ -601,8 +612,15 @@ func (s *AgentSession) Prompt(text string, opts ...*PromptOptions) error {
 	firlog.Debug("prompt received", "len", len(text))
 
 	if s.Model() == nil {
-		return fmt.Errorf("no model selected. Use /login or set an API key environment variable")
+		err := fmt.Errorf("no model selected. Use /login or set an API key environment variable")
+		s.statusPromptRefused(StatusNoModel, err)
+		return err
 	}
+
+	// The prompt is accepted: report busy now, not only at agent_start —
+	// the first turn can wait seconds on extension startup below, and an
+	// observer must not mistake that for idle.
+	s.statusPromptAccepted()
 
 	// Wait for extensions to finish loading before starting a turn.
 	// Auth-provider extensions (anthropic_auth etc.) register their OAuth
@@ -674,8 +692,15 @@ func (s *AgentSession) Prompt(text string, opts ...*PromptOptions) error {
 	// before the user message (persisted with the turn).
 	msgs := append(s.sections.updateMessages(), userMsg)
 
-	// Send to agent
+	// Send to agent. If a run started between the IsStreaming check above
+	// and here (e.g. a prompt injected via `fir send` racing the TUI), queue
+	// the message instead of dropping it.
 	if err := s.Agent.PromptMessages(msgs); err != nil {
+		if s.IsStreaming() {
+			s.Agent.FollowUp(userMsg)
+			return nil
+		}
+		s.statusPromptRefused(StatusError, err)
 		return err
 	}
 
@@ -1096,6 +1121,7 @@ func (s *AgentSession) SetModel(model *ai.Model) error {
 	s.Agent.SetModel(model)
 	s.SessionStore.AppendModelChange(model.Provider, model.ID)
 	s.UpdateSessionState(func(st *SessionState) { st.Conversation.Model = model.Provider + "/" + model.ID })
+	s.statusModelChanged()
 	return nil
 }
 
@@ -1263,6 +1289,8 @@ func (s *AgentSession) NewSessionCmd() (bool, error) {
 	s.updateStateNoSave(func(st *SessionState) { st.Conversation = ConversationState{} })
 	s.syncConversation()
 	s.SaveState()
+	// The cards store follows the session file; re-publish status there.
+	s.republishStatus()
 	// Clear the session name so extensions (e.g. tmuxspinner) reset the window title.
 	s.emit(AgentSessionEvent{
 		Type:        "session_named",
@@ -1275,7 +1303,7 @@ func (s *AgentSession) NewSessionCmd() (bool, error) {
 // by another process, it forks it to preserve history. Returns (forked, error).
 func (s *AgentSession) SwitchSession(sessionPath string) (bool, error) {
 	// Abort any in-progress streaming
-	s.Agent.Abort()
+	s.Abort()
 
 	// A transcript another owner holds by handle (e.g. a reaped ACP
 	// session) is forked, so switching here never rewrites its settings.
@@ -1327,6 +1355,10 @@ func (s *AgentSession) SwitchSession(sessionPath string) (bool, error) {
 	// Rebuild system prompt
 	s.sessionDate = time.Now().Format("2006-01-02")
 	s.buildSystemPrompt()
+
+	// The cards store follows the session file; re-publish status there
+	// (the abort above may also have left a stale "running" behind).
+	s.statusModelChanged()
 
 	// Emit session_named so extensions (e.g. tmuxspinner) update the window title.
 	// Always emit, even with an empty name, so the old name is cleared.

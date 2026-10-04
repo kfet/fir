@@ -38,6 +38,29 @@ func runFirBackground(t *testing.T, dir string, env map[string]string, args ...s
 	return cmd
 }
 
+// acceptFirstMessage returns a channel that receives the first non-empty
+// payload sent to l. Empty connections are skipped: `fir send` / `fir
+// observe` probe a session's socket for liveness (connect, then hang up)
+// before talking to it.
+func acceptFirstMessage(l net.Listener) <-chan string {
+	received := make(chan string, 1)
+	go func() {
+		for {
+			conn, err := l.Accept()
+			if err != nil {
+				return
+			}
+			data, _ := io.ReadAll(conn)
+			conn.Close()
+			if len(data) > 0 {
+				received <- string(data)
+				return
+			}
+		}
+	}()
+	return received
+}
+
 // waitForFile polls until a file appears or timeout elapses.
 func waitForFile(path string, timeout time.Duration) bool {
 	deadline := time.Now().Add(timeout)
@@ -449,17 +472,7 @@ func TestSend_ConnectToSocket(t *testing.T) {
 	}
 	defer l.Close()
 
-	received := make(chan string, 1)
-	go func() {
-		conn, err := l.Accept()
-		if err != nil {
-			return
-		}
-		defer conn.Close()
-		buf := make([]byte, 4096)
-		n, _ := conn.Read(buf)
-		received <- string(buf[:n])
-	}()
+	received := acceptFirstMessage(l)
 
 	// Write a synthetic sidecar pointing at our test socket.
 	sidecarDir := filepath.Join(stateHome, "fir", "agents")
@@ -518,17 +531,7 @@ func TestSend_SteerSigil(t *testing.T) {
 	}
 	defer l.Close()
 
-	received := make(chan string, 1)
-	go func() {
-		conn, _ := l.Accept()
-		if conn == nil {
-			return
-		}
-		defer conn.Close()
-		buf := make([]byte, 4096)
-		n, _ := conn.Read(buf)
-		received <- string(buf[:n])
-	}()
+	received := acceptFirstMessage(l)
 
 	sid := "aabbccdd-1234-5678-abcd-000000000002"
 	sidecarDir := filepath.Join(stateHome, "fir", "agents")
@@ -727,5 +730,137 @@ func TestObserve_OnlyNonLiveSessions(t *testing.T) {
 	}
 	if !strings.Contains(out, "--all") {
 		t.Errorf("expected --all hint:\n%s", out)
+	}
+}
+
+// startACPSession launches `fir --mode acp` with stdin held open, opens one
+// session, and returns the session id once its observe sidecar is on disk.
+// The process is torn down in t.Cleanup.
+func startACPSession(t *testing.T, stateHome, agentDir string, args ...string) string {
+	t.Helper()
+	all := append([]string{"--mode", "acp", "-e", "observe"}, args...)
+	cmd := exec.Command(firBinary, all...)
+	cmd.Dir = t.TempDir()
+	// No ambient provider keys: the agent dir alone decides which models
+	// exist (TestObserve_NoModelStatus relies on there being none).
+	cmd.Env = append(stripEnvKeys(
+		"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY",
+		"GROQ_API_KEY", "XAI_API_KEY", "OPENROUTER_API_KEY",
+		"MISTRAL_API_KEY", "AWS_PROFILE", "FIR_AGENT_DIR", "XDG_STATE_HOME",
+	), "FIR_AGENT_DIR="+agentDir, "XDG_STATE_HOME="+stateHome)
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = stdin.Close()
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	})
+	_, _ = io.WriteString(stdin,
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":10,"clientCapabilities":{}}}`+"\n"+
+			`{"jsonrpc":"2.0","id":2,"method":"session/new","params":{"cwd":"`+cmd.Dir+`","mcpServers":[]}}`+"\n")
+
+	matches, ok := waitForGlob(filepath.Join(stateHome, "fir", "agents", "*.json"), 20*time.Second)
+	if !ok {
+		t.Fatal("no observe sidecar within 20s")
+	}
+	m, err := readSidecar(matches[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	sid, _ := m["session_id"].(string)
+	if sid == "" {
+		t.Fatalf("sidecar without session_id: %v", m)
+	}
+	return sid
+}
+
+// observeStatus runs `fir observe <id> --status --json` until the session
+// reports a status other than "" (the socket/card may lag the sidecar).
+func observeStatus(t *testing.T, stateHome, sid string) map[string]any {
+	t.Helper()
+	var last string
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		out, code := runFir(t, "", 15*time.Second, map[string]string{"XDG_STATE_HOME": stateHome},
+			"observe", sid[:8], "--status", "--json")
+		last = out
+		if code == 0 {
+			var st map[string]any
+			if json.Unmarshal([]byte(out), &st) == nil && st["status"] != "" && st["runs"] != nil {
+				return st
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatalf("no status for %s: %s", sid, last)
+	return nil
+}
+
+// TestObserveSend_RemoteDriveLoop is the loop an agent runs against a fir
+// session on another host (each command would be `ssh host …`): send and
+// wait for the reply, read machine status, take a snapshot — no TTY, every
+// command exits on its own.
+func TestObserveSend_RemoteDriveLoop(t *testing.T) {
+	stateHome := t.TempDir()
+	sid := startACPSession(t, stateHome, mockAgentDir, "--provider", "mock", "--model", "mock-model")
+	env := map[string]string{"XDG_STATE_HOME": stateHome}
+
+	if st := observeStatus(t, stateHome, sid); st["status"] != "idle" || st["model"] != "mock/mock-model" {
+		t.Fatalf("initial status: %v", st)
+	}
+
+	// Positional message (used to fail: "unexpected extra argument") + --wait.
+	out, code := runFir(t, "", 30*time.Second, env, "send", sid[:8], "--wait", "--timeout", "25", "hello e2e")
+	if code != 0 {
+		t.Fatalf("fir send --wait exit %d: %s", code, out)
+	}
+	if strings.TrimSpace(out) != "MOCK_RESPONSE: hello e2e" {
+		t.Errorf("reply = %q, want the assistant's final text", out)
+	}
+
+	st := observeStatus(t, stateHome, sid)
+	if st["status"] != "idle" || st["runs"] != float64(1) {
+		t.Errorf("after one turn: %v", st)
+	}
+
+	// Snapshot without a TTY exits by itself (no `timeout` needed).
+	out, code = runFir(t, "", 15*time.Second, env, "observe", sid[:8], "-n", "5")
+	if code != 0 {
+		t.Fatalf("fir observe snapshot exit %d: %s", code, out)
+	}
+	if !strings.Contains(out, "status: idle") || !strings.Contains(out, "MOCK_RESPONSE: hello e2e") {
+		t.Errorf("snapshot missing status or reply:\n%s", out)
+	}
+
+	// The verb's own --cwd must not be swallowed by fir's global -C/--cwd.
+	out, code = runFir(t, "", 15*time.Second, env, "observe", "--cwd", "/nonexistent-e2e-dir", "--status")
+	if code == 0 || !strings.Contains(out, "no session in cwd") {
+		t.Errorf("observe --cwd should resolve by cwd, got exit %d: %s", code, out)
+	}
+}
+
+// TestObserve_NoModelStatus: a session that cannot run (no models) must say
+// so through `fir observe`, not only on its TUI screen.
+func TestObserve_NoModelStatus(t *testing.T) {
+	stateHome := t.TempDir()
+	emptyAgentDir := t.TempDir()
+	sid := startACPSession(t, stateHome, emptyAgentDir)
+
+	st := observeStatus(t, stateHome, sid)
+	if st["status"] != "no-model" {
+		t.Fatalf("status = %v, want no-model: %v", st["status"], st)
+	}
+
+	out, code := runFir(t, "", 30*time.Second, map[string]string{"XDG_STATE_HOME": stateHome},
+		"send", sid[:8], "--wait", "--timeout", "25", "hi")
+	if code != 1 || !strings.Contains(out, "no model") {
+		t.Errorf("send --wait to a model-less session: exit %d: %s", code, out)
 	}
 }

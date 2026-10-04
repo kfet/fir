@@ -519,7 +519,8 @@ class TestMetering(unittest.TestCase):
 
     def _read_sidecar(self) -> dict:
         path = os.path.join(self.state_dir, "fir", "agents", f"{self.session_id}.json")
-        return json.loads(open(path).read())
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
 
     def test_assistant_message_end_records_usage_and_model(self) -> None:
         self._start()
@@ -823,78 +824,103 @@ class TestAgeString(unittest.TestCase):
 
 class TestArgParsers(unittest.TestCase):
     def test_observe_no_args(self):
-        self.assertEqual(
-            observe._parse_observe_args([]),
-            ("", "", False, False, False, None),
-        )
+        o = observe._parse_observe_args([])
+        self.assertIsNone(o.error)
+        self.assertEqual((o.id_prefix, o.cwd, o.lines, o.follow), ("", "", 0, False))
 
     def test_observe_id_prefix(self):
-        self.assertEqual(
-            observe._parse_observe_args(["abc"]),
-            ("abc", "", False, False, False, None),
-        )
+        o = observe._parse_observe_args(["abc"])
+        self.assertIsNone(o.error)
+        self.assertEqual(o.id_prefix, "abc")
 
     def test_observe_flags(self):
-        r = observe._parse_observe_args(["abc", "--json", "--interact"])
-        self.assertEqual(r, ("abc", "", True, True, False, None))
+        o = observe._parse_observe_args(["abc", "--json", "--interact"])
+        self.assertIsNone(o.error)
+        self.assertTrue(o.json_out)
+        self.assertTrue(o.interact)
 
     def test_observe_all_flag(self):
-        r = observe._parse_observe_args(["--all"])
-        self.assertEqual(r, ("", "", False, False, True, None))
+        self.assertTrue(observe._parse_observe_args(["--all"]).include_all)
 
     def test_observe_cwd(self):
-        self.assertEqual(
-            observe._parse_observe_args(["--cwd", "/path"])[1],
-            "/path",
+        self.assertEqual(observe._parse_observe_args(["--cwd", "/path"]).cwd, "/path")
+        self.assertEqual(observe._parse_observe_args(["--cwd=/path"]).cwd, "/path")
+        self.assertIn("requires", observe._parse_observe_args(["--cwd"]).error or "")
+
+    def test_observe_snapshot_flags(self):
+        o = observe._parse_observe_args(
+            ["abc", "-n", "7", "--status", "--wait", "--timeout", "90s"]
         )
-        self.assertEqual(
-            observe._parse_observe_args(["--cwd=/path"])[1],
-            "/path",
+        self.assertIsNone(o.error)
+        self.assertEqual((o.lines, o.status, o.wait, o.timeout), (7, True, True, 90.0))
+        self.assertEqual(observe._parse_observe_args(["abc", "--lines=12"]).lines, 12)
+        self.assertTrue(observe._parse_observe_args(["abc", "-f"]).follow)
+        self.assertTrue(observe._parse_observe_args(["abc", "--follow"]).follow)
+
+    def test_observe_bad_values(self):
+        for argv in (["a", "-n"], ["a", "-n", "x"], ["a", "--lines=0"], ["a", "--timeout", "soon"]):
+            self.assertIsNotNone(observe._parse_observe_args(argv).error, argv)
+        self.assertIn(
+            "cannot be combined", observe._parse_observe_args(["a", "-f", "--wait"]).error or ""
+        )
+        self.assertIn(
+            "cannot be combined",
+            observe._parse_observe_args(["a", "--interact", "--status"]).error or "",
         )
 
     def test_observe_unknown_flag(self):
-        *_, err = observe._parse_observe_args(["--bogus"])
-        assert err is not None
-
-        self.assertIn("unknown flag", err)
+        self.assertIn("unknown flag", observe._parse_observe_args(["--bogus"]).error or "")
 
     def test_observe_extra_arg(self):
-        *_, err = observe._parse_observe_args(["a", "b"])
-        assert err is not None
-
-        self.assertIn("extra argument", err)
+        self.assertIn("extra argument", observe._parse_observe_args(["a", "b"]).error or "")
 
     def test_observe_help(self):
-        *_, err = observe._parse_observe_args(["--help"])
-        self.assertEqual(err, "__HELP__")
+        self.assertEqual(observe._parse_observe_args(["--help"]).error, "__HELP__")
 
     def test_send_no_args_required(self):
-        _, _, _, err = observe._parse_send_args([])
-        assert err is not None
-
-        self.assertIn("required", err)
+        self.assertIn("required", observe._parse_send_args([]).error or "")
 
     def test_send_unknown_flag(self):
-        _, _, _, err = observe._parse_send_args(["--bogus"])
-        assert err is not None
-
-        self.assertIn("unknown flag", err)
+        self.assertIn("unknown flag", observe._parse_send_args(["--bogus"]).error or "")
 
     def test_send_conflicting_flags(self):
-        _, _, _, err = observe._parse_send_args(["--steer", "--follow", "abc"])
-        assert err is not None
-
-        self.assertIn("mutually exclusive", err)
+        o = observe._parse_send_args(["--steer", "--follow", "abc"])
+        self.assertIn("mutually exclusive", o.error or "")
 
     def test_send_steer_default(self):
-        _, _, da, err = observe._parse_send_args(["--steer", "abc"])
-        self.assertIsNone(err)
-        self.assertEqual(da, "steer")
+        o = observe._parse_send_args(["--steer", "abc"])
+        self.assertIsNone(o.error)
+        self.assertEqual(o.deliver_as, "steer")
 
     def test_send_follow_default(self):
-        _, _, da, err = observe._parse_send_args(["--follow", "abc"])
-        self.assertIsNone(err)
-        self.assertEqual(da, "followUp")
+        o = observe._parse_send_args(["--follow", "abc"])
+        self.assertIsNone(o.error)
+        self.assertEqual(o.deliver_as, "followUp")
+
+    def test_send_positional_message(self):
+        # Regression: `fir send <id> 'text'` used to fail with
+        # "unexpected extra argument".
+        o = observe._parse_send_args(["abc", "fix the bug"])
+        self.assertIsNone(o.error)
+        self.assertEqual((o.id_prefix, o.message), ("abc", "fix the bug"))
+        o = observe._parse_send_args(["abc", "--wait", "--timeout=5m", "run", "the", "tests"])
+        self.assertEqual((o.message, o.wait, o.timeout), ("run the tests", True, 300.0))
+
+    def test_send_flags_after_message_are_text(self):
+        o = observe._parse_send_args(["abc", "explain", "--steer", "flag"])
+        self.assertIsNone(o.error)
+        self.assertEqual((o.message, o.deliver_as), ("explain --steer flag", ""))
+        o = observe._parse_send_args(["abc", "--", "--literal"])
+        self.assertEqual(o.message, "--literal")
+
+    def test_send_cwd_then_message(self):
+        o = observe._parse_send_args(["--cwd", ".", "hello"])
+        self.assertIsNone(o.error)
+        self.assertEqual((o.cwd, o.id_prefix, o.message), (".", "", "hello"))
+
+    def test_send_abort_rejects_message(self):
+        self.assertIn("no message", observe._parse_send_args(["abc", "--abort", "x"]).error or "")
+        self.assertEqual(observe._parse_send_args(["abc", "--abort"]).deliver_as, "abort")
 
 
 class TestHtopHelpers(unittest.TestCase):
@@ -1376,6 +1402,487 @@ class TestCards(unittest.TestCase):
         out = observe._snapshot_transcript(self.session_id, "", 50, False)
         self.assertNotIn("transcript lines", out)
         self.assertIn("msg2", out)
+
+
+# ---------------------------------------------------------------------------
+# Remote-drivable observe/send: status card, snapshot mode, send --wait
+# ---------------------------------------------------------------------------
+
+
+class _FakeHost:
+    """Minimal stand-in for fir_ext.Host used by the CLI verbs."""
+
+    def __init__(self, stdin: "list[str] | None" = None, tty: bool = False) -> None:
+        self.out: list[str] = []
+        self.err: list[str] = []
+        self._stdin = list(stdin or [])
+        self.stdin_is_tty = tty
+        self.stdout_is_tty = tty
+        self.stderr_is_tty = tty
+
+    def print(self, *a, sep=" ", end=""):
+        self.out.append(sep.join(str(x) for x in a) + end)
+
+    def println(self, *a, sep=" "):
+        self.print(*a, sep=sep, end="\n")
+
+    def eprint(self, *a, sep=" ", end=""):
+        self.err.append(sep.join(str(x) for x in a) + end)
+
+    def eprintln(self, *a, sep=" "):
+        self.eprint(*a, sep=sep, end="\n")
+
+    def readline(self, timeout=None):
+        return self._stdin.pop(0) if self._stdin else None
+
+    def wake(self):
+        pass
+
+    @property
+    def stdout(self) -> str:
+        return "".join(self.out)
+
+    @property
+    def stderr(self) -> str:
+        return "".join(self.err)
+
+
+def _status_card(status: str, ts: str = "2026-01-01T00:00:00.123456789Z", **extra: str) -> dict:
+    lines = [f"status: {status}"] + [f"{k}: {v}" for k, v in extra.items()]
+    return {
+        "source": "session",
+        "key": "status",
+        "slug": status,
+        "detail": "\n".join(lines),
+        "ts": ts,
+    }
+
+
+def _now_card_ts() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f") + "123Z"
+
+
+class TestRemoteDriving(unittest.TestCase):
+    def setUp(self) -> None:
+        # Short root: AF_UNIX paths are capped at ~104 bytes on macOS.
+        self.tmpdir = tempfile.mkdtemp(prefix="obs-", dir="/tmp")
+        self.session_id = "feedface" + "1" * 28
+        _reset_observe_state(self.tmpdir, self.tmpdir)
+        self.sidecar_dir = os.path.join(self.tmpdir, "fir", "agents")
+        os.makedirs(self.sidecar_dir, exist_ok=True)
+        self.store = os.path.join(self.tmpdir, "s.jsonl")
+        with open(self.store, "w") as f:
+            f.write(json.dumps({"type": "session", "version": 3, "id": self.session_id}) + "\n")
+        self.sock_path = ""
+        observe._verb_stop.clear()
+
+    def tearDown(self) -> None:
+        observe._verb_stop.clear()
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    # -- fixtures --------------------------------------------------------
+
+    def _sidecar(self, status: str = "idle", **extra) -> None:
+        d = {
+            "session_id": self.session_id,
+            "session_name": "worker",
+            "cwd": self.tmpdir,
+            "store_path": self.store,
+            "cards_path": self.store + ".cards",
+            "status": status,
+            "started_at": "2026-01-01T00:00:00Z",
+            "pid": os.getpid(),
+            "host_pid": os.getpid(),
+            "socket_path": self.sock_path,
+            "schema": 1,
+            "model": {"provider": "", "id": ""},
+        }
+        d.update(extra)
+        with open(os.path.join(self.sidecar_dir, f"{self.session_id}.json"), "w") as f:
+            json.dump(d, f)
+
+    def _cards(self, *cards: dict) -> None:
+        tmp = self.store + ".cards.tmp"
+        with open(tmp, "w") as f:
+            json.dump(list(cards), f)
+        os.replace(tmp, self.store + ".cards")
+
+    def _append(self, role: str, content, **msg) -> None:
+        m = {"role": role, "content": content}
+        m.update(msg)
+        with open(self.store, "a") as f:
+            f.write(
+                json.dumps({"type": "message", "timestamp": "2026-01-01T00:00:01Z", "message": m})
+                + "\n"
+            )
+
+    def _listen(self) -> "tuple[socket.socket, list[dict]]":
+        self.sock_path = os.path.join(self.tmpdir, "s.sock")
+        srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        srv.bind(self.sock_path)
+        srv.listen(16)  # room for liveness probes alongside the real send
+        got: list[dict] = []
+        self.addCleanup(srv.close)
+        return srv, got
+
+    def _recv_all(self, srv: socket.socket, got: list) -> None:
+        # Skip empty connections — liveness probes (_socket_alive) connect
+        # and hang up without sending anything.
+        while not got:
+            try:
+                conn, _ = srv.accept()
+            except ConnectionAbortedError:
+                continue  # a probe that hung up before we accepted it
+            with conn, conn.makefile("r") as f:
+                got.extend(json.loads(line) for line in f)
+        # Keep accepting (and dropping) later probes, like a live session,
+        # so the listen backlog never fills and refuses connections.
+        threading.Thread(target=self._drain, args=(srv,), daemon=True).start()
+
+    @staticmethod
+    def _drain(srv: socket.socket) -> None:
+        with suppress(OSError):
+            while True:
+                conn, _ = srv.accept()
+                conn.close()
+
+    # -- status ------------------------------------------------------------
+
+    def test_list_status_comes_from_core_card(self) -> None:
+        """Regression: the sidecar said idle (out-of-order extension events)
+        while the agent was mid-turn. The core card is authoritative."""
+        self._sidecar(status="idle")
+        self._cards(_status_card("running", tool="bash", model="anthropic/claude"))
+        out = observe._snapshot_session_list()
+        self.assertIn("running", out)
+        self.assertNotIn("idle", out)
+
+    def test_error_and_no_model_sessions_are_live(self) -> None:
+        self._sidecar(status="running")
+        self._cards(_status_card("no-model", notice="No models available. Use /login"))
+        rows = observe._read_sidecars(include_all=False)
+        self.assertEqual([r["status"] for r in rows], ["no-model"])
+
+    def test_reused_pid_with_dead_socket_is_crashed(self) -> None:
+        """Regression: after a reboot, old sidecars' pids belonged to
+        unrelated daemons and months-old sessions were listed as running."""
+        self.sock_path = os.path.join(self.tmpdir, "gone.sock")  # never bound
+        self._sidecar(status="running", started_at="2026-01-01T00:00:00Z")
+        self.assertEqual(observe._read_sidecars(include_all=True)[0]["status"], "crashed")
+
+    def test_single_refusal_is_not_death(self) -> None:
+        """A momentarily full listen backlog refuses one connect; only a
+        repeated refusal (or a missing socket file) means dead."""
+        self.sock_path = os.path.join(self.tmpdir, "busy.sock")
+        self._sidecar(status="running", started_at="2026-01-01T00:00:00Z")
+        results = iter(["refused", None])
+        with mock.patch.object(observe, "_probe_socket", side_effect=lambda p: next(results)):
+            self.assertEqual(observe._read_sidecars(include_all=True)[0]["status"], "running")
+        with mock.patch.object(observe, "_probe_socket", return_value="refused"):
+            self.assertEqual(observe._read_sidecars(include_all=True)[0]["status"], "crashed")
+
+    def test_fresh_session_without_socket_yet_is_live(self) -> None:
+        self.sock_path = os.path.join(self.tmpdir, "soon.sock")
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        self._sidecar(status="running", started_at=now)
+        self.assertEqual(observe._read_sidecars(include_all=True)[0]["status"], "running")
+
+    def test_resolve_by_cwd_follows_symlinks(self) -> None:
+        self._sidecar(status="idle")
+        link = os.path.join(self.tmpdir, "link")
+        os.symlink(self.tmpdir, link)
+        self.assertEqual(observe._resolve_sidecar("", link)["session_id"], self.session_id)
+
+    def test_live_session_wins_over_dead_namesake(self) -> None:
+        """Re-spawning worker 'worker' must not make it ambiguous with the
+        crashed 'worker' from the previous run."""
+        self._sidecar(status="idle")
+        old_sid = "deadbeef" + "2" * 28
+        with open(os.path.join(self.sidecar_dir, f"{old_sid}.json"), "w") as f:
+            json.dump(
+                {
+                    "session_id": old_sid,
+                    "session_name": "worker",
+                    "cwd": self.tmpdir,
+                    "status": "ended",
+                    "started_at": "2025-01-01T00:00:00Z",
+                    "pid": os.getpid(),
+                },
+                f,
+            )
+        self.assertEqual(observe._resolve_sidecar("worker", "")["session_id"], self.session_id)
+        self.assertEqual(observe._resolve_sidecar("", self.tmpdir)["session_id"], self.session_id)
+
+    def test_pick_match_rules(self) -> None:
+        live1 = {"session_id": "a1", "status": "idle"}
+        live2 = {"session_id": "a2", "status": "running"}
+        dead_new = {"session_id": "d1", "status": "crashed"}
+        dead_old = {"session_id": "d2", "status": "ended"}
+        with self.assertRaisesRegex(ValueError, "ambiguous"):
+            observe._pick_match([live1, dead_new, live2])
+        self.assertIs(observe._pick_match([dead_new, dead_old]), dead_new)
+
+    def test_dead_pid_still_crashed_despite_card(self) -> None:
+        self._sidecar(status="running", pid=2**22 + 12345)
+        self._cards(_status_card("running"))
+        rows = observe._read_sidecars(include_all=True)
+        self.assertEqual(rows[0]["status"], "crashed")
+
+    def test_status_json_and_snapshot_surface_startup_failure(self) -> None:
+        """Regression: the TUI said 'No models available' while observe
+        showed only '✎ thinking level changed'."""
+        self._sidecar(status="running")
+        self._cards(
+            _status_card(
+                "no-model",
+                runs="0",
+                error="no model selected. Use /login",
+                notice="No models available. Use /login or set an API key environment variable.",
+            )
+        )
+        h = _FakeHost()
+        self.assertEqual(observe.cli_observe([self.session_id[:8], "--status", "--json"], h), 0)
+        st = json.loads(h.stdout)
+        self.assertEqual(st["status"], "no-model")
+        self.assertIn("No models available", st["notice"])
+        self.assertEqual(st["runs"], 0)
+        self.assertTrue(st["live"])
+
+        h = _FakeHost()
+        self.assertEqual(observe.cli_observe([self.session_id[:8]], h), 0)
+        first = h.stdout.splitlines()[0]
+        self.assertIn("status: no-model", first)
+        self.assertIn("notice: No models available", h.stdout)
+        # The status card is not duplicated into the cards header.
+        self.assertNotIn("session: no-model", h.stdout)
+
+    def test_parse_card_ts_handles_go_nanos(self) -> None:
+        t = observe._parse_card_ts("2026-01-02T03:04:05.123456789Z")
+        self.assertAlmostEqual(
+            t, datetime(2026, 1, 2, 3, 4, 5, 123456, tzinfo=timezone.utc).timestamp()
+        )
+        self.assertEqual(observe._parse_card_ts("garbage"), 0.0)
+        self.assertEqual(
+            observe._parse_card_ts("2026-01-02T03:04:05.5-02:00"),
+            datetime(2026, 1, 2, 5, 4, 5, 500000, tzinfo=timezone.utc).timestamp(),
+        )
+        self.assertGreater(observe._parse_card_ts("2026-01-02T03:04:05Z"), 0)
+        # Go trims trailing zeros; Python 3.9 would reject a 1-digit fraction.
+        self.assertEqual(
+            observe._parse_card_ts("2026-01-02T03:04:05.5Z"),
+            datetime(2026, 1, 2, 3, 4, 5, 500000, tzinfo=timezone.utc).timestamp(),
+        )
+
+    # -- formatter ----------------------------------------------------------
+
+    def test_formatter_shows_turn_error_and_tools(self) -> None:
+        fmt = observe._Formatter(raw_json=False, color=False)
+        err = json.dumps(
+            {
+                "type": "message",
+                "message": {
+                    "role": "assistant",
+                    "content": [],
+                    "stopReason": "error",
+                    "errorMessage": "Refresh token expired. Run '/login anthropic'",
+                },
+            }
+        )
+        self.assertIn("✗ error: Refresh token expired", fmt.render(err) or "")
+        call = json.dumps(
+            {
+                "type": "message",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {"type": "toolCall", "name": "bash", "arguments": {"command": "make test"}}
+                    ],
+                },
+            }
+        )
+        self.assertIn("→ bash  make test", fmt.render(call) or "")
+        res = json.dumps(
+            {
+                "type": "message",
+                "message": {
+                    "role": "toolResult",
+                    "toolName": "bash",
+                    "isError": True,
+                    "content": [{"type": "text", "text": "x" * 1000}],
+                },
+            }
+        )
+        out = fmt.render(res) or ""
+        self.assertIn("✗ bash", out)
+        self.assertLess(len(out), 300)
+
+    # -- snapshot mode -------------------------------------------------------
+
+    def test_observe_without_tty_is_a_snapshot_that_exits(self) -> None:
+        self._sidecar(status="running")
+        self._cards(_status_card("running"))
+        for i in range(5):
+            self._append("user", f"msg{i}")
+        h = _FakeHost(tty=False)
+        rc = observe.cli_observe([self.session_id[:8], "-n", "2"], h)
+        self.assertEqual(rc, 0)
+        self.assertIn("msg4", h.stdout)
+        self.assertNotIn("msg2", h.stdout)
+
+    def test_observe_follow_stops_on_signal(self) -> None:
+        self._sidecar(status="running")
+        observe._verb_stop.set()  # as if Ctrl-C / SIGTERM arrived
+        h = _FakeHost(tty=True)
+        self.assertEqual(observe.cli_observe([self.session_id[:8]], h), 0)
+        self.assertIn("status:", h.stdout)
+
+    def test_observe_wait_times_out_with_124(self) -> None:
+        self._sidecar(status="running")
+        self._cards(_status_card("running"))
+        h = _FakeHost()
+        rc = observe.cli_observe([self.session_id[:8], "--wait", "--status", "--timeout", "0.3"], h)
+        self.assertEqual(rc, 124)
+        self.assertIn("status: running", h.stdout)
+
+    def test_observe_list_json(self) -> None:
+        self._sidecar(status="idle")
+        h = _FakeHost()
+        self.assertEqual(observe.cli_observe(["--json"], h), 0)
+        rows = json.loads(h.stdout)
+        self.assertEqual(rows[0]["session_id"], self.session_id)
+
+    # -- send ------------------------------------------------------------------
+
+    def test_send_positional_message(self) -> None:
+        srv, got = self._listen()
+        self._sidecar(status="idle")
+        t = threading.Thread(target=self._recv_all, args=(srv, got))
+        t.start()
+        h = _FakeHost()
+        rc = observe.cli_send([self.session_id[:8], "!stop", "and", "rethink"], h)
+        t.join(20)
+        self.assertEqual(rc, 0, h.stderr)
+        self.assertEqual(got, [{"deliver_as": "steer", "content": "stop and rethink"}])
+
+    def test_send_piped_stdin_is_one_message(self) -> None:
+        srv, got = self._listen()
+        self._sidecar(status="idle")
+        t = threading.Thread(target=self._recv_all, args=(srv, got))
+        t.start()
+        h = _FakeHost(stdin=["line one\n", "line two\n"], tty=False)
+        rc = observe.cli_send([self.session_id[:8]], h)
+        t.join(20)
+        self.assertEqual(rc, 0, h.stderr)
+        self.assertEqual(got, [{"deliver_as": "", "content": "line one\nline two"}])
+
+    def test_send_wait_needs_a_message(self) -> None:
+        self._listen()
+        self._sidecar(status="idle")
+        h = _FakeHost(tty=True)
+        self.assertEqual(observe.cli_send([self.session_id[:8], "--wait"], h), 1)
+        self.assertIn("--wait needs a message", h.stderr)
+
+    def test_send_interrupted_stdin_read_sends_nothing(self) -> None:
+        self._listen()
+        self._sidecar(status="idle")
+        observe._verb_stop.set()  # signal arrived while reading the brief
+        h = _FakeHost(stdin=["half a brie"], tty=False)
+        self.assertEqual(observe.cli_send([self.session_id[:8]], h), 130)
+
+    def test_send_to_ended_session_fails_fast(self) -> None:
+        self._sidecar(status="ended")
+        h = _FakeHost()
+        self.assertEqual(observe.cli_send([self.session_id[:8], "hi"], h), 1)
+        self.assertIn("ended", h.stderr)
+
+    def _fake_agent(self, srv: socket.socket, got: list, reply: str, error: str = "") -> None:
+        """Accept the message, then play a run: running → user msg →
+        assistant reply → idle/error, the order fir core writes them."""
+        self._recv_all(srv, got)
+        self._cards(_status_card("running", ts=_now_card_ts()))
+        self._append("user", got[0]["content"])
+        self._append(
+            "assistant",
+            [{"type": "toolCall", "name": "bash", "arguments": {}}],
+            stopReason="toolUse",
+        )
+        if error:
+            self._append("assistant", [], stopReason="error", errorMessage=error)
+            self._cards(_status_card("error", ts=_now_card_ts(), error=error))
+        else:
+            self._append("assistant", [{"type": "text", "text": reply}], stopReason="stop")
+            self._cards(_status_card("idle", ts=_now_card_ts()))
+
+    def test_send_wait_prints_final_reply(self) -> None:
+        srv, got = self._listen()
+        self._sidecar(status="idle")
+        self._cards(_status_card("idle"))  # stale idle from before the send
+        t = threading.Thread(target=self._fake_agent, args=(srv, got, "all 42 tests pass"))
+        t.start()
+        h = _FakeHost()
+        rc = observe.cli_send([self.session_id[:8], "--wait", "--timeout", "20", "run tests"], h)
+        t.join(20)
+        self.assertEqual(rc, 0, h.stderr)
+        self.assertEqual(h.stdout.strip(), "all 42 tests pass")
+
+    def test_send_wait_ignores_someone_elses_turn(self) -> None:
+        """A human typing in the TUI (or another sender) must not end our
+        wait with their reply."""
+        srv, got = self._listen()
+        self._sidecar(status="idle")
+        self._cards(_status_card("idle"))
+
+        def play() -> None:
+            self._recv_all(srv, got)
+            self._append("user", "unrelated question from the TUI")
+            self._append("assistant", [{"type": "text", "text": "NOT OURS"}], stopReason="stop")
+            self._cards(_status_card("idle", ts=_now_card_ts()))
+            self._fake_agent_run(got[0]["content"], "OURS")
+
+        t = threading.Thread(target=play)
+        t.start()
+        h = _FakeHost()
+        rc = observe.cli_send([self.session_id[:8], "--wait", "--timeout", "20", "our task"], h)
+        t.join(20)
+        self.assertEqual(rc, 0, h.stderr)
+        self.assertEqual(h.stdout.strip(), "OURS")
+
+    def _fake_agent_run(self, user: str, reply: str) -> None:
+        self._cards(_status_card("running", ts=_now_card_ts()))
+        self._append("user", user)
+        self._append("assistant", [{"type": "text", "text": reply}], stopReason="stop")
+        self._cards(_status_card("idle", ts=_now_card_ts()))
+
+    def test_send_wait_reports_failed_turn(self) -> None:
+        srv, got = self._listen()
+        self._sidecar(status="idle")
+        self._cards(_status_card("idle"))
+        t = threading.Thread(target=self._fake_agent, args=(srv, got, "", "Refresh token expired"))
+        t.start()
+        h = _FakeHost()
+        rc = observe.cli_send([self.session_id[:8], "--wait", "--timeout", "20", "hi"], h)
+        t.join(20)
+        self.assertEqual(rc, 1)
+        self.assertIn("Refresh token expired", h.stderr)
+
+    def test_send_wait_detects_refused_prompt(self) -> None:
+        """No model: the prompt never reaches the agent loop, nothing is
+        persisted — only the status card changes. --wait must not hang."""
+        srv, got = self._listen()
+        self._sidecar(status="running")
+        self._cards(_status_card("no-model", ts="2026-01-01T00:00:00Z"))
+
+        def refuse() -> None:
+            self._recv_all(srv, got)
+            self._cards(_status_card("no-model", ts=_now_card_ts(), error="no model selected"))
+
+        t = threading.Thread(target=refuse)
+        t.start()
+        h = _FakeHost()
+        rc = observe.cli_send([self.session_id[:8], "--wait", "--timeout", "20", "hi"], h)
+        t.join(20)
+        self.assertEqual(rc, 1)
+        self.assertIn("no model selected", h.stderr)
 
 
 if __name__ == "__main__":

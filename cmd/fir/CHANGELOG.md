@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+### Added
+- **`fir observe` / `fir send` can drive a fir agent on another host over ssh, better than scraping its tmux screen.** `fir send <id> 'text'` takes the message as arguments (it used to fail with "unexpected extra argument"); piped stdin is sent as one message; `fir send <id> --wait` blocks until that turn ends and prints the agent's final reply (exit 1 if the turn failed, 124 on `--timeout`). Without a TTY, `fir observe <id>` prints a snapshot and exits (`-n N` for size, `-f` to follow), so `ssh host fir observe <id>` no longer hangs; `--status [--json]` and `--wait` give scripts the session state, and `fir observe --json` lists sessions as JSON.
+- **Session status that matches what the TUI shows.** Core now publishes a `session/status` observable card from the agent loop, in order: `idle`, `running` (with the current tool), `error` (with the provider/auth error), `no-model` (with the startup "No models available…" notice). `fir observe`, `fir htop` and `observe_session` read it, and every snapshot starts with a status line. Before, a session that couldn't log in or had no model showed only `✎ thinking level changed`, and a busy session could be listed as `idle`.
+- `observe_session` / `send_session` say they are local-only and give the exact `fir observe` / `fir send` commands to run over ssh for a session on another host; `rexec`/`rtmux`/`rput` and the `shepherd`, `acp-shepherd`, `tmux-observer`, `wt` and `self` skills now use that as the default loop, with screen capture only as a fallback.
+
+### Fixed
+- `fir observe` transcript rendering shows tool calls (`→ bash  make test`), tool results (`✓`/`✗` name, truncated) and failed turns (`✗ error: …`); they were blank lines before.
+- `fir observe` no longer lists long-dead sessions as running after a reboot: liveness also probes the session's socket, since a reused pid made `kill -0` succeed.
+- `fir observe --cwd <dir>` / `fir send --cwd <dir>` reach the verb again; fir's global `-C/--cwd` chdir flag had been swallowing them. `--cwd` matching also resolves symlinks (`/tmp` vs `/private/tmp`).
+- Ctrl-C / SIGTERM / SIGHUP on a CLI verb such as `fir observe -f` exits cleanly instead of printing "Error: extension exited before returning a result".
+- `fir observe` / `fir send` prefer the live session when a name, id prefix or `--cwd` also matches ended/crashed ones, so a re-spawned worker keeps its name instead of hitting "ambiguous match".
+- `fir send --steer` / `--follow` (and the `!`/`+` sigils) to an idle session start a turn; they used to sit in a queue nothing drained.
+- A prompt injected by `fir send` while the agent was just starting a run is queued as a follow-up instead of being dropped.
+
 ## [1.25.1] - 2026-10-03
 
 ### Changed

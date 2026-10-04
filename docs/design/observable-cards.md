@@ -85,6 +85,8 @@ Cards file is read on session construct → footer/headers populated from last-k
 
 Mood extension publishes on mood_note: ctx.put_observable("current", tag or "noted", note). Also publishes ("footer", tag, note) to take over from the existing set_status path. Mood log entries persisted in session_data gain a parallel entry_id field for cross-reference.
 
+Core publishes a single `session/status` card from AgentSession's agent-event handler (pkg/session/statuscard.go): slug `idle` / `running` / `running: <tool>` / `error` / `no-model`; detail `key: value` lines (status, model, tool, runs, error, notice). It is the authoritative live status for `fir observe`, `fir htop` and `observe_session`, and is excluded from the slug header (readers render it as a dedicated status line).
+
 Plan tool publishes on every plan mutation, INSIDE THE TOOL'S Execute (not from agentsession event dispatch). Slug comes from plan metadata progress_metric or falls back to "done/total status". Detail is the rendered bullet listing. Whoever owns the state owns its card.
 
 set_status becomes a thin wrapper: b.store.Put(b.caps.Name, "footer", p.Status, "", b.currentEntryID()). The race we just fixed in set_status stays fixed — Put is one atomic operation through the store.

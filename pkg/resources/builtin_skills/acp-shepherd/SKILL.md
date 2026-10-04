@@ -146,6 +146,29 @@ fleet log-path worker-1
 Every `session/update` is appended to `<state_dir>/<agent>.jsonl`, so
 you have a perfect replayable record. No regex scraping.
 
+## Agents on another host
+
+ACP needs a persistent stdio connection, so a fleet daemon here can only
+hold remote agents for as long as an ssh pipe stays up
+(`fleet spawn w --cmd "ssh <host> fir --mode acp" …`). For anything
+longer-lived, don't: start the agent on the host inside tmux (the process
+holder) and drive it with fir's own CLI over ssh (`rexec`):
+
+```bash
+# on <host>, once:
+tmux new -d -s w1 -c ~/proj 'fir --session-name w1'
+# then, from here, each a short rexec on <host>:
+fir observe w1 --status --json        # idle | running | error | no-model | crashed, last error
+fir send w1 --wait --timeout 30m < brief.md  # send, block until the turn ends, print the reply
+fir observe w1 -n 40                  # snapshot of recent work; exits, no TTY needed
+fir send w1 '!change of plan: …'      # steer;  fir send w1 --abort  cancels
+```
+
+`observe_session` / `send_session` are local-only; these commands are the
+remote equivalent. Scraping the remote tmux pane is the fallback, not the
+loop — `--status` already shows startup failures such as "No models
+available" that a transcript tail would hide.
+
 ## Observability bridge (tmux view)
 
 You can render each agent's update stream into a tmux pane, giving you

@@ -33,6 +33,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -210,8 +211,9 @@ func RunCLIVerb(binding *CLIVerbBinding, argv []string, cwd string, projectDir s
 	// doesn't consume it. The goroutine outlives this call when the
 	// extension exits without consuming all stdin; that's fine — fir is
 	// about to exit and the OS reaps it.
+	stdin := os.Stdin // read once: the pump may outlive this call
 	go func() {
-		sc := bufio.NewScanner(os.Stdin)
+		sc := bufio.NewScanner(stdin)
 		// Allow long lines (e.g. JSON pasted into `fir send`). 1 MiB cap
 		// is far above any realistic terminal input.
 		buf := make([]byte, 0, 64*1024)
@@ -229,8 +231,16 @@ func RunCLIVerb(binding *CLIVerbBinding, argv []string, cwd string, projectDir s
 		signal.Stop(sigCh)
 		close(sigCh) // unblocks the goroutine's range loop
 	}()
+	// lastTermSig records the most recent forwarded terminating signal, so
+	// an extension that exits in response to Ctrl-C / SIGTERM / SIGHUP
+	// (rather than replying to cli_invoke) is reported as an ordinary
+	// signal exit, not "extension exited before returning a result".
+	var lastTermSig atomic.Int32
 	go func() {
 		for s := range sigCh {
+			if n, ok := s.(syscall.Signal); ok && n != syscall.SIGWINCH {
+				lastTermSig.Store(int32(n))
+			}
 			_ = codec.WriteNotification("cli_signal", map[string]string{"name": s.String()})
 		}
 	}()
@@ -241,6 +251,13 @@ func RunCLIVerb(binding *CLIVerbBinding, argv []string, cwd string, projectDir s
 		msg, err := codec.ReadMessage()
 		if err != nil {
 			if errors.Is(err, io.EOF) {
+				switch n := syscall.Signal(lastTermSig.Load()); n {
+				case 0:
+				case syscall.SIGQUIT:
+					return 0, nil // Ctrl-\ is the verbs' clean-detach key
+				default:
+					return 128 + int(n), nil
+				}
 				return 1, fmt.Errorf("extension exited before returning a result")
 			}
 			return 1, fmt.Errorf("read from extension: %w", err)
