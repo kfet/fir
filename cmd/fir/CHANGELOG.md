@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.26.0] - 2026-10-04
+
 ### Added
 - **`fir observe` / `fir send` can drive a fir agent on another host over ssh, better than scraping its tmux screen.** `fir send <id> 'text'` takes the message as arguments (it used to fail with "unexpected extra argument"); piped stdin is sent as one message; `fir send <id> --wait` blocks until that turn ends and prints the agent's final reply (exit 1 if the turn failed, 124 on `--timeout`). Without a TTY, `fir observe <id>` prints a snapshot and exits (`-n N` for size, `-f` to follow), so `ssh host fir observe <id>` no longer hangs; `--status [--json]` and `--wait` give scripts the session state, and `fir observe --json` lists sessions as JSON.
 - **Session status that matches what the TUI shows.** Core now publishes a `session/status` observable card from the agent loop, in order: `idle`, `running` (with the current tool), `error` (with the provider/auth error), `no-model` (with the startup "No models available…" notice). `fir observe`, `fir htop` and `observe_session` read it, and every snapshot starts with a status line. Before, a session that couldn't log in or had no model showed only `✎ thinking level changed`, and a busy session could be listed as `idle`.
@@ -15,6 +17,9 @@
 - `fir observe` / `fir send` prefer the live session when a name, id prefix or `--cwd` also matches ended/crashed ones, so a re-spawned worker keeps its name instead of hitting "ambiguous match".
 - `fir send --steer` / `--follow` (and the `!`/`+` sigils) to an idle session start a turn; they used to sit in a queue nothing drained.
 - A prompt injected by `fir send` while the agent was just starting a run is queued as a follow-up instead of being dropped.
+
+### Changed
+- **Model catalog regenerated**: added `amazon-bedrock/eu.anthropic.claude-sonnet-5-5`, `amazon-bedrock/us.anthropic.claude-sonnet-5-5`; removed 1 aggregator model(s); 17 model(s) with changed pricing/limits.
 
 ## [1.25.1] - 2026-10-03
 
