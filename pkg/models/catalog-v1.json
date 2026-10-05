@@ -1,8 +1,79 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-10-03T01:00:59Z",
+  "generatedAt": "2026-10-05T01:00:39Z",
   "clientVersions": {
     "claudeCode": "2.1.280"
   },
-  "providers": {}
+  "providers": {
+    "openrouter": {
+      "modelOverrides": {
+        "moonshotai/kimi-k3": {
+          "cost": {
+            "input": 0.67,
+            "output": 14,
+            "cacheRead": 0.66,
+            "cacheWrite": 0
+          }
+        },
+        "nvidia/nemotron-3.5-lightning": {
+          "cost": {
+            "input": 0.06,
+            "output": 0.16,
+            "cacheRead": 0.03,
+            "cacheWrite": 0
+          },
+          "maxTokens": 32768
+        },
+        "openai/gpt-5.6-sol-pro": {
+          "cost": {
+            "input": 2,
+            "output": 10,
+            "cacheRead": 0.2,
+            "cacheWrite": 2.5
+          }
+        },
+        "qwen/qwen3.6-27b": {
+          "cost": {
+            "input": 0.32,
+            "output": 2.7,
+            "cacheRead": 0.03,
+            "cacheWrite": 0
+          },
+          "maxTokens": 262140
+        },
+        "tencent/hy3": {
+          "cost": {
+            "input": 0.132,
+            "output": 0.528,
+            "cacheRead": 0.033,
+            "cacheWrite": 0
+          }
+        },
+        "tencent/hy4-preview": {
+          "cost": {
+            "input": 0.834,
+            "output": 2.501,
+            "cacheRead": 0.042,
+            "cacheWrite": 0
+          }
+        },
+        "z-ai/glm-5.2": {
+          "cost": {
+            "input": 0.096,
+            "output": 8,
+            "cacheRead": 0.096,
+            "cacheWrite": 0
+          }
+        },
+        "~moonshotai/kimi-latest": {
+          "cost": {
+            "input": 0.665,
+            "output": 13,
+            "cacheRead": 0.45,
+            "cacheWrite": 0
+          }
+        }
+      }
+    }
+  }
 }
