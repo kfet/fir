@@ -2,8 +2,13 @@
 
 ## [Unreleased]
 
+## [1.27.0] - 2026-10-06
+
 ### Added
 - ACP: standard `session/fork` (advertised as `sessionCapabilities.fork`). Forks at the parent's forkable leaf by default, or at `_meta.at` (advertised as `fork._meta.at`); parent untouched, child history a byte-identical prefix. `at` on `session/load`/`resume` is now fir-only legacy.
+
+### Changed
+- **Model catalog regenerated**: 8 model(s) with changed pricing/limits (openrouter: deepseek/deepseek-v3.1-terminus, deepseek/deepseek-v3.2, deepseek/deepseek-v4-pro-0813, google/gemma-4-26b-a4b-it, moonshotai/kimi-k3, z-ai/glm-5.2, z-ai/glm-5.3, ~moonshotai/kimi-latest).
 
 ## [1.26.1] - 2026-10-05
 
