@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Changed
+- `release` skill: the catalog entry now names the models with changed pricing/limits (grouped by provider, at most 10). Entries back to 1.19.0 backfilled.
+
 ## [1.26.0] - 2026-10-04
 
 ### Added
@@ -19,19 +22,19 @@
 - A prompt injected by `fir send` while the agent was just starting a run is queued as a follow-up instead of being dropped.
 
 ### Changed
-- **Model catalog regenerated**: added `amazon-bedrock/eu.anthropic.claude-sonnet-5-5`, `amazon-bedrock/us.anthropic.claude-sonnet-5-5`; removed 1 aggregator model(s); 17 model(s) with changed pricing/limits.
+- **Model catalog regenerated**: added `amazon-bedrock/eu.anthropic.claude-sonnet-5-5`, `amazon-bedrock/us.anthropic.claude-sonnet-5-5`; removed 1 aggregator model(s); 17 model(s) with changed pricing/limits (openrouter: deepseek/deepseek-chat-v3-0324, deepseek/deepseek-v4-flash, deepseek/deepseek-v4-flash-0731, deepseek/deepseek-v4-pro-0813, deepseek/deepseek-v4.1-flash, meta-llama/llama-3.3-70b-instruct, moonshotai/kimi-k3, qwen/qwen3.8-27b, tencent/hy3, tencent/hy4-preview +7 more).
 
 ## [1.25.1] - 2026-10-03
 
 ### Changed
 
-- Model catalog regenerated: 8 model(s) with changed pricing/limits.
+- Model catalog regenerated: 8 model(s) with changed pricing/limits (openrouter: deepseek/deepseek-v4-flash-0731, moonshotai/kimi-k2.6, qwen/qwen3-30b-a3b-instruct-2507, ~deepseek/deepseek-flash-latest, ~deepseek/deepseek-pro-latest, ~deepseek/deepseek-v4-flash-latest, ~moonshotai/kimi-latest, ~z-ai/glm-flash-latest).
 - `self` and `acp-shepherd` skills: "Subagent with context: fork yourself" recipe is now the default way to start a context-needing subagent.
 
 ## [1.25.0] - 2026-10-03
 
 ### Changed
-- **Model catalog regenerated**: 7 model(s) with changed pricing/limits.
+- **Model catalog regenerated**: 7 model(s) with changed pricing/limits (openrouter: nvidia/nemotron-3.5-lightning, qwen/qwen3-30b-a3b-instruct-2507, qwen/qwen3-next-80b-a3b-thinking, tencent/hy3, tencent/hy4-preview, z-ai/glm-5.1, ~deepseek/deepseek-v4-flash-latest).
 
 ### Added
 - **Fork a session at an entry, non-interactively.** `fir --resume <session> --at <entry-id>` (or `--session <path> --at <id>`) starts a child session branched at that entry — `/resume` + `/tree` in a fresh process — without writing the parent. ACP `session/load`/`session/resume` accept `at` (response `sessionId` names the child) and ACP `/resume` takes `--at`. Entries that leave a dangling tool call are rejected; the child replays a byte-identical prefix so prompt caches hit. `agent_introspect` now reports `session.leafId` and `session.forkAt`.
@@ -46,13 +49,13 @@
 - **`TestStreamGoogle_ContextCancelled` could hang the race suite for 10 minutes** when the server never saw the client disconnect; the handler now also exits at test end.
 
 ### Changed
-- **Model catalog regenerated**: added 1 aggregator model(s); 3 model(s) with changed pricing/limits.
+- **Model catalog regenerated**: added 1 aggregator model(s); 3 model(s) with changed pricing/limits (openrouter: deepseek/deepseek-v4.1-flash, ~deepseek/deepseek-flash-latest, ~moonshotai/kimi-latest).
 - **Anthropic system prompt now sent as two cached blocks**: a stable prefix (core text, guidelines, skills list) and a per-session suffix (context files, appended prompts, date, cwd, host), each with its own breakpoint, so turn one of a fresh session hits the prompt cache instead of rewriting ~30k tokens. The volatile breakpoint is dropped when needed to stay within the 4-breakpoint limit.
 
 ## [1.24.4] - 2026-10-03
 
 ### Changed
-- **Model catalog regenerated**: 9 model(s) with changed pricing/limits.
+- **Model catalog regenerated**: 9 model(s) with changed pricing/limits (openrouter: deepseek/deepseek-v3.1-terminus, deepseek/deepseek-v4-flash-0731, google/gemma-4-26b-a4b-it, inclusionai/ling-3.0-flash-fin, moonshotai/kimi-k2-thinking, nvidia/nemotron-3-ultra-550b-a55b, ~deepseek/deepseek-v4-flash-latest, ~moonshotai/kimi-latest, ~z-ai/glm-flash-latest).
 
 ### Fixed
 - **ACP: config-file MCP servers survive session re-hydration.** A session restored by `session/prompt` (after an idle reap or agent restart) no longer loses every `mcp.json` / `mcp.d` server with "connect: context canceled" when that prompt returns.
@@ -60,7 +63,7 @@
 ## [1.24.3] - 2026-10-02
 
 ### Changed
-- **Model catalog regenerated**: added `amazon-bedrock/in.anthropic.claude-haiku-4-5-20251001-v1:0`, `amazon-bedrock/in.anthropic.claude-opus-5`, `amazon-bedrock/in.anthropic.claude-sonnet-5`, `opencode/fledge-alpha-free`, `opencode/ling-3.1-flash-free` (+4 on aggregators); 18 model(s) with changed pricing/limits.
+- **Model catalog regenerated**: added `amazon-bedrock/in.anthropic.claude-haiku-4-5-20251001-v1:0`, `amazon-bedrock/in.anthropic.claude-opus-5`, `amazon-bedrock/in.anthropic.claude-sonnet-5`, `opencode/fledge-alpha-free`, `opencode/ling-3.1-flash-free` (+4 on aggregators); 18 model(s) with changed pricing/limits (openrouter: deepseek/deepseek-chat-v3-0324, deepseek/deepseek-v4-flash, deepseek/deepseek-v4-flash-0731, deepseek/deepseek-v4.1-flash, moonshotai/kimi-k2-thinking, moonshotai/kimi-k3, nvidia/nemotron-3.5-lightning, qwen/qwen3.5-35b-a3b, tencent/hy3, tencent/hy4-preview +8 more).
 - **MCP: a server that connects after an earlier "connecting" notice is now reported as ready.**
 
 ### Fixed
@@ -69,20 +72,20 @@
 ## [1.24.2] - 2026-10-01
 
 ### Changed
-- **Model catalog regenerated**: 3 model(s) with changed pricing/limits.
+- **Model catalog regenerated**: 3 model(s) with changed pricing/limits (openrouter: moonshotai/kimi-k3, ~deepseek/deepseek-pro-latest, ~moonshotai/kimi-latest).
 - **Session state is now an append-only history** (`<session>.jsonl.state.jsonl`, 0600): one timestamped full snapshot per actual change, fsynced, torn last line ignored on restore, capped at 1000 lines; a legacy `.state.json` is migrated automatically.
 
 ## [1.24.1] - 2026-10-01
 
 ### Changed
 - **Session state is saved and restored universally, in every mode.** Model, thinking level, name, cwd, mode, client metadata and session-scoped MCP servers are saved next to each transcript (`<session>.jsonl.state.json`, 0600) and restored through one core path on `-c`/`--session`/`/resume`/ACP new/load/resume/rehydrate; new `SessionState` fields ride along automatically. ACP drops its private `acp-sessions/` store for a `sessionId` handle (old configs are migrated on first use). See `docs/session-restore.md`.
-- **Model catalog regenerated**: added 1 aggregator model(s); 14 model(s) with changed pricing/limits.
+- **Model catalog regenerated**: added 1 aggregator model(s); 14 model(s) with changed pricing/limits (openrouter: deepseek/deepseek-v4-flash, deepseek/deepseek-v4-pro, deepseek/deepseek-v4-pro-0813, deepseek/deepseek-v4.1-flash, moonshotai/kimi-k2.6, moonshotai/kimi-k3, z-ai/glm-4.6v, z-ai/glm-5.2, z-ai/glm-5.3, ~deepseek/deepseek-flash-latest +4 more).
 
 ## [1.24.0] - 2026-10-01
 
 ### Changed
 - **ACP sessions persist and restore their full setup.** cwd, client `mcpServers`, `_meta`, mode, transcript, model and thinking level are saved per session (0600, `<agentDir>/acp-sessions/`) and every path — new, load, resume, idle-reap rehydrate, rehydrate after restart — rebuilds through one function. Client values override the saved ones; configs untouched for 30 days are pruned. Replaces the MCP-only reap record from 1.23.1.
-- **Model catalog regenerated**: added `amazon-bedrock/global.openai.gpt-6.1-sol`; removed 2 aggregator model(s); 20 model(s) with changed pricing/limits.
+- **Model catalog regenerated**: added `amazon-bedrock/global.openai.gpt-6.1-sol`; removed 2 aggregator model(s); 20 model(s) with changed pricing/limits (openrouter: deepseek/deepseek-v4-flash, deepseek/deepseek-v4-flash-0731, deepseek/deepseek-v4-pro, deepseek/deepseek-v4-pro-0813, deepseek/deepseek-v4.1-flash, google/gemma-4-26b-a4b-it, minimax/minimax-m1, moonshotai/kimi-k2-thinking, moonshotai/kimi-k3, nvidia/nemotron-3.5-lightning +10 more).
 
 ### Added
 - **ACP `session_needs_reload` error (-32010)** on a prompt when a restored client MCP server fails to start, so the client can `session/load` with fresh `mcpServers`.
@@ -91,7 +94,7 @@
 
 ### Changed
 - **release skill gains a docs step (2b)**: review repo docs each release; update or generate high-level docs — bigger diagrams, less words.
-- **Model catalog regenerated**: added `amazon-bedrock/openai.gpt-6.1-sol`, `amazon-bedrock/us.openai.gpt-6.1-sol` (+1 on aggregators); 4 model(s) with changed pricing/limits.
+- **Model catalog regenerated**: added `amazon-bedrock/openai.gpt-6.1-sol`, `amazon-bedrock/us.openai.gpt-6.1-sol` (+1 on aggregators); 4 model(s) with changed pricing/limits (openrouter: google/gemma-4-26b-a4b-it, qwen/qwen3.8-27b, z-ai/glm-5.2, ~moonshotai/kimi-latest).
 
 ## [1.23.1] - 2026-09-30
 
@@ -101,7 +104,7 @@
 - **`TestLoadDefaultConfigs_MissingFiles` no longer reads the real user `mcp.json`.**
 
 ### Changed
-- **Model catalog regenerated**: added `amazon-bedrock/anthropic.claude-sonnet-5-5`, `amazon-bedrock/global.anthropic.claude-sonnet-5-5`, `amazon-bedrock/global.xai.grok-4.7`, `amazon-bedrock/us.xai.grok-4.7`, `anthropic/claude-sonnet-5-5`, `azure-openai-responses/gpt-6.1-sol`, `github-copilot/claude-sonnet-5.5`, `github-copilot/gpt-6.1-sol` +3 more (+17 on aggregators); removed `mistral/magistral-small` (+2 on aggregators); 44 model(s) with changed pricing/limits.
+- **Model catalog regenerated**: added `amazon-bedrock/anthropic.claude-sonnet-5-5`, `amazon-bedrock/global.anthropic.claude-sonnet-5-5`, `amazon-bedrock/global.xai.grok-4.7`, `amazon-bedrock/us.xai.grok-4.7`, `anthropic/claude-sonnet-5-5`, `azure-openai-responses/gpt-6.1-sol`, `github-copilot/claude-sonnet-5.5`, `github-copilot/gpt-6.1-sol` +3 more (+17 on aggregators); removed `mistral/magistral-small` (+2 on aggregators); 44 model(s) with changed pricing/limits (cerebras: qwen-3.8-27b; mistral: codestral-latest, mistral-large-2512, mistral-large-latest, mistral-medium-2604, mistral-medium-latest, mistral-small-2603, mistral-small-latest; opencode: grok-4.7; openrouter: deepseek/deepseek-v3.1-terminus +34 more).
 
 ## [1.23.0] - 2026-09-28
 
@@ -109,13 +112,13 @@
 - **Extension sections**: extensions own one persistent context section each (`set_section` / `clear_section` RPCs, stored at `~/.config/fir/sections/<ext>.md`, atomic, ~500-token/section and ~2000-token total caps with rejection). Fir reads them from disk before the first turn and injects them as one `[SYS_EXT sections]` message after the system prompt (with its own cache breakpoint); changes are re-injected in full on the next turn. Only installed, enabled, trusted owners are emitted; uninstalled owners' files are pruned. New `/sections` command.
 
 ### Changed
-- **Model catalog regenerated**: 2 model(s) with changed pricing/limits.
+- **Model catalog regenerated**: 2 model(s) with changed pricing/limits (openrouter: deepseek/deepseek-v4-flash, ~moonshotai/kimi-latest).
 - **mood: lessons are published as a persistent section** instead of a `session_start` prepend, so `fir -p` and the very first turn see them. The render is now model-independent (lists the models each lesson was tested on).
 
 ## [1.22.1] - 2026-09-28
 
 ### Changed
-- **Model catalog regenerated**: added 1 aggregator model(s); removed 1 aggregator model(s); 14 model(s) with changed pricing/limits.
+- **Model catalog regenerated**: added 1 aggregator model(s); removed 1 aggregator model(s); 14 model(s) with changed pricing/limits (openrouter: deepseek/deepseek-v3.1-terminus, deepseek/deepseek-v3.2-exp, deepseek/deepseek-v4-flash, deepseek/deepseek-v4-pro, deepseek/deepseek-v4-pro-0813, deepseek/deepseek-v4.1-flash, google/gemma-4-26b-a4b-it, tencent/hy3, z-ai/glm-5.1, z-ai/glm-5.3 +4 more).
 - **mood: `lesson_add` description now defines the :mortar_board: reaction trigger** — a user :mortar_board: reaction on a message means read it, add or propose a lesson, and reply briefly; ships with the tool so every deployment (including relay-fronted bots) gets it.
 
 ## [1.22.0] - 2026-09-28
@@ -124,7 +127,7 @@
 - **mood: pre-registered bets, computed surprise, and lessons.** `mood_note` takes optional `bet` / `conf` / `anchor` and returns a short entry id; `mood_outcome(id, outcome, correct)` records what happened and computes `surprise = |conf - correct|` — surprise is never accepted as input. New `lesson_add` / `lesson_score` / `lesson_list` / `lesson_state` keep standing predictions in `~/.config/fir/mood/lessons.jsonl` with a per-model hit/miss map that only grows; nothing expires by date, retire by archiving. Active lessons are injected at session start via `[SYS_EXT]` prepend (prompt cache untouched), rendered as bets with evidence and tagged `[strong]`, `[weak - probe it]`, or `[unverified on this model - probe it]` when the current model has no column. Three high-surprise bets on one exact anchor from three different sessions propose a lesson at `agent_end`, best-effort.
 
 ### Changed
-- **Model catalog regenerated**: added `azure-openai-responses/gpt-daybreak-blue-latest`, `azure-openai-responses/gpt-daybreak-red-latest`, `openai/gpt-daybreak-blue-latest`, `openai/gpt-daybreak-red-latest`; removed `opencode-go/glm-5.1`, `opencode-go/kimi-k2.6`, `opencode-go/qwen3.6-plus`, `opencode-go/qwen3.7-max`; 18 model(s) with changed pricing/limits.
+- **Model catalog regenerated**: added `azure-openai-responses/gpt-daybreak-blue-latest`, `azure-openai-responses/gpt-daybreak-red-latest`, `openai/gpt-daybreak-blue-latest`, `openai/gpt-daybreak-red-latest`; removed `opencode-go/glm-5.1`, `opencode-go/kimi-k2.6`, `opencode-go/qwen3.6-plus`, `opencode-go/qwen3.7-max`; 18 model(s) with changed pricing/limits (openrouter: deepseek/deepseek-chat-v3-0324, deepseek/deepseek-v3.2, deepseek/deepseek-v4-flash, deepseek/deepseek-v4-flash-vision-exp, deepseek/deepseek-v4-pro, deepseek/deepseek-v4-pro-0813, deepseek/deepseek-v4.1-flash, minimax/minimax-m2.7, moonshotai/kimi-k2.6, qwen/qwen3.5-35b-a3b +8 more).
 
 ## [1.21.2] - 2026-09-27
 
@@ -135,7 +138,7 @@
 
 ### Changed
 - **Provider defaults follow their product line automatically.** The configured default (compiled-in or catalog `providerDefaults`) is now an anchor that resolves to the newest registered generation of the same product line — e.g. `claude-opus-5` → `claude-opus-5-5`, `us.anthropic.claude-opus-5` → `us.anthropic.claude-opus-5-5` — with no code or data edit. Conservative: never crosses product lines, variants, regional/aggregator prefixes or `-preview` tags, skips dated snapshots, respects the provider's live model list, and falls back to the anchor. Explicit pins are unchanged; the stale-pin warning compares against the resolved default.
-- **Model catalog regenerated**: added `opencode-go/longcat-2.5-preview-free`, `opencode/longcat-2.5-preview-free` (+1 on aggregators); 14 model(s) with changed pricing/limits.
+- **Model catalog regenerated**: added `opencode-go/longcat-2.5-preview-free`, `opencode/longcat-2.5-preview-free` (+1 on aggregators); 14 model(s) with changed pricing/limits (openrouter: deepseek/deepseek-chat, deepseek/deepseek-v4-flash, deepseek/deepseek-v4-flash-vision-exp, deepseek/deepseek-v4-pro, deepseek/deepseek-v4-pro-0813, deepseek/deepseek-v4.1-flash, minimax/minimax-m2.7, qwen/qwen3.5-122b-a10b, tencent/hy3, z-ai/glm-5.3-flash +4 more).
 
 ## [1.21.0] - 2026-09-26
 
@@ -143,7 +146,7 @@
 - **`unix://` provider base URLs.** `baseUrl: "unix:///run/x.sock/path"` sends HTTP (incl. SSE streaming) over the unix socket; custom providers whose baseUrl is `unix://` may omit `apiKey` and send no auth header.
 
 ### Changed
-- **Model catalog regenerated**: removed 1 aggregator model(s); 7 model(s) with changed pricing/limits.
+- **Model catalog regenerated**: removed 1 aggregator model(s); 7 model(s) with changed pricing/limits (openrouter: deepseek/deepseek-v4-flash-0731, deepseek/deepseek-v4-pro, qwen/qwen3-235b-a22b-2507, z-ai/glm-5.3-flash, ~deepseek/deepseek-v4-flash-latest, ~z-ai/glm-flash-latest, ~z-ai/glm-latest).
 
 ## [1.20.2] - 2026-09-26
 
@@ -151,7 +154,7 @@
 - **`/mcp reload` in the TUI now shows servers added after startup.** When fir started with no MCP servers, the `/mcp` view and the connection notices stayed bound to that empty startup state. A server added later in `mcp.d/` or `mcp.json` did start on reload, but `/mcp` never listed it. Both now follow the manager that the reload creates.
 
 ### Changed
-- **Model catalog regenerated**: added `amazon-bedrock/openai.gpt-6-luna`, `amazon-bedrock/openai.gpt-6-sol`, `opencode/qwen3.8-max` (+11 on aggregators); removed `opencode/muse-spark-1.2-contributor-free` (+8 on aggregators); 58 model(s) with changed pricing/limits.
+- **Model catalog regenerated**: added `amazon-bedrock/openai.gpt-6-luna`, `amazon-bedrock/openai.gpt-6-sol`, `opencode/qwen3.8-max` (+11 on aggregators); removed `opencode/muse-spark-1.2-contributor-free` (+8 on aggregators); 58 model(s) with changed pricing/limits (amazon-bedrock: global.moonshotai.kimi-k3, minimax.minimax-m2.1, mistral.devstral-2-123b, mistral.mistral-large-3-675b-instruct, moonshot.kimi-k2-thinking, moonshotai.kimi-k2.5, nvidia.nemotron-nano-12b-v2, openai.gpt-5.5, openai.gpt-oss-120b, openai.gpt-oss-120b-1:0 +48 more).
 
 ## [1.20.1] - 2026-09-23
 
@@ -159,7 +162,7 @@
 - **One broken MCP config file no longer disables every MCP server.** A parse error in `~/.config/fir/mcp.json`, any `mcp.d/*.json` drop-in, or a project `.fir/mcp.json` made fir start no MCP servers at all — in ACP, CLI, `/reload` and `reload_mcp` alike — and the only trace was a stderr line an ACP client never shows. Loading is now best-effort: the broken file is skipped, the rest start, and the error names each skipped file (also written to the fir log in ACP mode, and returned by `reload_mcp`).
 
 ### Changed
-- **Model catalog regenerated**: added Bedrock `kimi-k3` and `gpt-6-luna`/`gpt-6-sol`, `github-copilot/claude-opus-5.5` and `gpt-6-luna`, +4 more (+5 on aggregators); removed 3 aggregator model(s); 17 model(s) with changed pricing/limits.
+- **Model catalog regenerated**: added Bedrock `kimi-k3` and `gpt-6-luna`/`gpt-6-sol`, `github-copilot/claude-opus-5.5` and `gpt-6-luna`, +4 more (+5 on aggregators); removed 3 aggregator model(s); 17 model(s) with changed pricing/limits (amazon-bedrock: openai.gpt-5.4; openrouter: deepseek/deepseek-v4-flash, deepseek/deepseek-v4-pro, deepseek/deepseek-v4-pro-0813, inclusionai/ling-3.0-flash-vl, nvidia/nemotron-3.5-lightning, tencent/hy3, z-ai/glm-5.3-flashx, z-ai/glm-5.3:batch, ~deepseek/deepseek-pro-latest +7 more).
 
 ## [1.20.0] - 2026-09-23
 
@@ -167,7 +170,7 @@
 - **A Claude Code version-gate rejection is now detected, recorded, and nagged about until the pin moves.** v1.19.0 made the claude-cli pin deliverable as data, but nothing told anyone a bump was *needed*: a gate rejection surfaced as an opaque provider error and the only detector was a human recognising it. Now, on an OAuth-mode Anthropic request, fir matches the vendor's exact gate sentence — `Claude Code <advertised> does not support this model; version <required> or newer is required`, the one signature ever observed, with `required > advertised` enforced — and nothing looser: ordinary 400s, 401/403, quota, overload and network errors are never classified, because a false positive teaches people to ignore the warning. The error is rewritten to name the pin, its source (catalog overlay vs. embedded floor), the required version and the remedy, and a `client-version-gate` record (pin, pinSource, effectivePin, required, model, host, ts, vendor error) goes to `~/.config/fir/doctor.jsonl`, once per pin/model per session, with no network call — so `doctor_query pattern=client-version-gate` answers "is this happening, and since when". Every session start warns in one line while an unresolved record exists, and the warning clears itself the moment the effective pin moves strictly past the rejected one — no acknowledge step. New `fir doctor client-version-gates` prints the unresolved records (nothing when clear) for fleet aggregation; `fir-converge` in `kfet/fir-exts` publishes it as `~/sync/shared/fleet/status/<host>.gates`. The nightly `model-watch` PR does **not** yet say "a host hit the gate": it runs on GitHub Actions, which cannot see the Syncthing-shared fleet status, and bridging that would be new infrastructure — read `status/*.gates` when reviewing the PR instead.
 
 ### Changed
-- **Model catalog regenerated**: added `opencode/grok-4.7` (+1 on aggregators); 16 model(s) with changed pricing/limits.
+- **Model catalog regenerated**: added `opencode/grok-4.7` (+1 on aggregators); 16 model(s) with changed pricing/limits (openrouter: deepseek/deepseek-v4-flash, deepseek/deepseek-v4-pro, deepseek/deepseek-v4-pro-0813, deepseek/deepseek-v4.1-flash, tencent/hy3, z-ai/glm-5.3, ~deepseek/deepseek-flash-latest, ~deepseek/deepseek-pro-latest, ~moonshotai/kimi-latest, ~z-ai/glm-flash-latest +6 more).
 
 ## [1.19.0] - 2026-09-22
 
@@ -175,7 +178,7 @@
 - **The Claude Code version pin ships as catalog data, so v1.18.3 was the last release of its kind.** Anthropic gates new models on the `claude-cli/<version>` a request advertises, and that number was a literal in the `anthropic-auth` extension — every gate bump cost a binary release plus the fleet's update lag (v1.18.3 was exactly that, a one-line release). The catalog overlay gains one additive, tightly-typed key, `clientVersions.claudeCode`, and the extension now declares a template (`claude-cli/{clientVersion.claudeCode} (external, cli)`) with no version literal anywhere in the file. fir expands `{clientVersion.<key>}` in header **values only** — never a header name, never a URL — at token exchange/refresh and after `auth/modify_models`, so a published catalog moves the pin fleet-wide within one TTL with no restart, and the model that needs the pin travels in the same document. Values must match `^[0-9]+(\.[0-9]+){0,3}$` and be ≤ 32 bytes, making injection structurally impossible, and the version compiled into each binary is a **floor**: data can only ever advance the pin, never roll a host below what it shipped with. Hooks that issue their own HTTP requests (`auth/list_models`) receive the scalar as a `client_versions` param, exposed to the Python SDK as `ctx.client_version("claudeCode")`. The nightly `model-watch` job learns the value from npm `dist-tags.latest` for `@anthropic-ai/claude-code`, forward-only, on the same rolling PR as new models — and a moved pin alone now qualifies to open one.
 
 ### Changed
-- **Model catalog regenerated**: 6 model(s) with changed pricing/limits.
+- **Model catalog regenerated**: 6 model(s) with changed pricing/limits (openrouter: aion-labs/aion-2.0, aion-labs/aion-3.0, aion-labs/aion-3.0-mini, deepseek/deepseek-v4-pro, deepseek/deepseek-v4.1-flash, ~deepseek/deepseek-flash-latest).
 
 ## [1.18.4] - 2026-09-22
 

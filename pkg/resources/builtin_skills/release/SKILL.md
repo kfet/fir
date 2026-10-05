@@ -32,7 +32,7 @@ step 1); that line alone is not grounds for a minor bump either.
    **Write the `### Changed` catalog entry from that line**, verbatim or lightly
    edited; never the old canned "routine upstream refresh" sentence, which hid
    everything. Name the changed-pricing models too, grouped by provider
-   (`provider: id, id`). `-changelog <path>` writes the same text as a ready-to-paste
+   (`provider: id, id`; at most 10, then `+N more`). `-changelog <path>` writes the same text as a ready-to-paste
    bullet if you would rather read it from a file than the log.
 
    If it reports no changes, **omit the catalog line entirely** — do not write a
