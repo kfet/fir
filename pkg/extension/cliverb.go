@@ -250,7 +250,9 @@ func RunCLIVerb(binding *CLIVerbBinding, argv []string, cwd string, projectDir s
 	for {
 		msg, err := codec.ReadMessage()
 		if err != nil {
-			if errors.Is(err, io.EOF) {
+			// os.ErrClosed: the process reaper can close the pipe before
+			// the read sees EOF. Both mean the extension is gone.
+			if errors.Is(err, io.EOF) || errors.Is(err, os.ErrClosed) {
 				switch n := syscall.Signal(lastTermSig.Load()); n {
 				case 0:
 				case syscall.SIGQUIT:

@@ -2,8 +2,14 @@
 
 ## [Unreleased]
 
+## [1.26.1] - 2026-10-05
+
+### Fixed
+- `fir observe -f` (and other CLI verbs) could still print "read from extension: file already closed" on Ctrl-C / SIGTERM when the pipe closed before EOF was read.
+
 ### Changed
 - `release` skill: the catalog entry now names the models with changed pricing/limits (grouped by provider, at most 10). Entries back to 1.19.0 backfilled.
+- **Model catalog regenerated**: removed 3 aggregator model(s); 16 model(s) with changed pricing/limits (openrouter: deepseek/deepseek-chat-v3-0324, deepseek/deepseek-v4-flash, deepseek/deepseek-v4-pro-0813, deepseek/deepseek-v4.1-flash, google/gemma-4-26b-a4b-it, moonshotai/kimi-k3, nvidia/nemotron-3.5-lightning, openai/gpt-5.6-sol-pro, qwen/qwen3.6-27b, z-ai/glm-5.2 +6 more).
 
 ## [1.26.0] - 2026-10-04
 
