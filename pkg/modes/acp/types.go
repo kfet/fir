@@ -215,3 +215,15 @@ type SetSessionConfigOptionRequest struct {
 type SetSessionConfigOptionResponse struct {
 	ConfigOptions []SessionConfigOption `json:"configOptions"`
 }
+
+// ForkSessionRequest is the request for session/fork (RFD session-fork).
+// Defined locally so McpServers uses the same type as session/new.
+type ForkSessionRequest struct {
+	SessionId             string             `json:"sessionId"`
+	Cwd                   string             `json:"cwd"`
+	McpServers            []acpsdk.McpServer `json:"mcpServers,omitempty"`
+	AdditionalDirectories []string           `json:"additionalDirectories,omitempty"`
+	// Meta is the client's _meta. fir extension: _meta.at = entry id to fork
+	// at (default: the parent's forkable leaf).
+	Meta map[string]any `json:"_meta,omitempty"`
+}

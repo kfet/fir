@@ -101,7 +101,7 @@ wait
 
 Default way to start a subagent that needs this session's context (instead of a fresh session or an `aside` delegate that re-explores):
 1. `agent_introspect` → `session.file`, `session.forkAt`.
-2. In the SAME cwd on the SAME model: `fir --resume <file> --at <forkAt> --model <same> -p '<task; return a short summary>'` (ACP: `session/load` with `at`).
+2. In the SAME cwd on the SAME model: `fir --resume <file> --at <forkAt> --model <same> -p '<task; return a short summary>'` (ACP: `session/fork`).
 3. Use only the child's summary; the parent file is untouched.
 
 Rules: same model and tool set or the cache misses (an `aside` delegate on a cheaper model always misses); fork promptly (5-min cache TTL); the child inherits the full context, so don't fork near the context limit; children that write files need their own worktree; prefer it when the parent holds >~30k tokens of useful context, use a fresh session for unrelated work. Measured 2026-10-03 on fir 1.25.0: forking a 97.7k-token session gave first-turn cacheRead 96,131 / cacheWrite 711 (~98% cached); on 1.24.4 (before the prompt split) cacheRead was 0.
@@ -109,11 +109,14 @@ Rules: same model and tool set or the cache misses (an `aside` delegate on a che
 ### Forking a child at a turn
 
 To branch an agent from an earlier point (A/B a different instruction from the
-same history, or retry a turn) without touching the original session, open a
-child at an entry id with `session/load` (or `session/resume`) plus `at`:
+same history, or retry a turn) without touching the original session, use the
+standard `session/fork` (advertised as `agentCapabilities.sessionCapabilities.fork`).
+Without `_meta.at` it forks at the parent's forkable leaf (newest entry not mid
+tool call); fir's extension `_meta.at` (advertised as `fork._meta.at: true`)
+forks at an explicit entry id:
 
 ```json
-{"method":"session/load","params":{"sessionId":"<parent file or id>","cwd":"...","mcpServers":[],"at":"<entry-id>"}}
+{"method":"session/fork","params":{"sessionId":"<parent id or file>","cwd":"...","mcpServers":[],"_meta":{"at":"<entry-id>"}}}
 ```
 
 The response carries `sessionId` — the child's id; use it for all further
@@ -122,7 +125,8 @@ prefix of the parent's, so on the same model/tools the prompt cache hits.
 Entry ids come from the transcript jsonl (`id` field) or, from inside an
 agent, `agent_introspect` → `session.file` / `session.forkAt`. An entry that
 leaves a tool call without its result is rejected. The CLI equivalent is
-`fir --resume <session> --at <entry-id>`.
+`fir --resume <session> --at <entry-id>`. Legacy (fir-only, prefer
+`session/fork`): `session/load`/`session/resume` with `"at"` does the same.
 
 ## Observing
 

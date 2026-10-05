@@ -169,3 +169,16 @@ func copyStateUnbound(src, dst string) {
 	}
 	_ = WriteState(dst, st)
 }
+
+// ForkableLeafIDOfFile is ForkableLeafID for the session file at path,
+// read without opening (or locking) it. Returns "" when the file is empty,
+// invalid, or has no forkable entry.
+func ForkableLeafIDOfFile(path string) string {
+	header, entries := loadEntriesFromFile(path)
+	if header == nil {
+		return ""
+	}
+	ss := &SessionStore{header: header, entries: entries}
+	ss.buildIndex()
+	return ss.ForkableLeafID()
+}

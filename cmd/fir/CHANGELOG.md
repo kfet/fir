@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Added
+- ACP: standard `session/fork` (advertised as `sessionCapabilities.fork`). Forks at the parent's forkable leaf by default, or at `_meta.at` (advertised as `fork._meta.at`); parent untouched, child history a byte-identical prefix. `at` on `session/load`/`resume` is now fir-only legacy.
+
 ## [1.26.1] - 2026-10-05
 
 ### Fixed

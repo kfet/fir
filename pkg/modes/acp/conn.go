@@ -86,6 +86,9 @@ func rawMethodHandler(pa *firAgent, wn *writeNotifier) acpsdk.MethodHandler {
 				caps["sessionCapabilities"] = map[string]any{
 					"list":   map[string]any{},
 					"resume": map[string]any{},
+					// session/fork (RFD session-fork). fir extension: _meta.at
+					// forks at an explicit entry id instead of the leaf.
+					"fork": map[string]any{"_meta": map[string]any{"at": true}},
 				}
 			}
 			// Replace authMethods with extended format (RFD auth-methods).
@@ -242,6 +245,34 @@ func rawMethodHandler(pa *firAgent, wn *writeNotifier) acpsdk.MethodHandler {
 			}
 			firlog.Info("acp dispatch: session/list done", "total_ms", time.Since(methodStart).Milliseconds(), "count", len(resp.Sessions))
 			return resp, nil
+
+		case "session/fork":
+			methodStart := time.Now()
+			var p ForkSessionRequest
+			if err := json.Unmarshal(params, &p); err != nil {
+				return nil, acpsdk.NewInvalidParams(map[string]any{"error": err.Error()})
+			}
+			childID, entry, err := pa.forkSessionLocal(ctx, p)
+			if err != nil {
+				firlog.Error("acp dispatch: session/fork failed", "err", err, "sessionId", p.SessionId)
+				return nil, toReqErr(err)
+			}
+			respMap := map[string]any{
+				"sessionId":     childID,
+				"configOptions": buildConfigOptions(entry),
+			}
+			if m := entry.session.Model(); m != nil {
+				respMap["models"] = BuildModelState(entry.modelRegistry, m)
+			}
+			afterWrite := wn.AfterWrite()
+			go func() {
+				<-afterWrite
+				runtime.Gosched()
+				time.Sleep(5 * time.Millisecond)
+				pa.sendAvailableCommands(childID)
+			}()
+			firlog.Info("acp dispatch: session/fork done", "total_ms", time.Since(methodStart).Milliseconds(), "child", childID)
+			return respMap, nil
 
 		case "session/load", "session/resume":
 			replayHistory := method == "session/load"

@@ -2,6 +2,7 @@ package acp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -1105,4 +1106,80 @@ func (pa *firAgent) ResumeSession(ctx context.Context, params acpsdk.ResumeSessi
 		return acpsdk.ResumeSessionResponse{Meta: map[string]any{"sessionId": resp.SessionId}}, nil
 	}
 	return acpsdk.ResumeSessionResponse{}, nil
+}
+
+// forkSessionLocal implements session/fork (RFD session-fork). It writes a
+// child of the source session into a new file and opens it under the child's
+// id; the source file is only read. The fork point defaults to the parent's
+// forkable leaf (the newest entry not mid tool call); fir's extension
+// _meta.at names an explicit entry instead. The child's history is a
+// byte-identical prefix of the parent's, so provider prompt caches hit.
+func (pa *firAgent) forkSessionLocal(ctx context.Context, params ForkSessionRequest) (string, *firSession, error) {
+	parentID := string(params.SessionId)
+	if parentID == "" {
+		return "", nil, fmt.Errorf("sessionId is required")
+	}
+	cwd := params.Cwd
+	if cwd == "" {
+		cwd = defaultPromptCwd()
+	}
+	at, _ := params.Meta["at"].(string)
+
+	var sourcePath string
+	if live := pa.lookupSession(parentID); live != nil && live.session.SessionStore != nil {
+		sourcePath = live.session.SessionStore.GetSessionFile()
+		if at == "" {
+			at = live.session.SessionStore.ForkableLeafID()
+		}
+	} else {
+		sourcePath = pa.resolveSessionFilePath(parentID, cwd)
+	}
+	if sourcePath == "" {
+		return "", nil, fmt.Errorf("session %q not found", parentID)
+	}
+	if at == "" {
+		at = store.ForkableLeafIDOfFile(sourcePath)
+	}
+	if at == "" {
+		return "", nil, fmt.Errorf("session %q has no entry to fork at", parentID)
+	}
+
+	childPath, childID, err := forkSessionAt(sourcePath, at, cwd, store.DefaultSessionDir(resolveAgentDir(), cwd))
+	if err != nil {
+		return "", nil, err
+	}
+	var meta map[string]any
+	for k, v := range params.Meta {
+		if k != "at" {
+			if meta == nil {
+				meta = map[string]any{}
+			}
+			meta[k] = v
+		}
+	}
+	entry, _, err := pa.openSession(ctx, childID, &clientSetup{
+		cwd: params.Cwd, mcpServers: params.McpServers, meta: meta, transcript: childPath,
+	})
+	if err != nil {
+		return "", nil, err
+	}
+	return childID, entry, nil
+}
+
+// UnstableForkSession satisfies acpsdk's experimental agent interface for
+// session/fork; fir's dispatch table (conn.go) routes the method itself.
+func (pa *firAgent) UnstableForkSession(ctx context.Context, params acpsdk.UnstableForkSessionRequest) (acpsdk.UnstableForkSessionResponse, error) {
+	var req ForkSessionRequest
+	raw, err := json.Marshal(params)
+	if err == nil {
+		err = json.Unmarshal(raw, &req)
+	}
+	if err != nil {
+		return acpsdk.UnstableForkSessionResponse{}, err
+	}
+	childID, _, err := pa.forkSessionLocal(ctx, req)
+	if err != nil {
+		return acpsdk.UnstableForkSessionResponse{}, err
+	}
+	return acpsdk.UnstableForkSessionResponse{SessionId: acpsdk.SessionId(childID)}, nil
 }
