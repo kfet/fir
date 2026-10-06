@@ -110,12 +110,8 @@ gathers -> escalate judges".  See the block comment above
 Steering the executor
 ---------------------
 
-The executor is guided toward the advisor pattern via the built-in
-``aside-advisor`` skill rather than a session_start prepend.  The skill's
-``[SYS_EXT]`` description appears in the base system prompt's
-``<available_skills>`` block on every turn, making it more persistent than
-a prepended history message which can drift away during compaction.
-The skill body provides detailed examples and decision guidance.
+When to escalate or delegate lives in the tool description itself, which is
+in every request and survives compaction. There is no separate skill.
 """
 
 from __future__ import annotations
@@ -2655,9 +2651,13 @@ def _aside_tool_description() -> str:
     if _advisor() is not None:
         base += (
             "\n\nAdvisor escalation: set 'escalate' to true to route this side query "
-            "to a stronger advisor model. See the session-start [SYS_EXT] note for "
-            "when escalation is warranted — the principle is judgement-call cost, "
-            "not a checklist of categories."
+            "to a stronger advisor model. Escalate when the gap is reasoning, not "
+            "information (if more data would settle it, gather that first) and being "
+            "wrong costs more than asking: before committing to an approach, when "
+            "stuck or changing approach, and before declaring done (make the result "
+            "durable first). The advisor already sees this whole session — ask the "
+            "question, add only what is not in it, do not recap. Weigh the advice; "
+            "if your evidence contradicts it, say so in one reconcile call."
         )
     if _delegate() is not None:
         base += (
@@ -2711,7 +2711,7 @@ def _aside_tool_parameters() -> dict[str, Any]:
             },
             "instructions": {
                 "type": "string",
-                "description": "Instructions for the LLM that synthesises collected outputs, or the side question to ask. Required unless 'goal' is set.",
+                "description": "Instructions for the LLM that synthesises collected outputs, or the side question to ask. Required unless 'goal' is set. Without tools the model already sees this session: state the question and only new facts, no recap.",
             },
         },
         "required": ["title"],
@@ -2721,8 +2721,8 @@ def _aside_tool_parameters() -> dict[str, Any]:
             "type": "boolean",
             "description": (
                 "When true, route this side query to the configured advisor "
-                "model instead of the executor's current model. Use sparingly "
-                "— see the tool description for when escalation is warranted."
+                "model instead of the executor's current model. See the tool "
+                "description for when."
             ),
         }
     if _delegate() is not None:

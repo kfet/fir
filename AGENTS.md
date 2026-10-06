@@ -49,7 +49,7 @@ When merging a feature branch back to main, always use `git merge --ff-only` to 
 
 ## Advisor
 
-The `aside-advisor` skill (auto-loaded) explains how to escalate to a stronger advisor model via `aside` with `escalate=true`. Use it at the high-leverage moments:
+Escalate to the stronger advisor model with `aside` `escalate=true` at the high-leverage moments:
 
 - **Before committing to an approach** on any non-trivial task — after orientation, before substantive edits.
 - **When stuck** — recurring errors, not converging, results that don't fit. If you've re-run the same command 5+ times (see *Stuck loops*), escalate instead of looping.

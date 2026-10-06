@@ -66,7 +66,7 @@ func ParseChangelogContent(content string) []ChangelogEntry {
 
 	for _, line := range lines {
 		if strings.HasPrefix(line, "## ") {
-					entries = appendEntry(entries, currentVersion, currentLines)
+			entries = appendEntry(entries, currentVersion, currentLines)
 
 			// Try to parse version, or detect [Unreleased]
 			m := versionHeaderRe.FindStringSubmatch(line)

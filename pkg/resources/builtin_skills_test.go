@@ -18,7 +18,6 @@ func TestLoadBuiltinSkills_ReturnsExpectedSkills(t *testing.T) {
 	}
 
 	expected := map[string]bool{
-		"aside-advisor":       false,
 		"acp-shepherd":        false,
 		"autoresearch-create": false,
 		"claude-usage":        false,
