@@ -2,8 +2,13 @@
 
 ## [Unreleased]
 
+## [1.28.0] - 2026-10-06
+
 ### Added
 - **ACP: `session/prompt` responses report the turn's leaf entry in `_meta.leafId`**, accepted as `session/fork` `_meta.at` to fork exactly after that turn. Advertised as `agentCapabilities.promptCapabilities._meta.leafId`. Cancelled turns report the leaf they left; omitted when that leaf is a dangling tool call or the turn errored (error responses carry no result).
+
+### Changed
+- Model catalog regenerated: 11 model(s) with changed pricing/limits.
 
 ## [1.27.0] - 2026-10-06
 
