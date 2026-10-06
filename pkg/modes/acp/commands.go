@@ -58,7 +58,7 @@ func newCommandRegistry() *commandRegistry {
 	r.register(slashCommand{"name", "Rename the current session (usage: /name <new name>)", cmdName})
 	r.register(slashCommand{"session", "Show session statistics", cmdSession})
 	r.register(slashCommand{"sections", "Show the persistent extension sections fir injects", cmdSections})
-	r.register(slashCommand{"changelog", "Show changelog", cmdChangelog})
+	r.register(slashCommand{"changelog", "Show recent changelog (args: N or all)", cmdChangelog})
 	r.register(slashCommand{"share", "Share session as a secret GitHub Gist with a preview link", cmdShare})
 	r.register(slashCommand{"export", "Export session to an HTML file (usage: /export [path])", cmdExport})
 	r.register(slashCommand{"login", "Login with OAuth provider (usage: /login [provider-id])", cmdLogin})
@@ -326,17 +326,26 @@ func cmdSession(ctx *commandContext, _ string) {
 	ctx.sendMessage(info)
 }
 
-func cmdChangelog(ctx *commandContext, _ string) {
+func cmdChangelog(ctx *commandContext, args string) {
 	entries := session.GetChangelogEntries()
 	if len(entries) == 0 {
 		ctx.sendMessage("No changelog entries found.")
+		return
+	}
+	entries, footer, err := session.SelectChangelogEntries(entries, args)
+	if err != nil {
+		ctx.sendMessage(err.Error())
 		return
 	}
 	var texts []string
 	for i := len(entries) - 1; i >= 0; i-- {
 		texts = append(texts, entries[i].Content)
 	}
-	ctx.sendMessage("**What's New**\n\n" + strings.Join(texts, "\n\n"))
+	msg := "**What's New**\n\n" + strings.Join(texts, "\n\n")
+	if footer != "" {
+		msg += "\n\n*" + footer + "*"
+	}
+	ctx.sendMessage(msg)
 }
 
 func cmdShare(ctx *commandContext, _ string) {

@@ -54,7 +54,7 @@ var BuiltinSlashCommands = []BuiltinSlashCommand{
 	{Name: "export", Description: "Export session to HTML file"},
 	{Name: "share", Description: "Share session as a secret GitHub gist"},
 	{Name: "name", Description: "Set session display name"},
-	{Name: "changelog", Description: "Show changelog entries"},
+	{Name: "changelog", Description: "Show recent changelog entries (N or all)"},
 	{Name: "login", Description: "Login with OAuth provider"},
 	{Name: "logout", Description: "Logout from OAuth provider"},
 	{Name: "reload", Description: "Reload extensions, skills, themes, and MCP servers"},

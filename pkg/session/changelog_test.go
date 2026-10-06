@@ -188,3 +188,42 @@ func TestParseChangelog_Unreleased(t *testing.T) {
 		t.Errorf("expected 1.0.0, got %s", entries[1].Version())
 	}
 }
+
+func TestParseChangelogContent_DropsEmptyUnreleased(t *testing.T) {
+	got := ParseChangelogContent("# Changelog\n\n## [Unreleased]\n\n## [1.2.0] - x\n\n- a\n")
+	if len(got) != 1 || got[0].Version() != "1.2.0" {
+		t.Fatalf("got %+v", got)
+	}
+	got = ParseChangelogContent("## [Unreleased]\n\n- wip\n\n## [1.2.0]\n- a\n")
+	if len(got) != 2 || got[0].Major != 999 {
+		t.Fatalf("non-empty Unreleased must be kept: %+v", got)
+	}
+}
+
+func TestSelectChangelogEntries(t *testing.T) {
+	var all []ChangelogEntry
+	for i := 9; i >= 0; i-- {
+		all = append(all, ChangelogEntry{Major: 1, Minor: i})
+	}
+	sel, footer, err := SelectChangelogEntries(all, "")
+	if err != nil || len(sel) != DefaultChangelogLimit || sel[0].Minor != 9 || footer == "" {
+		t.Fatalf("default: %d %q %v", len(sel), footer, err)
+	}
+	sel, footer, err = SelectChangelogEntries(all, " all ")
+	if err != nil || len(sel) != 10 || footer != "" {
+		t.Fatalf("all: %d %q %v", len(sel), footer, err)
+	}
+	sel, _, err = SelectChangelogEntries(all, "3")
+	if err != nil || len(sel) != 3 {
+		t.Fatalf("3: %d %v", len(sel), err)
+	}
+	sel, footer, _ = SelectChangelogEntries(all, "50")
+	if len(sel) != 10 || footer != "" {
+		t.Fatalf("50: %d %q", len(sel), footer)
+	}
+	for _, bad := range []string{"0", "-1", "x"} {
+		if _, _, err := SelectChangelogEntries(all, bad); err == nil {
+			t.Fatalf("%q: want error", bad)
+		}
+	}
+}

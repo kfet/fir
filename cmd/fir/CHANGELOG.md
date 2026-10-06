@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Changed
+- `/changelog` shows the last 5 releases by default, with a footer when cut. `/changelog N` shows the last N; `/changelog all` shows everything. An empty `[Unreleased]` section is no longer shown.
+
 ## [1.28.0] - 2026-10-06
 
 ### Added

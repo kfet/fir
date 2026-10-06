@@ -66,11 +66,7 @@ func ParseChangelogContent(content string) []ChangelogEntry {
 
 	for _, line := range lines {
 		if strings.HasPrefix(line, "## ") {
-			// Save previous entry
-			if currentVersion != nil && len(currentLines) > 0 {
-				currentVersion.Content = strings.TrimSpace(strings.Join(currentLines, "\n"))
-				entries = append(entries, *currentVersion)
-			}
+					entries = appendEntry(entries, currentVersion, currentLines)
 
 			// Try to parse version, or detect [Unreleased]
 			m := versionHeaderRe.FindStringSubmatch(line)
@@ -93,13 +89,52 @@ func ParseChangelogContent(content string) []ChangelogEntry {
 		}
 	}
 
-	// Save last entry
-	if currentVersion != nil && len(currentLines) > 0 {
-		currentVersion.Content = strings.TrimSpace(strings.Join(currentLines, "\n"))
-		entries = append(entries, *currentVersion)
-	}
+	return appendEntry(entries, currentVersion, currentLines)
+}
 
-	return entries
+// appendEntry finalises an entry and appends it. An entry with only a header
+// line and no body (typically an empty "## [Unreleased]") is dropped.
+func appendEntry(entries []ChangelogEntry, e *ChangelogEntry, lines []string) []ChangelogEntry {
+	if e == nil || len(lines) == 0 {
+		return entries
+	}
+	if strings.TrimSpace(strings.Join(lines[1:], "\n")) == "" {
+		return entries
+	}
+	e.Content = strings.TrimSpace(strings.Join(lines, "\n"))
+	return append(entries, *e)
+}
+
+// DefaultChangelogLimit is how many entries /changelog shows without an argument.
+const DefaultChangelogLimit = 5
+
+// ChangelogUsage is the usage line for the /changelog command.
+const ChangelogUsage = "Usage: /changelog [N|all] — last N releases (default 5), or all."
+
+// SelectChangelogEntries applies the /changelog argument to entries (newest
+// first). Empty arg means the last DefaultChangelogLimit entries; "all" means
+// everything; a positive integer N means the last N. It returns the selected
+// entries, a footer to show when the list was cut ("" otherwise), and an
+// error for an invalid argument.
+func SelectChangelogEntries(entries []ChangelogEntry, arg string) ([]ChangelogEntry, string, error) {
+	arg = strings.TrimSpace(arg)
+	limit := DefaultChangelogLimit
+	switch {
+	case arg == "":
+	case strings.EqualFold(arg, "all"):
+		return entries, "", nil
+	default:
+		n, err := strconv.Atoi(arg)
+		if err != nil || n < 1 {
+			return nil, "", fmt.Errorf("invalid argument %q. %s", arg, ChangelogUsage)
+		}
+		limit = n
+	}
+	if len(entries) <= limit {
+		return entries, "", nil
+	}
+	footer := fmt.Sprintf("Showing %d of %d releases — /changelog all for full history.", limit, len(entries))
+	return entries[:limit], footer, nil
 }
 
 // CompareVersions compares two changelog entries by version.

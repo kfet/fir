@@ -302,7 +302,7 @@ func (m *InteractiveMode) handleSlashCommand(text string) {
 	case "/name":
 		m.handleNameCommand(text)
 	case "/changelog":
-		m.handleChangelogCommand()
+		m.handleChangelogCommand(strings.Join(parts[1:], " "))
 	case "/reload":
 		m.handleReloadCommand()
 	case "/skills":
@@ -1158,10 +1158,15 @@ func formatSortedSection(t *itheme.Theme, title, prefix string, items map[string
 	return lines
 }
 
-func (m *InteractiveMode) handleChangelogCommand() {
+func (m *InteractiveMode) handleChangelogCommand(arg string) {
 	entries := session.GetChangelogEntries()
 	if len(entries) == 0 {
 		m.showMessage("No changelog entries found.")
+		return
+	}
+	entries, footer, err := session.SelectChangelogEntries(entries, arg)
+	if err != nil {
+		m.showMessage(err.Error())
 		return
 	}
 
@@ -1180,6 +1185,9 @@ func (m *InteractiveMode) handleChangelogCommand() {
 		}
 	}
 	lines = append(lines, "")
+	if footer != "" {
+		lines = append(lines, t.Fg("dim", "  "+footer))
+	}
 	lines = append(lines, border+"────────"+border)
 	m.showMessage(strings.Join(lines, "\n"))
 }
@@ -2207,7 +2215,7 @@ func (m *InteractiveMode) buildHelpLines() []string {
   /tree           - Navigate session tree (switch branches)
   /export         - Export session to HTML file
   /share          - Share session as a secret GitHub gist
-  /changelog      - Show changelog entries
+  /changelog [N|all] - Show recent changelog entries (default 5)
   /reload         - Reload extensions, skills, themes, MCP servers, and provider auth
   /skills         - List loaded skills (/skills <name> for details, /skills install <name> to install)
   /mcp            - Show MCP servers (/mcp <name> for details, /mcp reload to reload configs)
