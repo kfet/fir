@@ -49,6 +49,10 @@ func TestInitialize_AdvertisesSessionFork(t *testing.T) {
 					Meta map[string]any `json:"_meta"`
 				} `json:"fork"`
 			} `json:"sessionCapabilities"`
+			PromptCapabilities struct {
+				Image bool           `json:"image"`
+				Meta  map[string]any `json:"_meta"`
+			} `json:"promptCapabilities"`
 		} `json:"agentCapabilities"`
 	}
 	if err := json.Unmarshal(raw, &got); err != nil {
@@ -57,6 +61,10 @@ func TestInitialize_AdvertisesSessionFork(t *testing.T) {
 	f := got.AgentCapabilities.SessionCapabilities.Fork
 	if f == nil || f.Meta["at"] != true {
 		t.Fatalf("fork capability missing or without _meta.at: %s", raw)
+	}
+	pc := got.AgentCapabilities.PromptCapabilities
+	if pc.Meta["leafId"] != true || !pc.Image {
+		t.Fatalf("promptCapabilities missing _meta.leafId or lost image: %s", raw)
 	}
 }
 

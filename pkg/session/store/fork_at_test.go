@@ -194,6 +194,19 @@ func TestForkableLeafID(t *testing.T) {
 	}
 }
 
+func TestLeafIDIfForkable(t *testing.T) {
+	dir, path := forkFixture(t)
+	ss, _ := OpenSessionStore(path, dir)
+	defer ss.Close()
+	if got := ss.LeafIDIfForkable(); got != "e7" {
+		t.Errorf("at e7 = %q", got)
+	}
+	ss.Branch("e3") // dangling tool call: not forkable, omit
+	if got := ss.LeafIDIfForkable(); got != "" {
+		t.Errorf("at e3 = %q, want empty", got)
+	}
+}
+
 func TestResolveSessionRef(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, "proj")

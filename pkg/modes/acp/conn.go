@@ -90,6 +90,9 @@ func rawMethodHandler(pa *firAgent, wn *writeNotifier) acpsdk.MethodHandler {
 					// forks at an explicit entry id instead of the leaf.
 					"fork": map[string]any{"_meta": map[string]any{"at": true}},
 				}
+				// fir extension: session/prompt responses carry _meta.leafId,
+				// the turn's leaf entry, accepted as session/fork _meta.at.
+				caps["promptCapabilities"] = mergeMeta(caps["promptCapabilities"], "leafId")
 			}
 			// Replace authMethods with extended format (RFD auth-methods).
 			// The SDK's AuthMethod only has id/name/description/_meta, but the RFD
@@ -427,4 +430,20 @@ func newRawConn(pa *firAgent, stdout io.Writer, stdin io.Reader) (acpConn, <-cha
 	handler := rawMethodHandler(pa, wn)
 	conn := acpsdk.NewConnection(handler, wn, stdin)
 	return &rawConn{conn: conn}, conn.Done()
+}
+
+// mergeMeta sets _meta[key]=true on a capability object, creating either
+// level as needed and preserving existing fields.
+func mergeMeta(v any, key string) map[string]any {
+	obj, _ := v.(map[string]any)
+	if obj == nil {
+		obj = map[string]any{}
+	}
+	meta, _ := obj["_meta"].(map[string]any)
+	if meta == nil {
+		meta = map[string]any{}
+	}
+	meta[key] = true
+	obj["_meta"] = meta
+	return obj
 }

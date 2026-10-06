@@ -153,6 +153,18 @@ func (ss *SessionStore) ForkableLeafID() string {
 	return ""
 }
 
+// LeafIDIfForkable returns the current leaf id when ForkAt would accept
+// it, or "" when the session is empty or the leaf is mid tool call (a
+// dangling tool_use with no result).
+func (ss *SessionStore) LeafIDIfForkable() string {
+	ss.mu.RLock()
+	defer ss.mu.RUnlock()
+	if ss.leafID == "" || danglingToolUse(BuildSessionContextFromEntries(ss.entries, ss.leafID, ss.byID)) {
+		return ""
+	}
+	return ss.leafID
+}
+
 // copyStateUnbound copies the saved settings of the session at src to dst,
 // minus the runtime handle: a handle names exactly one transcript (the
 // parent's ACP sessionId), so a copy carrying it would hijack the parent's

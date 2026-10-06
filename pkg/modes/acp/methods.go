@@ -196,7 +196,7 @@ func (pa *firAgent) Prompt(ctx context.Context, params acpsdk.PromptRequest) (ac
 			args = strings.Join(parts[1:], " ")
 		}
 		if pa.handleSlashCommand(string(params.SessionId), entry, command, args) {
-			return acpsdk.PromptResponse{StopReason: acpsdk.StopReasonEndTurn}, nil
+			return entry.promptResponse(), nil
 		}
 	}
 
@@ -229,7 +229,22 @@ func (pa *firAgent) Prompt(ctx context.Context, params acpsdk.PromptRequest) (ac
 	// Clear plan at end of turn so the next turn starts fresh.
 	entry.plan.clear()
 
-	return acpsdk.PromptResponse{StopReason: acpsdk.StopReasonEndTurn}, nil
+	return entry.promptResponse(), nil
+}
+
+// promptResponse builds the end-of-turn session/prompt response. fir
+// extension: _meta.leafId names the session's leaf entry after the turn,
+// usable as session/fork _meta.at; omitted when that leaf is not forkable
+// (a dangling tool call) or the session has no store.
+func (s *firSession) promptResponse() acpsdk.PromptResponse {
+	resp := acpsdk.PromptResponse{StopReason: acpsdk.StopReasonEndTurn}
+	if s.session == nil || s.session.SessionStore == nil {
+		return resp
+	}
+	if leaf := s.session.SessionStore.LeafIDIfForkable(); leaf != "" {
+		resp.Meta = map[string]any{"leafId": leaf}
+	}
+	return resp
 }
 
 // maxChainedHandoffs bounds how many self_handoff hops a single ACP prompt
