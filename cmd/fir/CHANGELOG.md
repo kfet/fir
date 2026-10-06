@@ -2,7 +2,10 @@
 
 ## [Unreleased]
 
+## [1.28.1] - 2026-10-07
+
 ### Changed
+- Model catalog: added `mistral/mistral-large-4`, `opencode-go/space-bunny`, `opencode/mistral-large-4` (+3 on aggregators); removed `opencode-go/space-bunny-free`; 21 models with changed pricing/limits.
 - `/changelog` shows the last 5 releases by default, with a footer when cut. `/changelog N` shows the last N; `/changelog all` shows everything. An empty `[Unreleased]` section is no longer shown.
 - **Removed the builtin `aside-advisor` skill.** Its `[SYS_EXT]` description repeated the `aside` tool description in every system prompt, and agents rarely read its body. The escalation guidance now lives in the `aside` tool description. The `instructions` parameter now says the advisor already sees the session, so a brief must not recap it: escalation briefs were the longest sub-agent prompts in the traces (median 1.3k–3k chars), sent to the one sub-agent that already has full context.
 
