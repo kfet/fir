@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- **`fir --resume <file> -p '...'` wrote the turn to a new session file.** It now opens `<file>` and appends to it; `--resume --at` still forks into a new child.
+
 ## [1.29.1] - 2026-10-08
 
 ### Fixed
