@@ -262,6 +262,15 @@ func TestSupportsBedrockAdaptiveThinking(t *testing.T) {
 	assert.True(t, supportsBedrockAdaptiveThinking("arn:aws:bedrock:us-east-1:123:application-inference-profile/abcd", "Claude Opus 4.7"))
 }
 
+func TestBedrockClaudeGen5_AdaptiveAndXhigh(t *testing.T) {
+	for _, id := range []string{"anthropic.claude-haiku-5-5", "us.anthropic.claude-haiku-5-5", "global.anthropic.claude-sonnet-5-5", "anthropic.claude-opus-5"} {
+		assert.True(t, supportsBedrockAdaptiveThinking(id, ""), id)
+		assert.Equal(t, "xhigh", bedrockThinkingLevelToEffort(ai.ThinkingXHigh, &ai.Model{ID: id}), id)
+	}
+	assert.False(t, supportsBedrockAdaptiveThinking("anthropic.claude-haiku-4-5", ""))
+	assert.Equal(t, "high", bedrockThinkingLevelToEffort(ai.ThinkingXHigh, &ai.Model{ID: "anthropic.claude-haiku-4-5"}))
+}
+
 func TestBuildBedrockAdditionalFields_Adaptive(t *testing.T) {
 	fields := buildBedrockAdditionalFields(&ai.Model{ID: "anthropic.claude-opus-4-6-v1"}, "high", &ai.StreamOptions{
 		Headers: map[string]string{"x-bedrock-reasoning": "high"},

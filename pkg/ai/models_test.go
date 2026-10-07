@@ -4,6 +4,7 @@ package ai
 
 import (
 	"math"
+	"slices"
 	"testing"
 )
 
@@ -395,5 +396,52 @@ func TestUnregisterProviderModels(t *testing.T) {
 func TestIsUnixURL(t *testing.T) {
 	if !IsUnixURL("unix:///run/a.sock/x") || IsUnixURL("http://localhost") {
 		t.Error("IsUnixURL wrong")
+	}
+}
+
+func TestClaudeGen5_SupportsXhighAndMax(t *testing.T) {
+	for _, id := range []string{
+		"claude-haiku-5-5", "anthropic.claude-haiku-5-5", "us.anthropic.claude-haiku-5-5",
+		"global.anthropic.claude-haiku-5-5", "anthropic/claude-haiku-5.5",
+		"claude-sonnet-5-5", "eu.anthropic.claude-sonnet-5-5", "claude-opus-5",
+	} {
+		m := &Model{ID: id, API: ApiAnthropicMessages}
+		if !SupportsXhigh(m) {
+			t.Errorf("%s: expected xhigh support", id)
+		}
+		if !SupportsMax(m) {
+			t.Errorf("%s: expected max support", id)
+		}
+	}
+	if SupportsXhigh(&Model{ID: "claude-haiku-4-5"}) || SupportsMax(&Model{ID: "claude-haiku-4-5"}) {
+		t.Error("claude-haiku-4-5 must not advertise xhigh/max")
+	}
+}
+
+func TestClaudeHaiku55_Catalog(t *testing.T) {
+	m := GetModel("anthropic", "claude-haiku-5-5")
+	if m == nil {
+		t.Fatal("anthropic/claude-haiku-5-5 not registered")
+	}
+	if !m.Reasoning || !m.AdaptiveThinking || !m.Compaction {
+		t.Errorf("want reasoning+adaptive+compaction, got %v %v %v", m.Reasoning, m.AdaptiveThinking, m.Compaction)
+	}
+	want := ModelCost{Input: 0.1, Output: 0.5, CacheRead: 0.01, CacheWrite: 0.125}
+	if m.Cost != want {
+		t.Errorf("cost = %+v, want %+v", m.Cost, want)
+	}
+	if !slices.Equal(m.ReasoningEffortValues, []string{"low", "medium", "high", "xhigh", "max"}) {
+		t.Errorf("effort values = %v", m.ReasoningEffortValues)
+	}
+	if !slices.Contains(m.Input, "image") {
+		t.Error("expected vision input")
+	}
+	for _, id := range []string{"anthropic.claude-haiku-5-5", "us.anthropic.claude-haiku-5-5", "eu.anthropic.claude-haiku-5-5", "global.anthropic.claude-haiku-5-5"} {
+		if GetModel("amazon-bedrock", id) == nil {
+			t.Errorf("amazon-bedrock/%s not registered", id)
+		}
+	}
+	if s := GetModel("anthropic", "claude-sonnet-5-5"); s == nil || s.Cost.CacheRead != 0.1 {
+		t.Errorf("claude-sonnet-5-5 cache read should be 0.10, got %+v", s)
 	}
 }

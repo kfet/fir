@@ -3215,3 +3215,45 @@ func TestUpdateAnthropicUsage_Prices1hCacheWrite(t *testing.T) {
 		t.Fatalf("cost = %+v, want cacheWrite %v", output.Usage.Cost, want)
 	}
 }
+
+func TestSupportsModelCompaction_LegacyGen5Fallback(t *testing.T) {
+	for _, id := range []string{"claude-haiku-5-5", "claude-sonnet-5-5", "claude-fable-5"} {
+		if !supportsModelCompaction(&ai.Model{ID: id}) {
+			t.Errorf("%s: expected compaction via ID fallback", id)
+		}
+	}
+	if supportsModelCompaction(&ai.Model{ID: "claude-haiku-4-5"}) {
+		t.Error("claude-haiku-4-5 must not support compaction")
+	}
+}
+
+func TestAnthropic_StreamSimple_Haiku55XhighAndMax(t *testing.T) {
+	cat := ai.GetModel("anthropic", "claude-haiku-5-5")
+	if cat == nil {
+		t.Fatal("claude-haiku-5-5 not in catalog")
+	}
+	for _, level := range []ai.ThinkingLevel{ai.ThinkingXHigh, ai.ThinkingMax} {
+		srv, captured := captureRequest(t, "anthropic_simple_response.sse")
+		model := *cat
+		model.BaseURL = srv.URL
+		opts := &ai.SimpleStreamOptions{
+			StreamOptions: ai.StreamOptions{APIKey: "test-key"},
+			Reasoning:     level,
+		}
+		collectEvents(t, StreamSimpleAnthropic(context.Background(), &model, ai.Context{
+			Messages: []ai.Message{ai.NewUserMsg("hi", 1000)},
+		}, opts))
+		srv.Close()
+
+		var payload map[string]any
+		if err := json.Unmarshal(*captured, &payload); err != nil {
+			t.Fatalf("unmarshal request: %v", err)
+		}
+		if th, _ := payload["thinking"].(map[string]any); th["type"] != "adaptive" {
+			t.Errorf("%s: expected adaptive thinking, got %v", level, payload["thinking"])
+		}
+		if oc, _ := payload["output_config"].(map[string]any); oc["effort"] != string(level) {
+			t.Errorf("%s: expected effort=%s, got %v", level, level, payload["output_config"])
+		}
+	}
+}

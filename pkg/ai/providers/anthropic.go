@@ -221,6 +221,7 @@ func supportsModelCompaction(model *ai.Model) bool {
 		return strings.Contains(id, "opus-4-8") || strings.Contains(id, "opus-4.8") ||
 			strings.Contains(id, "opus-4-6") || strings.Contains(id, "opus-4.6") ||
 			strings.Contains(id, "sonnet-4-6") || strings.Contains(id, "sonnet-4.6") ||
+			strings.Contains(id, "sonnet-5") || strings.Contains(id, "haiku-5") ||
 			strings.Contains(id, "fable-5") || strings.Contains(id, "mythos-5")
 	}
 	return false

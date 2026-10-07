@@ -822,7 +822,17 @@ func supportsBedrockAdaptiveThinking(modelID, modelName string) bool {
 	return anyContains(candidates, "opus-4-6") ||
 		anyContains(candidates, "opus-4-7") ||
 		anyContains(candidates, "opus-4-8") ||
-		anyContains(candidates, "sonnet-4-6")
+		anyContains(candidates, "sonnet-4-6") ||
+		isClaudeGen5(candidates)
+}
+
+// isClaudeGen5 reports whether any candidate names a Claude 5-generation
+// model (Opus/Sonnet/Haiku 5.x, Fable/Mythos 5). All are adaptive-thinking
+// models with the full low…max effort ladder including xhigh.
+func isClaudeGen5(candidates []string) bool {
+	return anyContains(candidates, "opus-5") || anyContains(candidates, "sonnet-5") ||
+		anyContains(candidates, "haiku-5") || anyContains(candidates, "fable-5") ||
+		anyContains(candidates, "mythos-5")
 }
 
 func bedrockThinkingLevelToEffort(level ai.ThinkingLevel, model *ai.Model) string {
@@ -842,7 +852,7 @@ func bedrockThinkingLevelToEffort(level ai.ThinkingLevel, model *ai.Model) strin
 			}
 			if len(model.ReasoningEffortValues) == 0 {
 				cands := modelMatchCandidates(model.ID, model.Name)
-				if anyContains(cands, "opus-4-7") || anyContains(cands, "opus-4-8") {
+				if anyContains(cands, "opus-4-7") || anyContains(cands, "opus-4-8") || isClaudeGen5(cands) {
 					return "xhigh"
 				}
 			}

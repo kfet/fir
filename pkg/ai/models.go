@@ -111,6 +111,9 @@ func SupportsXhigh(model *Model) bool {
 		return false
 	}
 	id := model.ID
+	if isClaudeGen5ID(id) {
+		return true
+	}
 	if strings.Contains(id, "gpt-5.2") || strings.Contains(id, "gpt-5.3") || strings.Contains(id, "gpt-5.4") || strings.Contains(id, "gpt-5.5") {
 		return true
 	}
@@ -131,10 +134,22 @@ func SupportsMax(model *Model) bool {
 		return false
 	}
 	id := model.ID
-	return strings.Contains(id, "opus-4-6") || strings.Contains(id, "opus-4.6") ||
+	return isClaudeGen5ID(id) || strings.Contains(id, "opus-4-6") || strings.Contains(id, "opus-4.6") ||
 		strings.Contains(id, "opus-4-7") || strings.Contains(id, "opus-4.7") ||
 		strings.Contains(id, "opus-4-8") || strings.Contains(id, "opus-4.8") ||
 		strings.Contains(id, "sonnet-4-6") || strings.Contains(id, "sonnet-4.6")
+}
+
+// isClaudeGen5ID reports whether id names a Claude 5-generation model
+// (Opus/Sonnet/Haiku 5.x, Fable/Mythos 5) on any surface. These all expose
+// the full low/medium/high/xhigh/max effort ladder.
+func isClaudeGen5ID(id string) bool {
+	for _, f := range []string{"opus-5", "sonnet-5", "haiku-5", "fable-5", "mythos-5"} {
+		if strings.Contains(id, f) {
+			return true
+		}
+	}
+	return false
 }
 
 // ModelsAreEqual checks if two models are equal by comparing ID and provider.

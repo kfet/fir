@@ -292,6 +292,11 @@ var sweModelPatterns = []swePattern{
 	// --- Claude Sonnet 4 (base, no sub-version) ---
 	// Source: bash-only leaderboard "Claude 4 Sonnet (20250514)" = 64.9%
 	{"claude-sonnet-4", "claude-sonnet-4", 64.9},
+	// --- Claude Haiku 5.5 ---
+	// SWE-bench Verified pending system card; floor at Haiku 4.5's score so
+	// the model does not sort below its predecessor.
+	{"claude-haiku-5-5", "claude-haiku-5-5", 66.6},
+	{"claude-haiku-5.5", "claude-haiku-5-5", 66.6},
 	// --- Claude Haiku 4.5 ---
 	// Source: bash-only leaderboard "Claude 4.5 Haiku (high reasoning)" = 66.6%
 	{"claude-haiku-4-5", "claude-haiku-4-5", 66.6},
@@ -1654,6 +1659,21 @@ func applyOverridesAndAdditions(all []modelSpec) []modelSpec {
 	}
 	all = filtered
 
+	// Claude Sonnet 5.5 cache-read price cut to $0.10/M (was $0.20/M) with the
+	// Haiku 5.5 launch (2026-10-07). Patch catalogs still carrying the old
+	// price (10% of input). Assumes Bedrock regional and reseller entries pass
+	// the cut through. fir has no tiered (>100k) pricing, so the <=100k
+	// rates are used for Haiku/Sonnet 5.5.
+	for i := range all {
+		m := &all[i]
+		if (strings.Contains(m.ID, "sonnet-5-5") || strings.Contains(m.ID, "sonnet-5.5")) &&
+			m.CostInput > 0 && math.Abs(m.CostCacheRead/m.CostInput-0.1) < 0.002 {
+			// Old ratio was 10% of input; new is 5% (also covers regional
+			// +10% and reseller markups).
+			m.CostCacheRead = math.Round(m.CostInput/20*1e6) / 1e6
+		}
+	}
+
 	// Filter MiniMax: only keep supported direct models
 	minimaxDirectSupported := map[string]bool{"MiniMax-M2.7": true, "MiniMax-M2.7-highspeed": true}
 	filtered = all[:0]
@@ -2112,18 +2132,18 @@ func applyOverridesAndAdditions(all []modelSpec) []modelSpec {
 		if strings.Contains(m.ID, "opus-5") || strings.Contains(m.ID, "opus-4-8") || strings.Contains(m.ID, "opus-4.8") ||
 			strings.Contains(m.ID, "opus-4-6") || strings.Contains(m.ID, "opus-4.6") ||
 			strings.Contains(m.ID, "sonnet-4-6") || strings.Contains(m.ID, "sonnet-4.6") ||
-			strings.Contains(m.ID, "sonnet-5") ||
+			strings.Contains(m.ID, "sonnet-5") || strings.Contains(m.ID, "haiku-5") ||
 			strings.Contains(m.ID, "fable-5") || strings.Contains(m.ID, "mythos-5") {
 			m.Compaction = true
 		}
 		// Adaptive (always-on, effort-based) thinking models: Opus 4.6+, Sonnet
-		// 4.6, Fable/Mythos 5. These cannot disable thinking (no thinking.type=
+		// 4.6, Sonnet/Haiku 5.x, Fable/Mythos 5. These cannot disable thinking (no thinking.type=
 		// disabled) and use output_config.effort rather than a token budget.
 		if strings.Contains(m.ID, "opus-5") || strings.Contains(m.ID, "opus-4-6") || strings.Contains(m.ID, "opus-4.6") ||
 			strings.Contains(m.ID, "opus-4-7") || strings.Contains(m.ID, "opus-4.7") ||
 			strings.Contains(m.ID, "opus-4-8") || strings.Contains(m.ID, "opus-4.8") ||
 			strings.Contains(m.ID, "sonnet-4-6") || strings.Contains(m.ID, "sonnet-4.6") ||
-			strings.Contains(m.ID, "sonnet-5") ||
+			strings.Contains(m.ID, "sonnet-5") || strings.Contains(m.ID, "haiku-5") ||
 			strings.Contains(m.ID, "fable-5") || strings.Contains(m.ID, "mythos-5") {
 			m.AdaptiveThinking = true
 			// Advertise the supported effort enum so the provider clamps
@@ -2132,7 +2152,7 @@ func applyOverridesAndAdditions(all []modelSpec) []modelSpec {
 			if len(m.ReasoningEffortValues) == 0 {
 				if strings.Contains(m.ID, "opus-5") || strings.Contains(m.ID, "opus-4-7") || strings.Contains(m.ID, "opus-4.7") ||
 					strings.Contains(m.ID, "opus-4-8") || strings.Contains(m.ID, "opus-4.8") ||
-					strings.Contains(m.ID, "sonnet-5") ||
+					strings.Contains(m.ID, "sonnet-5") || strings.Contains(m.ID, "haiku-5") ||
 					strings.Contains(m.ID, "fable-5") || strings.Contains(m.ID, "mythos-5") {
 					m.ReasoningEffortValues = []string{"low", "medium", "high", "xhigh", "max"}
 				} else {
