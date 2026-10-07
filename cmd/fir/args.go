@@ -31,8 +31,8 @@ type Args struct {
 	Thinking           agent.ThinkingLevel
 	Continue           bool
 	Resume             bool
-	// ResumeRef is the session named by `--resume <session>` (only taken
-	// as a value when --at is also given).
+	// ResumeRef is the session named by `--resume <session>`. Taken as a
+	// value when --at is also given, or when it names a session file.
 	ResumeRef string
 	// At forks the resumed session at this entry id into a new child.
 	At          string
@@ -117,6 +117,16 @@ func isAllVs(s string) bool {
 }
 
 // ParseArgs parses CLI arguments into an Args struct.
+// looksLikeSessionFile reports whether a bare `--resume` value names a
+// session file rather than a prompt: an existing file or a .jsonl path.
+func looksLikeSessionFile(s string) bool {
+	if strings.HasSuffix(s, ".jsonl") {
+		return true
+	}
+	fi, err := os.Stat(s)
+	return err == nil && !fi.IsDir()
+}
+
 func ParseArgs(args []string) *Args {
 	result := &Args{
 		Messages:          []string{},
@@ -162,7 +172,8 @@ func ParseArgs(args []string) *Args {
 		case arg == "--resume" || arg == "-r":
 			result.Resume = true
 			mark("--resume")
-			if hasAt && i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") &&
+				(hasAt || looksLikeSessionFile(args[i+1])) {
 				i++
 				result.ResumeRef = args[i]
 			}
@@ -429,6 +440,7 @@ Options:
                                  --model / etc. by default; pass
                                  --no-restore-config to opt out)
   --resume, -r                   Select a session to resume
+  --resume <file.jsonl>          Resume that session file and append to it
   --resume <session> --at <id>   Fork <session> (path, file name or id) at
                                  entry <id> into a new child session; the
                                  parent file is untouched. Also works as

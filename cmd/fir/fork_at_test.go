@@ -63,3 +63,33 @@ func TestForkSessionStoreAt(t *testing.T) {
 		t.Error("expected error for unknown session")
 	}
 }
+
+func TestResumeFileAppendsToSameSession(t *testing.T) {
+	cwd := t.TempDir()
+	agentDir := t.TempDir()
+	dir := store.DefaultSessionDir(agentDir, cwd)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(dir, "2026_parent-uuid.jsonl")
+	lines := []string{
+		`{"type":"session","version":3,"id":"parent-uuid","timestamp":"2026-08-02T07:00:00Z","cwd":"/tmp"}`,
+		`{"type":"message","id":"e1","parentId":"","timestamp":"2026-08-02T07:00:01Z","message":{"role":"user","content":"hi","timestamp":1}}`,
+	}
+	if err := os.WriteFile(src, []byte(strings.Join(lines, "\n")+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	a := ParseArgs([]string{"--resume", src, "-p", "hello"})
+	if a.ResumeRef != src || len(a.Messages) != 1 || a.Messages[0] != "hello" {
+		t.Fatalf("ResumeRef=%q Messages=%q", a.ResumeRef, a.Messages)
+	}
+	ss, resumed := createSessionStore(a, cwd, agentDir)
+	defer ss.Close()
+	if !resumed || ss.GetSessionFile() != src || ss.GetLeafID() != "e1" {
+		t.Fatalf("resumed=%v file=%q leaf=%q", resumed, ss.GetSessionFile(), ss.GetLeafID())
+	}
+	if files, _ := filepath.Glob(filepath.Join(dir, "*.jsonl")); len(files) != 1 {
+		t.Fatalf("session files = %v, want only %s", files, src)
+	}
+}

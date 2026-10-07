@@ -966,6 +966,16 @@ func createSessionStore(args *Args, cwd, agentDir string) (*store.SessionStore, 
 		}
 		return sm, sm.WasResumed()
 	}
+	if args.ResumeRef != "" {
+		if src := store.ResolveSessionRef(args.ResumeRef, sessionDir, store.SessionsDir(agentDir)); src != "" {
+			sm, forked := store.OpenSessionStore(src)
+			if forked {
+				fmt.Fprintln(os.Stderr, "fir: session is active in another window — branched with history preserved")
+			}
+			return sm, sm.WasResumed()
+		}
+		fmt.Fprintf(os.Stderr, "fir: session %q not found — starting a new session\n", args.ResumeRef)
+	}
 	if args.Continue {
 		sm, forked := store.ContinueRecentSession(cwd, sessionDir)
 		if forked {
