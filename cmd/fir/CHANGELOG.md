@@ -2,8 +2,13 @@
 
 ## [Unreleased]
 
+## [1.29.1] - 2026-10-08
+
 ### Fixed
 - **Anthropic 1h cache writes were priced at the 5m rate.** fir now reads `usage.cache_creation.ephemeral_1h_input_tokens` and prices that share at 2x input (5m writes stay at 1.25x); the `cacheWrite` token total is unchanged.
+
+### Changed
+- **Model catalog regenerated**: added Claude Haiku 5.5 (anthropic, amazon-bedrock incl. regional), `mistral/codestral-2508` +8 more (+6 on aggregators); removed 3 aggregator models; 23 with changed pricing/limits.
 
 ## [1.29.0] - 2026-10-07
 
