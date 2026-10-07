@@ -2,8 +2,13 @@
 
 ## [Unreleased]
 
+## [1.29.2] - 2026-10-08
+
 ### Fixed
 - **`fir --resume <file> -p '...'` wrote the turn to a new session file.** It now opens `<file>` and appends to it; `--resume --at` still forks into a new child.
+
+### Changed
+- **Model catalog regenerated**: 3 models with changed pricing/limits (anthropic: claude-sonnet-4-5, claude-sonnet-4-5-20250929 context window; one cache-read price).
 
 ## [1.29.1] - 2026-10-08
 
