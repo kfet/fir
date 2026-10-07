@@ -2,8 +2,13 @@
 
 ## [Unreleased]
 
+## [1.29.0] - 2026-10-07
+
 ### Added
 - **Anthropic: each turn's user message is cached with a 1h TTL in interactive sessions (TUI, ACP).** Replies after a >5m pause no longer re-write the whole history (replay of 1,159 relay sessions: −9.4% input cost). The tail keeps its 5m breakpoint; the previous turn's anchor is also marked so a long tool loop cannot push it out of the 20-block lookback. Print mode is unchanged. Disable with `"turnCache1h": false` or `FIR_TURN_CACHE_1H=0`; `-vv` now traces raw Anthropic usage including `ephemeral_1h_input_tokens`.
+
+### Changed
+- **Model catalog regenerated**: added `amazon-bedrock/global.zai.glm-5.3`, `amazon-bedrock/us.zai.glm-5.3`, `opencode/exo-free`; removed 1 aggregator model(s); 20 model(s) with changed pricing/limits.
 
 ## [1.28.1] - 2026-10-07
 
