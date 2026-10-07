@@ -2,11 +2,14 @@
 
 ## [Unreleased]
 
+## [1.30.1] - 2026-10-08
+
 ### Added
 - **Claude Haiku 5.5** (`claude-haiku-5-5`) on Anthropic, Bedrock (`anthropic.`/`us.`/`eu.`/`au.`/`jp.`/`global.`) and aggregators: 1M context, 128k output, vision, adaptive thinking with low…max effort incl. xhigh, server-side compaction; $0.10/$0.50 in/out, $0.01 cache read, $0.125 cache write (≤100k-prompt rates; fir has no tiered pricing).
 
 ### Changed
 - **Claude Sonnet 5.5 cache-read price** lowered to $0.10/M (was $0.20/M) across all catalog entries.
+- **Model catalog regenerated**: 9 model(s) with changed pricing/limits (Sonnet 5.5 cache read; Haiku 5.5 adaptive/effort/compaction flags).
 
 ### Fixed
 - **Claude 5-generation models (Opus/Sonnet/Haiku 5.x, Fable/Mythos 5) now offer and send `xhigh`/`max` thinking** — `SupportsXhigh`/`SupportsMax` and Bedrock adaptive-thinking detection only knew 4.x IDs, so `--thinking xhigh|max` was clamped to `high` and Bedrock gen-5 models used budget thinking.
