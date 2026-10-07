@@ -1067,6 +1067,11 @@ func buildAnthropicParams(model *ai.Model, ctx ai.Context, oauthToken bool, opti
 		applySideQueryCacheControl(msgs, model, retention, options.SessionID)
 	}
 	markSectionsBreakpoint(msgs, model, retention)
+	// Session turns only: one-off calls (compaction, MCP sampling) carry no
+	// session id and never come back, so a 1h write would be pure cost.
+	if !sideQuery && options != nil && options.SessionID != "" && TurnLongCacheEnabled() {
+		applyTurnLongCache(systemCached, msgs, model, retention)
+	}
 	trimSystemBreakpoints(systemCached, countMessageBreakpoints(msgs))
 	params["messages"] = msgs
 
@@ -1920,6 +1925,9 @@ func formatToolOutput(cb map[string]any) string {
 // earlier events (e.g. input_tokens from message_start when proxies omit
 // it in message_delta).
 func updateAnthropicUsage(output *ai.AssistantMessage, usage map[string]any, model *ai.Model) {
+	// Raw usage carries the per-TTL cache_creation breakdown
+	// (ephemeral_5m/1h_input_tokens) that ai.Usage does not model.
+	firlog.Trace("anthropic usage", "model", model.ID, "usage", usage)
 	if v, ok := usage["input_tokens"]; ok && v != nil {
 		if f, ok := v.(float64); ok {
 			output.Usage.Input = int(f)

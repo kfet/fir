@@ -109,6 +109,7 @@ type Settings struct {
 	ShellPath              string                    `json:"shellPath,omitempty"`
 	ShellCommandPrefix     string                    `json:"shellCommandPrefix,omitempty"`
 	CollapseChangelog      *bool                     `json:"collapseChangelog,omitempty"`
+	TurnCache1h            *bool                     `json:"turnCache1h,omitempty"`
 	Packages               []any                     `json:"packages,omitempty"`
 	Extensions             []string                  `json:"extensions,omitempty"`
 	ExtensionPaths         []string                  `json:"extensionPaths,omitempty"`
@@ -149,6 +150,7 @@ func deepMergeSettings(base, overrides Settings) Settings {
 	// Pointer fields: override wins if non-nil
 	mergeBool(&r.HideThinkingBlock, overrides.HideThinkingBlock)
 	mergeBool(&r.CollapseChangelog, overrides.CollapseChangelog)
+	mergeBool(&r.TurnCache1h, overrides.TurnCache1h)
 	mergeBool(&r.EnableSkillCommands, overrides.EnableSkillCommands)
 	mergeBool(&r.EnableSysExtensions, overrides.EnableSysExtensions)
 	mergeBool(&r.ShowHardwareCursor, overrides.ShowHardwareCursor)
@@ -965,6 +967,14 @@ func (sm *SettingsManager) GetShellCommandPrefix() string {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 	return sm.settings.ShellCommandPrefix
+}
+
+// GetTurnCache1h reports whether interactive sessions write each turn's user
+// message to the Anthropic prompt cache with a 1h TTL. Default: true.
+func (sm *SettingsManager) GetTurnCache1h() bool {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	return boolDefault(sm.settings.TurnCache1h, true)
 }
 
 func (sm *SettingsManager) GetCollapseChangelog() bool {

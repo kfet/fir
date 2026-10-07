@@ -634,6 +634,15 @@ func run() error {
 		return err
 	}
 
+	// Interactive modes (TUI, ACP) come back for later turns, often after
+	// more than five minutes; anchor each turn in the 1h prompt cache.
+	// One-shot print runs never do, so they keep plain 5m caching.
+	if !isPrintMode {
+		if cwd, err := os.Getwd(); err == nil {
+			providers.SetTurnLongCache(config.NewSettingsManager(cwd, resolveAgentDir()).GetTurnCache1h())
+		}
+	}
+
 	// ACP mode creates sessions on demand, so dispatch before setupSession.
 	if isACPMode {
 		firlog.Debug("mode dispatch", "mode", "acp")

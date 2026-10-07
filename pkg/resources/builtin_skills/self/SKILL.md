@@ -779,6 +779,7 @@ All fields are optional. Nested objects merge recursively; arrays and primitives
   "theme": "dark",                       // Theme name or path
   "hideThinkingBlock": false,            // Hide thinking blocks in output
   "collapseChangelog": false,            // Collapse changelog on startup
+  "turnCache1h": true,                   // Anthropic: cache each turn's user message for 1h (TUI/ACP; env FIR_TURN_CACHE_1H=0/1 overrides)
   "doubleEscapeAction": "tree",          // "tree" or "quit"
   "autocompleteMaxVisible": 5,           // Max autocomplete suggestions shown
   "showHardwareCursor": false,           // Show hardware cursor
