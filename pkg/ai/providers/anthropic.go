@@ -428,6 +428,9 @@ func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, op
 				}
 			}
 
+			// 1h-TTL share of cache writes, kept across usage events
+			// (message_delta may omit the cache_creation breakdown).
+			var cacheWrite1h int
 			output := &ai.AssistantMessage{
 				Role:       ai.RoleAssistant,
 				Content:    []ai.AssistantContent{},
@@ -484,7 +487,7 @@ func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, op
 							output.ResponseID = id
 						}
 						if usage, ok := msg["usage"].(map[string]any); ok {
-							updateAnthropicUsage(output, usage, model)
+							updateAnthropicUsage(output, usage, model, &cacheWrite1h)
 						}
 					}
 
@@ -620,7 +623,7 @@ func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, op
 						}
 					}
 					if usage, ok := raw["usage"].(map[string]any); ok {
-						updateAnthropicUsage(output, usage, model)
+						updateAnthropicUsage(output, usage, model, &cacheWrite1h)
 					}
 
 				case "message_stop":
@@ -1923,34 +1926,45 @@ func formatToolOutput(cb map[string]any) string {
 // updateAnthropicUsage updates usage from an Anthropic usage object.
 // Only updates fields that are present (non-null) to preserve values from
 // earlier events (e.g. input_tokens from message_start when proxies omit
-// it in message_delta).
-func updateAnthropicUsage(output *ai.AssistantMessage, usage map[string]any, model *ai.Model) {
-	// Raw usage carries the per-TTL cache_creation breakdown
-	// (ephemeral_5m/1h_input_tokens) that ai.Usage does not model.
+// it in message_delta). cacheWrite1h holds the 1h-TTL share of
+// CacheWrite across events; it is priced at 2x input instead of the 5m
+// rate (model.Cost.CacheWrite, 1.25x input).
+func updateAnthropicUsage(output *ai.AssistantMessage, usage map[string]any, model *ai.Model, cacheWrite1h *int) {
 	firlog.Trace("anthropic usage", "model", model.ID, "usage", usage)
-	if v, ok := usage["input_tokens"]; ok && v != nil {
-		if f, ok := v.(float64); ok {
-			output.Usage.Input = int(f)
-		}
+	if v, ok := usage["input_tokens"].(float64); ok {
+		output.Usage.Input = int(v)
 	}
-	if v, ok := usage["output_tokens"]; ok && v != nil {
-		if f, ok := v.(float64); ok {
-			output.Usage.Output = int(f)
-		}
+	if v, ok := usage["output_tokens"].(float64); ok {
+		output.Usage.Output = int(v)
 	}
-	if v, ok := usage["cache_read_input_tokens"]; ok && v != nil {
-		if f, ok := v.(float64); ok {
-			output.Usage.CacheRead = int(f)
-		}
+	if v, ok := usage["cache_read_input_tokens"].(float64); ok {
+		output.Usage.CacheRead = int(v)
 	}
-	if v, ok := usage["cache_creation_input_tokens"]; ok && v != nil {
-		if f, ok := v.(float64); ok {
-			output.Usage.CacheWrite = int(f)
+	if v, ok := usage["cache_creation_input_tokens"].(float64); ok {
+		output.Usage.CacheWrite = int(v)
+	}
+	if cc, ok := usage["cache_creation"].(map[string]any); ok {
+		if v, ok := cc["ephemeral_1h_input_tokens"].(float64); ok {
+			*cacheWrite1h = int(v)
 		}
 	}
 	output.Usage.TotalTokens = output.Usage.Input + output.Usage.Output +
 		output.Usage.CacheRead + output.Usage.CacheWrite
 	ai.CalculateCost(model, &output.Usage)
+	priceCacheWrite1h(model, &output.Usage, *cacheWrite1h)
+}
+
+// priceCacheWrite1h re-prices the 1h-TTL part of usage.CacheWrite at 2x
+// the input rate; CalculateCost priced all of it at the 5m rate.
+func priceCacheWrite1h(model *ai.Model, usage *ai.Usage, tokens1h int) {
+	tokens1h = min(tokens1h, usage.CacheWrite)
+	if tokens1h <= 0 {
+		return
+	}
+	tokens5m := usage.CacheWrite - tokens1h
+	usage.Cost.CacheWrite = (model.Cost.CacheWrite/1_000_000)*float64(tokens5m) +
+		(2*model.Cost.Input/1_000_000)*float64(tokens1h)
+	usage.Cost.Total = usage.Cost.Input + usage.Cost.Output + usage.Cost.CacheRead + usage.Cost.CacheWrite
 }
 
 func jsonInt(m map[string]any, key string) int {

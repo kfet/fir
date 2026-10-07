@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- **Anthropic 1h cache writes were priced at the 5m rate.** fir now reads `usage.cache_creation.ephemeral_1h_input_tokens` and prices that share at 2x input (5m writes stay at 1.25x); the `cacheWrite` token total is unchanged.
+
 ## [1.29.0] - 2026-10-07
 
 ### Added

@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"os"
 	"strings"
@@ -1456,7 +1457,7 @@ func TestAnthropic_UpdateUsage(t *testing.T) {
 		"cache_read_input_tokens":     float64(200),
 		"cache_creation_input_tokens": float64(30),
 	}
-	updateAnthropicUsage(output, usage, model)
+	updateAnthropicUsage(output, usage, model, new(int))
 
 	if output.Usage.Input != 100 {
 		t.Errorf("expected input=100, got %d", output.Usage.Input)
@@ -1483,7 +1484,7 @@ func TestAnthropic_UpdateUsagePartial(t *testing.T) {
 	output := &ai.AssistantMessage{Usage: ai.ZeroUsage()}
 
 	usage := map[string]any{"input_tokens": float64(42)}
-	updateAnthropicUsage(output, usage, model)
+	updateAnthropicUsage(output, usage, model, new(int))
 
 	if output.Usage.Input != 42 {
 		t.Errorf("expected input=42, got %d", output.Usage.Input)
@@ -1506,7 +1507,8 @@ func TestAnthropic_UpdateUsagePreservesFieldsOnNull(t *testing.T) {
 		"output_tokens":           float64(0),
 		"cache_read_input_tokens": float64(50),
 	}
-	updateAnthropicUsage(output, usage1, model)
+	cw1h := 0
+	updateAnthropicUsage(output, usage1, model, &cw1h)
 	if output.Usage.Input != 100 {
 		t.Errorf("expected input=100 after message_start, got %d", output.Usage.Input)
 	}
@@ -1516,7 +1518,7 @@ func TestAnthropic_UpdateUsagePreservesFieldsOnNull(t *testing.T) {
 	usage2 := map[string]any{
 		"output_tokens": float64(25),
 	}
-	updateAnthropicUsage(output, usage2, model)
+	updateAnthropicUsage(output, usage2, model, &cw1h)
 	if output.Usage.Input != 100 {
 		t.Errorf("expected input=100 preserved from message_start, got %d", output.Usage.Input)
 	}
@@ -3188,5 +3190,28 @@ func TestAnthropic_ToolResultMeta_RenderedInRequest(t *testing.T) {
 	// Persisted message untouched.
 	if len(orig.Content) != 1 || orig.Content[0].Text != "command output" {
 		t.Fatalf("original message mutated: %+v", orig.Content)
+	}
+}
+
+func TestUpdateAnthropicUsage_Prices1hCacheWrite(t *testing.T) {
+	model := &ai.Model{ID: "m", Cost: ai.ModelCost{Input: 10, Output: 50, CacheRead: 1, CacheWrite: 12.5}}
+	output := &ai.AssistantMessage{}
+	cw1h := 0
+	updateAnthropicUsage(output, map[string]any{
+		"input_tokens":                float64(0),
+		"cache_creation_input_tokens": float64(3_000_000),
+		"cache_creation": map[string]any{
+			"ephemeral_5m_input_tokens": float64(1_000_000),
+			"ephemeral_1h_input_tokens": float64(2_000_000),
+		},
+	}, model, &cw1h)
+	// delta without breakdown must keep the 1h split
+	updateAnthropicUsage(output, map[string]any{"output_tokens": float64(0)}, model, &cw1h)
+	if output.Usage.CacheWrite != 3_000_000 {
+		t.Fatalf("CacheWrite = %d", output.Usage.CacheWrite)
+	}
+	want := 12.5 + 2*20.0
+	if math.Abs(output.Usage.Cost.CacheWrite-want) > 1e-9 || math.Abs(output.Usage.Cost.Total-want) > 1e-9 {
+		t.Fatalf("cost = %+v, want cacheWrite %v", output.Usage.Cost, want)
 	}
 }
