@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [1.30.2] - 2026-10-08
+
+### Fixed
+- **`fir --resume <file> -p '...'` wrote the turn to a new session file.** It now opens `<file>` and appends to it; `--resume --at` still forks into a new child.
+
 ## [1.30.1] - 2026-10-08
 
 ### Added
@@ -13,8 +18,6 @@
 
 ### Fixed
 - **Claude 5-generation models (Opus/Sonnet/Haiku 5.x, Fable/Mythos 5) now offer and send `xhigh`/`max` thinking** — `SupportsXhigh`/`SupportsMax` and Bedrock adaptive-thinking detection only knew 4.x IDs, so `--thinking xhigh|max` was clamped to `high` and Bedrock gen-5 models used budget thinking.
-### Fixed
-- **`fir --resume <file> -p '...'` wrote the turn to a new session file.** It now opens `<file>` and appends to it; `--resume --at` still forks into a new child.
 
 ## [1.29.1] - 2026-10-08
 
