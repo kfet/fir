@@ -87,7 +87,7 @@ fir reads `AGENTS.md` (or `CLAUDE.md`) from the working directory and its ancest
 Two methods:
 
 1. **Environment variables** — set `<PROVIDER>_API_KEY` (e.g. `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`). See the full list below.
-2. **OAuth** — use `/login` in interactive mode, or `fir login <provider-id>` from the shell. Supports Anthropic, Google (Antigravity & Gemini CLI), OpenAI Codex, GitHub Copilot, and Poe. Credentials are persisted automatically.
+2. **OAuth** — use `/login` in interactive mode, or `fir login <provider-id>` from the shell. Supports Anthropic, Google Antigravity, OpenAI Codex, GitHub Copilot, and Poe. Credentials are persisted automatically.
 3. New OAuth providers can be added as extensions
 
 ## Login subcommand

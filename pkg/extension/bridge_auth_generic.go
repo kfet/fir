@@ -234,7 +234,7 @@ func (p *genericAuthProvider) RefreshToken(ctx context.Context, creds *ai.OAuthC
 
 // GetAPIKey delegates to the auth/api_key extension hook when present.
 // Default returns the access token directly — covers every Bearer-style
-// provider in fir today (Anthropic, Codex, Antigravity, Gemini-CLI, Poe).
+// provider in fir today (Anthropic, Codex, Antigravity, Poe).
 // Extensions that need different behaviour (Copilot uses a separate
 // short-lived token) keep the imperative extAuthProvider.
 func (p *genericAuthProvider) GetAPIKey(creds *ai.OAuthCredentials) string {

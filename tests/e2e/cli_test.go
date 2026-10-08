@@ -143,45 +143,42 @@ func TestCLI_ModelThinkingLevelSuffix(t *testing.T) {
 }
 
 // TestCLI_ExtShippedProviderResolves is a regression test for the Phase B4
-// migration of google-gemini-cli and google-antigravity providers out of
-// core into the gemini-cli-auth and antigravity-auth builtin extensions.
+// migration of the Cloud Code Assist providers out of core into builtin
+// auth extensions (today only google-antigravity remains; google-gemini-cli
+// was removed after Google retired it).
 //
 // It catches two distinct bugs that broke real-inference end-to-end after
 // the migration:
 //
 //  1. CLI model resolution ran before extensions registered, so
-//     `--provider google-gemini-cli --model gemini-2.5-flash` failed with
-//     `Unknown provider "google-gemini-cli"` in -p / non-interactive mode.
+//     `--provider <ext-provider> --model <id>` failed with
+//     `Unknown provider "<ext-provider>"` in -p / non-interactive mode.
 //
 //  2. ModelRegistry.Refresh() (called via refreshSessionModel after auth
 //     extensions ran) called Registry.ResetApiProviders, which wiped
 //     the dynamic Api map and re-registered only built-ins — silently
 //     dropping the wire-protocol Api entries shipped by the same
 //     extensions, so the very next stream attempt panicked with
-//     `no API provider registered for api: google-gemini-cli`.
+//     `no API provider registered for api: <ext-api>`.
 //
 // The test runs with a fresh empty agent dir (no OAuth credentials), so
 // inference will fail downstream — but the failure must be a credentials/
 // network/auth error, NOT one of the two regression strings above.
 //
-// Run for both ext-shipped providers since each owns its own ApiSpec
-// registration and a future regression could hit one but not the other.
+// Table-driven so further ext-shipped providers can be added as rows.
 func TestCLI_ExtShippedProviderResolves(t *testing.T) {
 	cases := []struct {
 		name     string
 		provider string
 		model    string
 	}{
-		{"gemini-cli", "google-gemini-cli", "gemini-2.5-flash"},
 		{"antigravity", "google-antigravity", "gemini-3-flash"},
 	}
 	// Strings that, if present, indicate one of the two regressions has
 	// returned. Anything else (auth required, no credentials, network, etc.)
 	// is acceptable — those are downstream of resolution.
 	regressionMarkers := []string{
-		`Unknown provider "google-gemini-cli"`,
 		`Unknown provider "google-antigravity"`,
-		"no API provider registered for api: google-gemini-cli",
 		"no API provider registered for api: google-antigravity",
 	}
 	for _, tc := range cases {
@@ -213,7 +210,7 @@ func TestCLI_ExtShippedProviderResolves(t *testing.T) {
 // synthetic-stream "echo" provider. This catches the same two regressions
 // for the *synthetic* dispatch path (host streams via extStreamAdapter
 // over provider/stream/* RPC), complementing the decl-google passthrough
-// path covered by the gemini-cli/antigravity test above.
+// path covered by the antigravity test above.
 //
 // The echo provider is opt-in via -e demo and emits a deterministic
 // "Echo: <input>" completion entirely in-process, so the test is fully

@@ -215,7 +215,7 @@ func TestAnthropic_ConvertMessages_DropsStoredEmptyTextFromOtherProvider(t *test
 	// text(from-thinking) → text(empty) → tool_use; then
 	// convertAnthropicMessages must drop the empty text.
 	geminiMsg := ai.AssistantMessage{
-		Role: ai.RoleAssistant, Provider: "google-gemini-cli", API: "google-gemini-cli", Model: "gemini-2.5-flash",
+		Role: ai.RoleAssistant, Provider: "google-antigravity", API: "google-antigravity", Model: "gemini-2.5-flash",
 		StopReason: ai.StopReasonToolUse,
 		Content: []ai.AssistantContent{
 			ai.NewThinkingContent("ponder"),

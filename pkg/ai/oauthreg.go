@@ -24,7 +24,7 @@ import (
 // Mirrors what pinoauth.Token carries (access/refresh/expires) and adds
 // a fir-side `Extra` map for provider-specific data that must survive
 // across refreshes — most notably the Google Cloud project ID used by
-// the gemini-cli / antigravity providers and the chatgpt_account_id
+// the antigravity provider and the chatgpt_account_id
 // used by codex. pinoauth.Token itself has no Extra field by design
 // (it's the raw RFC 6749 §5.1 token response shape); fir keeps Extra
 // here so the toolkit stays stateless.

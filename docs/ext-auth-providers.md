@@ -586,7 +586,7 @@ spawn only those.
 
 - Auth provider IDs must match `[a-z][a-z0-9-]*`.
 - Auth provider IDs must not collide with built-in provider IDs (`anthropic`,
-  `github-copilot`, `gemini-cli`, `google-antigravity`, `openai-codex`, `poe`,
+  `github-copilot`, `google-antigravity`, `openai-codex`, `poe`,
   `openrouter`) unless the extension is explicitly trusted to override them.
 - Frontmatter auth provider declarations are checked against init handshake
   results (same as events/commands).

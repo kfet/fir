@@ -231,7 +231,7 @@ _fir_models() {
 }
 
 _fir_providers() {
-    local builtin="anthropic openai google bedrock azure-openai openai-codex google-vertex google-gemini-cli poe groq cerebras deepseek xai openrouter github-copilot openai-antigravity"
+    local builtin="anthropic openai google bedrock azure-openai openai-codex google-vertex poe groq cerebras deepseek xai openrouter github-copilot openai-antigravity"
     if [[ -z ${_FIR_PROVIDERS_CACHE+x} ]]; then
         _FIR_PROVIDERS_CACHE=$(fir --list-models 2>/dev/null | awk -F/ '{print $1}' | sort -u)
     fi

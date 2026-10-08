@@ -33,7 +33,7 @@ fir has diverged enough that syncing them costs more than it saves.
 | `ai/src/providers/openai-codex-responses.ts` | `pkg/ai/providers/openai_codex_responses.go` | ✅ |
 | `ai/src/providers/google-vertex.ts` | `pkg/ai/providers/google_vertex.go` | ✅ |
 | `ai/src/providers/google-shared.ts` | `pkg/ai/providers/google_shared.go` | ✅ |
-| `ai/src/providers/google-gemini-cli.ts` | `pkg/ai/providers/google_gemini_cli.go` | ✅ |
+| `ai/src/providers/google-gemini-cli.ts` | — (provider removed: retired by Google) | ❌ |
 | `ai/src/providers/google.ts` | `pkg/ai/providers/google.go` | ✅ |
 | `ai/src/providers/amazon-bedrock.ts` | `pkg/ai/providers/bedrock.go` | ✅ |
 | `ai/src/providers/simple-options.ts` | `pkg/ai/providers/options.go` | ✅ |
@@ -49,7 +49,7 @@ fir has diverged enough that syncing them costs more than it saves.
 | `ai/src/utils/oauth/anthropic.ts` | `pkg/ai/oauth/anthropic.go` | ✅ |
 | `ai/src/utils/oauth/github-copilot.ts` | `pkg/ai/oauth/github_copilot.go` | ✅ |
 | `ai/src/utils/oauth/google-antigravity.ts` | `pkg/ai/oauth/google_antigravity.go` | ✅ |
-| `ai/src/utils/oauth/google-gemini-cli.ts` | `pkg/ai/oauth/google_gemini_cli.go` | ✅ |
+| `ai/src/utils/oauth/google-gemini-cli.ts` | — (provider removed: retired by Google) | ❌ |
 | `ai/src/utils/oauth/openai-codex.ts` | `pkg/ai/oauth/openai_codex.go` | ✅ |
 | `ai/src/utils/oauth/index.ts` | `pkg/ai/oauth/registry.go` | ✅ |
 

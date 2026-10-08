@@ -1237,7 +1237,7 @@ Request:
 
 ```json
 {
-  "provider_id": "google-gemini-cli",
+  "provider_id": "google-antigravity",
   "token": {
     "access_token": "ya29...",
     "refresh_token": "1//...",
@@ -1570,7 +1570,7 @@ dispatched:
   one fir already speaks.
 
 - **Set to a built-in wire protocol** (e.g. ``"openai-completions"``,
-  ``"anthropic-messages"``, ``"google-gemini-cli"``) — fir reuses its
+  ``"anthropic-messages"``) — fir reuses its
   in-process stream function for that Api. The extension ships only
   metadata: display name, env keys, OAuth wiring, model catalogue. No
   ``provider/stream/*`` handler is needed; ``provider/listModels`` and
@@ -1691,10 +1691,9 @@ Currently supported kinds:
 |---|---|---|
 | `decl-google` | `DeclGoogleApi` (endpoints, headers, conditional headers, envelope template, system-instruction prefix, reasoning-header prefix) | `pkg/ai/providers/StreamDeclGoogle` — Cloud Code Assist Gemini family |
 
-Builtin extensions like `gemini-cli-auth` and `antigravity-auth` ship
-their wire-protocol Api spec, hosted-provider record, and full model
+The builtin `antigravity-auth` extension ships its wire-protocol Api spec, hosted-provider record, and full model
 catalogue together — so `pkg/ai/providers` carries no provider-specific
-literals for those services.
+literals for that service.
 
 ### Init declaration
 
@@ -1705,13 +1704,12 @@ array, each entry ``{id, kind, payload}``:
 {
   "apis": [
     {
-      "id": "google-gemini-cli",
+      "id": "my-code-assist",
       "kind": "decl-google",
       "payload": {
         "endpoints": ["https://cloudcode-pa.googleapis.com"],
         "headers": {
-          "User-Agent": "google-cloud-sdk vscode_cloudshelleditor/0.1",
-          "X-Goog-Api-Client": "gl-node/22.17.0"
+          "User-Agent": "my-client/1.0"
         },
         "conditional_headers": [],
         "envelope": "{\"project\":\"${creds.project_id}\",\"model\":\"${model.id}\",\"request\":\"$inner\",\"userAgent\":\"fir-coding-agent\",\"requestId\":\"${fn.rand_id(fir-coding-agent)}\"}",

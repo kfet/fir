@@ -330,7 +330,7 @@ _fir_models() {
 
 _fir_providers() {
     local -a providers
-    providers=(anthropic openai google bedrock azure-openai openai-codex google-vertex google-gemini-cli poe groq cerebras deepseek xai openrouter github-copilot openai-antigravity)
+    providers=(anthropic openai google bedrock azure-openai openai-codex google-vertex poe groq cerebras deepseek xai openrouter github-copilot openai-antigravity)
     # Augment with providers seen in --list-models output (provider/id).
     local cache_var=_fir_providers_cache
     if (( ${(P)+cache_var} == 0 )); then

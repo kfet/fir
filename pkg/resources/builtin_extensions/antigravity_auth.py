@@ -393,7 +393,6 @@ def _probe_models(access: str, project: str, ids: list[str]) -> tuple[list[str],
 # Replaces what used to live in:
 #
 #   - pkg/ai/providers/register_antigravity.go (DeclGoogleConfig)
-#   - pkg/ai/providers/register_gemini_cli.go (Api wire registration)
 #   - pkg/ai/provider_registry_builtins.go (RegisteredProvider record)
 #   - cmd/generate-models/main.go + pkg/ai/models_generated.go (12 models)
 #
