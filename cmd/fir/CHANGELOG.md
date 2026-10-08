@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- ACP mode now supports `/mcp login <server>` and `/mcp logout <server>`; previously `/mcp login slack` replied `MCP server "login slack" not found.`
+
 ## [1.30.3] - 2026-10-08
 
 ### Fixed

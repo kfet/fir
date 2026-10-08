@@ -65,7 +65,7 @@ func newCommandRegistry() *commandRegistry {
 	r.register(slashCommand{"logout", "Log out from provider (usage: /logout [provider-id|all])", cmdLogout})
 	r.register(slashCommand{"reload", "Reload extensions, skills, themes, MCP servers, and provider auth", cmdReload})
 	r.register(slashCommand{"skills", "List loaded skills (/skills <name> for details, /skills install <name> to install)", cmdSkills})
-	r.register(slashCommand{"mcp", "Show MCP servers summary; /mcp <name> for details; /mcp reload to reload configs", cmdMCP})
+	r.register(slashCommand{"mcp", "Show MCP servers summary; /mcp <name> for details; /mcp reload to reload configs; /mcp login <server> / /mcp logout <server> for OAuth", cmdMCP})
 	return r
 }
 
@@ -644,6 +644,17 @@ func cmdMCP(ctx *commandContext, args string) {
 		return
 	}
 
+	// Handle /mcp login <server> and /mcp logout <server>.
+	if sub, rest, _ := strings.Cut(serverName, " "); sub == "login" || sub == "logout" {
+		rest = strings.TrimSpace(rest)
+		if sub == "login" {
+			cmdMCPLogin(ctx, rest)
+		} else {
+			cmdMCPLogout(ctx, rest)
+		}
+		return
+	}
+
 	if entry.mcpManager == nil {
 		ctx.sendMessage("No MCP servers configured.")
 		return
@@ -730,6 +741,63 @@ func cmdMCP(ctx *commandContext, args string) {
 	}
 	sb.WriteString("\nUse `/mcp <server-name>` to see full tool details.")
 	ctx.sendMessage(sb.String())
+}
+
+// cmdMCPLogin runs the OAuth login flow for one remote MCP server. It is the
+// ACP counterpart of the interactive `/mcp login <server>`.
+func cmdMCPLogin(ctx *commandContext, serverName string) {
+	if serverName == "" {
+		ctx.sendMessage("Usage: /mcp login <server>")
+		return
+	}
+	if ctx.entry.mcpManager == nil {
+		ctx.sendMessage("No MCP servers configured.")
+		return
+	}
+	loginCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	err := ctx.entry.mcpManager.LoginServer(loginCtx, serverName, pinoauth.LoginCallbacks{
+		OnAuth: func(info pinoauth.AuthInfo) {
+			msg := fmt.Sprintf("Open this URL to authenticate:\n%s", session.FormatAuthURLs(info.URL, info.ShortURL))
+			if info.Instructions != "" {
+				msg += "\n\n" + info.Instructions
+			}
+			ctx.sendMessage(msg)
+		},
+		OnProgress: func(message string) {
+			ctx.sendMessage(message)
+		},
+		OnPrompt: func(prompt pinoauth.Prompt) (string, error) {
+			ctx.sendMessage(prompt.Message + " (using default)")
+			return "", nil
+		},
+	})
+	if err != nil {
+		if loginCtx.Err() != nil {
+			ctx.sendMessage("MCP login timed out after 5 minutes.")
+		} else {
+			ctx.sendMessage(fmt.Sprintf("MCP login failed: %v", err))
+		}
+		return
+	}
+	ctx.sendMessage(fmt.Sprintf("Logged in to MCP server %q. Credentials saved.", serverName))
+}
+
+// cmdMCPLogout removes stored OAuth credentials for one MCP server.
+func cmdMCPLogout(ctx *commandContext, serverName string) {
+	if serverName == "" {
+		ctx.sendMessage("Usage: /mcp logout <server>")
+		return
+	}
+	if ctx.entry.mcpManager == nil {
+		ctx.sendMessage("No MCP servers configured.")
+		return
+	}
+	if err := ctx.entry.mcpManager.LogoutServer(serverName); err != nil {
+		ctx.sendMessage(fmt.Sprintf("MCP logout failed: %v", err))
+		return
+	}
+	ctx.sendMessage(fmt.Sprintf("Removed stored credentials for MCP server %q.", serverName))
 }
 
 // cmdMCPReload performs an MCP-only reload: re-reads mcp.json and mcp.d/ from disk
