@@ -24,6 +24,7 @@ import (
 	"github.com/kfet/fir/pkg/resources/clipboard"
 	"github.com/kfet/fir/pkg/session"
 	"github.com/kfet/fir/pkg/session/store"
+	"github.com/kfet/fir/pkg/slashcmd"
 	tuicomp "github.com/kfet/fir/pkg/tui/components"
 	"github.com/kfet/fir/pkg/update"
 	"github.com/kfet/pinoauth"
@@ -1030,8 +1031,8 @@ func (m *InteractiveMode) setupAutocomplete() {
 		}
 		reexecBin = bin
 	}
-	for _, cmd := range resources.BuiltinSlashCommands {
-		desc := cmd.Description
+	for _, cmd := range slashcmd.ForMode(slashcmd.TUI) {
+		desc := cmd.FullDescription(slashcmd.TUI)
 		if cmd.Name == "reexec" {
 			desc = fmt.Sprintf("Re-exec into %s (or a specified binary), preserving the session", reexecBin)
 		}

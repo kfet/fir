@@ -751,9 +751,7 @@ func TestHandleSlashCommand_Login_NoArgs(t *testing.T) {
 		t.Error("expected handleSlashCommand to return true for login")
 	}
 	// Should have sent a message listing providers (or "no OAuth providers" message).
-	if len(mc.getUpdates()) == 0 {
-		t.Error("expected at least one update for login command")
-	}
+	waitAnyAgentMessage(t, mc)
 }
 
 func TestHandleSlashCommand_Logout_InvalidProviderID(t *testing.T) {
@@ -1041,72 +1039,30 @@ func TestHandleSlashCommand_Export_WritesFile(t *testing.T) {
 		t.Error("expected handleSlashCommand to return true for /export")
 	}
 
-	deadline := time.Now().Add(2 * time.Second)
+	waitAgentMessage(t, mc, "exported to")
+	if _, err := os.Stat(outPath); err != nil {
+		t.Errorf("expected output file to exist at %s: %v", outPath, err)
+	}
+}
+
+// waitAnyAgentMessage polls until any agent message arrives.
+func waitAnyAgentMessage(t *testing.T, mc *mockConn) string {
+	return waitAgentMessage(t, mc, "")
+}
+
+// waitAgentMessage polls until the last agent message contains want. Async
+// slash commands (export, share, login) reply from a goroutine.
+func waitAgentMessage(t *testing.T, mc *mockConn, want string) string {
+	t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
-		msg := getLastAgentMessage(mc.getUpdates())
-		if strings.Contains(msg, "exported to") {
-			// File should exist.
-			if _, err := os.Stat(outPath); err != nil {
-				t.Errorf("expected output file to exist at %s: %v", outPath, err)
-			}
-			return
+		if msg := getLastAgentMessage(mc.getUpdates()); msg != "" && strings.Contains(msg, want) {
+			return msg
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	t.Errorf("timed out waiting for export message; last msg: %q", getLastAgentMessage(mc.getUpdates()))
-}
-
-func TestGistIDRegex(t *testing.T) {
-	valid := []string{
-		"d168778e8e62f65886000f3f314d63e3",
-		"AABBCCDDEEFF00112233445566778899",
-		"abcdef0123456789abcdef0123456789",
-	}
-	invalid := []string{
-		"",
-		"short",
-		"not-hex-string!!!!!!!!",
-		"d168778e8e62f6588600", // exactly 20 chars — valid
-	}
-	for _, s := range valid {
-		if !gistIDRegex.MatchString(s) {
-			t.Errorf("gistIDRegex should match %q", s)
-		}
-	}
-	// The 19-char case is invalid (< 20).
-	if gistIDRegex.MatchString("d168778e8e62f658860") {
-		t.Error("gistIDRegex should NOT match a 19-char hex string")
-	}
-	for _, s := range invalid[:3] {
-		if gistIDRegex.MatchString(s) {
-			t.Errorf("gistIDRegex should NOT match %q", s)
-		}
-	}
-}
-
-func TestIsNotFound_ExitError(t *testing.T) {
-	// An ExitError (non-zero exit) means the command exists but failed — NOT "not found".
-	// Simulate this by running a command that exits non-zero.
-	cmd := exec.Command("false")
-	err := cmd.Run()
-	if err == nil {
-		t.Skip("'false' command succeeded unexpectedly")
-	}
-	if isNotFound(err) {
-		t.Error("isNotFound should return false for *exec.ExitError (command exists but failed)")
-	}
-}
-
-func TestIsNotFound_CommandNotFound(t *testing.T) {
-	// A command that doesn't exist at all returns a non-ExitError.
-	cmd := exec.Command("this-command-does-not-exist-fir-test-12345")
-	err := cmd.Run()
-	if err == nil {
-		t.Skip("unexpected success")
-	}
-	if !isNotFound(err) {
-		t.Error("isNotFound should return true when command is not on PATH")
-	}
+	t.Fatalf("timed out waiting for %q; last msg: %q", want, getLastAgentMessage(mc.getUpdates()))
+	return ""
 }
 
 func TestPerformShare_GhNotAuthenticated_SendsError(t *testing.T) {
@@ -1128,9 +1084,9 @@ func TestPerformShare_GhNotAuthenticated_SendsError(t *testing.T) {
 	defer sess.Close()
 	entry := &firSession{termState: newTerminalState(), session: sess}
 
-	pa.performShare("s1", entry)
+	pa.handleSlashCommand("s1", entry, "share", "")
 
-	msg := getLastAgentMessage(mc.getUpdates())
+	msg := waitAgentMessage(t, mc, "GitHub CLI")
 	if !strings.Contains(msg, "not logged in") && !strings.Contains(msg, "not installed") {
 		t.Errorf("expected gh auth error message, got: %q", msg)
 	}
@@ -1146,9 +1102,9 @@ func TestPerformShare_GhNotInstalled_SendsError(t *testing.T) {
 	defer sess.Close()
 	entry := &firSession{termState: newTerminalState(), session: sess}
 
-	pa.performShare("s1", entry)
+	pa.handleSlashCommand("s1", entry, "share", "")
 
-	msg := getLastAgentMessage(mc.getUpdates())
+	msg := waitAgentMessage(t, mc, "GitHub CLI")
 	if !strings.Contains(msg, "not installed") && !strings.Contains(msg, "not logged in") {
 		t.Errorf("expected 'not installed' error message, got: %q", msg)
 	}
@@ -1920,8 +1876,8 @@ func TestHandleSlashCommand_Logout_SpecificProvider(t *testing.T) {
 		t.Error("expected handleSlashCommand to return true for logout")
 	}
 	msg := getLastAgentMessage(mc.getUpdates())
-	if !strings.Contains(msg, "Logged out from anthropic") {
-		t.Errorf("expected 'Logged out from anthropic' message, got: %q", msg)
+	if !strings.Contains(msg, "Logged out from Anthropic") {
+		t.Errorf("expected 'Logged out from Anthropic' message, got: %q", msg)
 	}
 }
 
@@ -1959,7 +1915,7 @@ func TestHandleSlashCommand_Login_InvalidProviderID(t *testing.T) {
 	if !found {
 		t.Error("expected handleSlashCommand to return true for login")
 	}
-	msg := getLastAgentMessage(mc.getUpdates())
+	msg := waitAnyAgentMessage(t, mc)
 	if !strings.Contains(msg, "Invalid provider ID") && !strings.Contains(msg, "No OAuth providers available") {
 		t.Errorf("expected 'Invalid provider ID' or 'No OAuth providers available' message, got: %q", msg)
 	}

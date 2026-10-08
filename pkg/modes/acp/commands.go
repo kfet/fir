@@ -4,20 +4,18 @@ package acp
 import (
 	"context"
 	"fmt"
-	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 
 	acpsdk "github.com/coder/acp-go-sdk"
-	"github.com/kfet/fir/pkg/auth"
 	"github.com/kfet/fir/pkg/mcp"
 	"github.com/kfet/fir/pkg/resources"
 	"github.com/kfet/fir/pkg/session"
 	"github.com/kfet/fir/pkg/session/store"
+	"github.com/kfet/fir/pkg/slashcmd"
+	"github.com/kfet/fir/pkg/slashcmd/builtin"
 	"github.com/kfet/pinoauth"
 )
 
@@ -25,14 +23,9 @@ import (
 // Command infrastructure
 // ============================================================================
 
-// slashCommand represents a registered slash command.
-type slashCommand struct {
-	Name        string
-	Description string
-	Handler     func(ctx *commandContext, args string)
-}
-
-// commandContext bundles everything a command handler needs.
+// commandContext is the ACP host environment passed to every slash-command
+// handler as slashcmd.Ctx.Host. It implements builtin.Host for the shared
+// handlers and slashcmd.Output for user feedback.
 type commandContext struct {
 	sessionID string
 	entry     *firSession
@@ -44,47 +37,91 @@ func (c *commandContext) sendMessage(msg string) {
 	c.agent.sendAgentMessage(c.sessionID, msg)
 }
 
-// commandRegistry maps command names to handlers.
-type commandRegistry struct {
-	commands map[string]slashCommand
-	order    []string
+// slashcmd.Output — ACP renders every kind of feedback as an agent message.
+func (c *commandContext) Message(text string) { c.sendMessage(text) }
+func (c *commandContext) Status(text string)  { c.sendMessage(text) }
+func (c *commandContext) Warn(text string)    { c.sendMessage(text) }
+func (c *commandContext) Code(text string)    { c.sendMessage("```\n" + text + "\n```") }
+
+// LoginCallbacks reports the auth URL and progress as agent messages. ACP has
+// no input channel during a command, so prompts take their default.
+func (c *commandContext) LoginCallbacks() pinoauth.LoginCallbacks {
+	return pinoauth.LoginCallbacks{
+		OnAuth: func(info pinoauth.AuthInfo) {
+			msg := fmt.Sprintf("Open this URL to authenticate:\n%s", session.FormatAuthURLs(info.URL, info.ShortURL))
+			if info.Instructions != "" {
+				msg += "\n\n" + info.Instructions
+			}
+			c.sendMessage(msg)
+		},
+		OnProgress: func(message string) { c.sendMessage(message) },
+		OnPrompt: func(prompt pinoauth.Prompt) (string, error) {
+			c.sendMessage(prompt.Message + " (using default)")
+			return "", nil
+		},
+	}
 }
 
-func newCommandRegistry() *commandRegistry {
-	r := &commandRegistry{commands: make(map[string]slashCommand)}
-	r.register(slashCommand{"compact", "Compact the session history to save tokens", cmdCompact})
-	r.register(slashCommand{"resume", "List or resume a session (usage: /resume [number|path] [--at <entry-id>])", cmdResume})
-	r.register(slashCommand{"continue", "Continue the most recent session", cmdContinue})
-	r.register(slashCommand{"name", "Rename the current session (usage: /name <new name>)", cmdName})
-	r.register(slashCommand{"session", "Show session statistics", cmdSession})
-	r.register(slashCommand{"sections", "Show the persistent extension sections fir injects", cmdSections})
-	r.register(slashCommand{"changelog", "Show recent changelog (args: N or all)", cmdChangelog})
-	r.register(slashCommand{"share", "Share session as a secret GitHub Gist with a preview link", cmdShare})
-	r.register(slashCommand{"export", "Export session to an HTML file (usage: /export [path])", cmdExport})
-	r.register(slashCommand{"login", "Login with OAuth provider (usage: /login [provider-id])", cmdLogin})
-	r.register(slashCommand{"logout", "Log out from provider (usage: /logout [provider-id|all])", cmdLogout})
-	r.register(slashCommand{"reload", "Reload extensions, skills, themes, MCP servers, and provider auth", cmdReload})
-	r.register(slashCommand{"skills", "List loaded skills (/skills <name> for details, /skills install <name> to install)", cmdSkills})
-	r.register(slashCommand{"mcp", "Show MCP servers summary; /mcp <name> for details; /mcp reload to reload configs; /mcp login <server> / /mcp logout <server> for OAuth", cmdMCP})
+// builtin.Host.
+func (c *commandContext) Cwd() string { return c.entry.cwd }
+
+func (c *commandContext) Session() builtin.Session {
+	if c.entry.session == nil {
+		return nil
+	}
+	return builtin.NewSession(c.entry.session)
+}
+
+func (c *commandContext) Auth() builtin.Auth {
+	if c.entry.modelRegistry == nil || c.entry.modelRegistry.AuthStorage() == nil {
+		return nil
+	}
+	reg := c.entry.modelRegistry
+	return builtin.NewAuthStorage(reg.AuthStorage(), reg.Refresh)
+}
+
+func (c *commandContext) MCP() builtin.MCP {
+	entry := c.entry
+	return builtin.ManagerMCP(
+		func() *mcp.Manager { return entry.mcpManager },
+		func(ctx context.Context) error {
+			err := session.ReloadMCP(ctx, &entry.mcpManager, entry.session, entry.cwd, c.agent.options.MCPConfig, nil)
+			entry.mcpStatus = mcp.StatusFunc(entry.mcpManager)
+			return err
+		},
+	)
+}
+
+// acpOnly adapts an ACP-specific handler to slashcmd.Handler.
+func acpOnly(fn func(ctx *commandContext, args string)) slashcmd.Handler {
+	return func(c *slashcmd.Ctx, args string) { fn(c.Host.(*commandContext), args) }
+}
+
+// newCommandRegistry binds the shared builtin handlers plus the ACP-specific
+// ones. Every command declared for ACP in slashcmd.Specs must be bound here;
+// TestCommandParity enforces it.
+func newCommandRegistry() *slashcmd.Registry {
+	r := slashcmd.NewRegistry(slashcmd.ACP)
+	builtin.Register(r)
+	r.Bind("help", acpOnly(cmdHelp))
+	r.Bind("compact", acpOnly(cmdCompact))
+	r.Bind("resume", acpOnly(cmdResume))
+	r.Bind("continue", acpOnly(cmdContinue))
+	r.Bind("session", acpOnly(cmdSession))
+	r.Bind("changelog", acpOnly(cmdChangelog))
+	r.Bind("reload", acpOnly(cmdReload))
 	return r
 }
 
-func (r *commandRegistry) register(cmd slashCommand) {
-	r.commands[cmd.Name] = cmd
-	r.order = append(r.order, cmd.Name)
-}
+// CommandRegistry returns the ACP slash-command registry (for parity tests).
+func CommandRegistry() *slashcmd.Registry { return newCommandRegistry() }
 
-func (r *commandRegistry) lookup(name string) (slashCommand, bool) {
-	cmd, ok := r.commands[name]
-	return cmd, ok
-}
-
-// availableCommands returns the ACP command list from the registry.
-func (r *commandRegistry) availableCommands() []acpsdk.AvailableCommand {
-	cmds := make([]acpsdk.AvailableCommand, 0, len(r.order))
-	for _, name := range r.order {
-		cmd := r.commands[name]
-		cmds = append(cmds, acpsdk.AvailableCommand{Name: cmd.Name, Description: cmd.Description})
+// availableCommands returns the ACP command list from the shared registry.
+func availableCommands() []acpsdk.AvailableCommand {
+	specs := slashcmd.ForMode(slashcmd.ACP)
+	cmds := make([]acpsdk.AvailableCommand, 0, len(specs))
+	for _, s := range specs {
+		cmds = append(cmds, acpsdk.AvailableCommand{Name: s.Name, Description: s.FullDescription(slashcmd.ACP)})
 	}
 	return cmds
 }
@@ -103,8 +140,7 @@ func (pa *firAgent) handleSlashCommand(sessionID string, entry *firSession, comm
 	}
 
 	// 1. Built-in commands.
-	if cmd, ok := cmds.lookup(command); ok {
-		cmd.Handler(ctx, args)
+	if cmds.Dispatch(&slashcmd.Ctx{Out: ctx, Host: ctx}, command, args) {
 		return true
 	}
 
@@ -219,19 +255,6 @@ func cmdContinue(ctx *commandContext, _ string) {
 	ctx.agent.replaySessionHistory(ctx.sessionID, entry)
 }
 
-func cmdName(ctx *commandContext, args string) {
-	if args == "" {
-		ctx.sendMessage("Usage: /name <new name>")
-		return
-	}
-	ctx.entry.session.SessionStore.AppendSessionInfo(args)
-	ctx.sendMessage(fmt.Sprintf("Session renamed to: %s", args))
-}
-
-func cmdSections(ctx *commandContext, _ string) {
-	ctx.sendMessage("```\n" + ctx.entry.session.Sections().Format() + "\n```")
-}
-
 func cmdSession(ctx *commandContext, _ string) {
 	entry := ctx.entry
 	stats := entry.session.GetSessionStats()
@@ -326,6 +349,10 @@ func cmdSession(ctx *commandContext, _ string) {
 	ctx.sendMessage(info)
 }
 
+func cmdHelp(ctx *commandContext, _ string) {
+	ctx.sendMessage(slashcmd.HelpText(slashcmd.ACP))
+}
+
 func cmdChangelog(ctx *commandContext, args string) {
 	entries := session.GetChangelogEntries()
 	if len(entries) == 0 {
@@ -346,140 +373,6 @@ func cmdChangelog(ctx *commandContext, args string) {
 		msg += "\n\n*" + footer + "*"
 	}
 	ctx.sendMessage(msg)
-}
-
-func cmdShare(ctx *commandContext, _ string) {
-	go ctx.agent.performShare(ctx.sessionID, ctx.entry)
-}
-
-func cmdExport(ctx *commandContext, args string) {
-	go func() {
-		filePath, err := ctx.entry.session.ExportToHTML(args)
-		if err != nil {
-			ctx.sendMessage(fmt.Sprintf("Failed to export session: %v", err))
-			return
-		}
-		ctx.sendMessage(fmt.Sprintf("Session exported to: %s", filePath))
-	}()
-}
-
-func cmdLogin(ctx *commandContext, args string) {
-	entry := ctx.entry
-	authStorage := entry.modelRegistry.AuthStorage()
-	providers := authStorage.GetOAuthProviders()
-	if len(providers) == 0 {
-		ctx.sendMessage("No OAuth providers available.")
-		return
-	}
-
-	if args == "" {
-		var lines []string
-		for _, p := range providers {
-			lines = append(lines, "- "+p.ID())
-		}
-		ctx.sendMessage(fmt.Sprintf("Available OAuth providers:\n%s\n\nTo login, run: /login <provider-id>", strings.Join(lines, "\n")))
-		return
-	}
-
-	if !providerIDRegex.MatchString(args) {
-		ctx.sendMessage(fmt.Sprintf("Invalid provider ID: %s", args))
-		return
-	}
-
-	var found bool
-	for _, p := range providers {
-		if p.ID() == args {
-			found = true
-			break
-		}
-	}
-	if !found {
-		ctx.sendMessage(fmt.Sprintf("Provider not found: %s", args))
-		return
-	}
-
-	loginCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
-
-	err := authStorage.Login(loginCtx, args, pinoauth.LoginCallbacks{
-		OnAuth: func(info pinoauth.AuthInfo) {
-			formatted := session.FormatAuthURLs(info.URL, info.ShortURL)
-			msg := fmt.Sprintf("Open this URL to authenticate:\n%s", formatted)
-			if info.Instructions != "" {
-				msg += "\n\n" + info.Instructions
-			}
-			ctx.sendMessage(msg)
-		},
-		OnProgress: func(message string) {
-			ctx.sendMessage(message)
-		},
-		OnPrompt: func(prompt pinoauth.Prompt) (string, error) {
-			ctx.sendMessage(prompt.Message + " (using default)")
-			return "", nil
-		},
-	})
-	if err != nil {
-		if loginCtx.Err() != nil {
-			ctx.sendMessage("Login timed out after 5 minutes.")
-		} else {
-			ctx.sendMessage(fmt.Sprintf("Login failed: %v", err))
-		}
-		return
-	}
-	entry.modelRegistry.Refresh()
-	ctx.sendMessage(fmt.Sprintf("Successfully logged in to %s.", args))
-}
-
-func cmdLogout(ctx *commandContext, args string) {
-	entry := ctx.entry
-	authStorage := entry.modelRegistry.AuthStorage()
-	creds := authStorage.GetAll()
-	loggedIn := make([]string, 0, len(creds))
-	for k := range creds {
-		if auth.IsMCPKey(k) {
-			continue // MCP server tokens are not provider accounts
-		}
-		loggedIn = append(loggedIn, k)
-	}
-	sort.Strings(loggedIn)
-
-	if len(loggedIn) == 0 {
-		ctx.sendMessage("No providers currently logged in.")
-		return
-	}
-
-	if args == "" {
-		var lines []string
-		for _, p := range loggedIn {
-			lines = append(lines, "- "+p)
-		}
-		ctx.sendMessage(fmt.Sprintf("Logged in providers:\n%s\n\nTo logout: /logout <provider-id> or /logout all", strings.Join(lines, "\n")))
-	} else if args == "all" {
-		for _, p := range loggedIn {
-			authStorage.Logout(p)
-		}
-		entry.modelRegistry.Refresh()
-		ctx.sendMessage("Logged out from all providers.")
-	} else {
-		if !providerIDRegex.MatchString(args) {
-			ctx.sendMessage(fmt.Sprintf("Invalid provider ID: %s", args))
-			return
-		}
-		found := false
-		for _, p := range loggedIn {
-			if p == args {
-				found = true
-				break
-			}
-		}
-		if !found {
-			ctx.sendMessage(fmt.Sprintf("Provider not logged in: %s", args))
-			return
-		}
-		authStorage.Logout(args)
-		entry.modelRegistry.Refresh()
-		ctx.sendMessage(fmt.Sprintf("Logged out from %s.", args))
-	}
 }
 
 func cmdReload(ctx *commandContext, _ string) {
@@ -509,338 +402,6 @@ func cmdReload(ctx *commandContext, _ string) {
 	}
 	ctx.agent.sendAvailableCommands(ctx.sessionID)
 	ctx.sendMessage("Reload completed successfully.")
-}
-
-func cmdSkills(ctx *commandContext, args string) {
-	parts := strings.Fields(args)
-	if len(parts) == 0 || parts[0] == "list" {
-		cmdSkillsList(ctx)
-		return
-	}
-	if parts[0] == "install" {
-		if len(parts) < 2 {
-			ctx.sendMessage("Usage: /skills install <name> [--user] [--force]")
-			return
-		}
-		cmdSkillsInstall(ctx, parts[1:])
-		return
-	}
-	// Otherwise treat the arg as a loaded-skill name and show its details.
-	cmdSkillDetail(ctx, parts[0])
-}
-
-func cmdSkillDetail(ctx *commandContext, name string) {
-	skills, _ := ctx.entry.session.ResourceLoader().GetSkills()
-	for _, s := range skills {
-		if s.Name == name {
-			ctx.sendMessage(fmt.Sprintf(
-				"Name:        %s\nSource:      %s\nLocation:    %s\nDescription: %s",
-				s.Name, resources.DisplayOrigin(s), s.FilePath, s.Description,
-			))
-			return
-		}
-	}
-	ctx.sendMessage(fmt.Sprintf("Unknown skills subcommand or skill: %s. Usage: /skills [list | install <name> [--user] [--force] | <name>]", name))
-}
-
-func cmdSkillsList(ctx *commandContext) {
-	skills, _ := ctx.entry.session.ResourceLoader().GetSkills()
-	if len(skills) == 0 {
-		ctx.sendMessage("No skills loaded.")
-		return
-	}
-	sorted := make([]resources.Skill, len(skills))
-	copy(sorted, skills)
-	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Name < sorted[j].Name })
-
-	var sb strings.Builder
-	sb.WriteString("| Name | Source | Description |\n")
-	sb.WriteString("|------|--------|-------------|\n")
-	for _, s := range sorted {
-		sb.WriteString(fmt.Sprintf("| %s | %s | %s |\n", s.Name, resources.DisplayOrigin(s), s.Description))
-	}
-	ctx.sendMessage(strings.TrimRight(sb.String(), "\n"))
-}
-
-func cmdSkillsInstall(ctx *commandContext, parts []string) {
-	name := parts[0]
-	var toUser, force bool
-	for _, p := range parts[1:] {
-		switch p {
-		case "--user":
-			toUser = true
-		case "--force":
-			force = true
-		}
-	}
-
-	builtins := resources.LoadBuiltinSkills()
-	var found bool
-	for _, s := range builtins.Skills {
-		if s.Name == name {
-			found = true
-			break
-		}
-	}
-	if !found {
-		available := make([]string, 0, len(builtins.Skills))
-		for _, s := range builtins.Skills {
-			available = append(available, s.Name)
-		}
-		sort.Strings(available)
-		ctx.sendMessage(fmt.Sprintf("Unknown builtin skill %q. Available: %s", name, strings.Join(available, ", ")))
-		return
-	}
-
-	var targetDir string
-	if toUser {
-		home, _ := os.UserHomeDir()
-		targetDir = filepath.Join(home, ".fir", "agent", "skills", name)
-	} else {
-		targetDir = filepath.Join(ctx.entry.cwd, ".fir", "skills", name)
-	}
-
-	if _, err := os.Stat(targetDir); err == nil && !force {
-		ctx.sendMessage(fmt.Sprintf("Skill %q already exists at %s. Use --force to overwrite.", name, targetDir))
-		return
-	}
-
-	prefix := "builtin_skills/" + name
-	err := fs.WalkDir(resources.BuiltinSkillsFS, prefix, func(path string, d fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		rel := strings.TrimPrefix(path, prefix)
-		if rel == "" {
-			return nil
-		}
-		dest := filepath.Join(targetDir, rel)
-		if d.IsDir() {
-			return os.MkdirAll(dest, 0o755)
-		}
-		data, err := fs.ReadFile(resources.BuiltinSkillsFS, path)
-		if err != nil {
-			return err
-		}
-		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
-			return err
-		}
-		return os.WriteFile(dest, data, 0o644)
-	})
-	if err != nil {
-		ctx.sendMessage(fmt.Sprintf("Failed to install skill: %v", err))
-		return
-	}
-	ctx.sendMessage(fmt.Sprintf("Installed skill %q to %s", name, targetDir))
-}
-
-func cmdMCP(ctx *commandContext, args string) {
-	entry := ctx.entry
-	serverName := strings.TrimSpace(args)
-
-	// Handle /mcp reload: targeted MCP-only reload.
-	if serverName == "reload" {
-		cmdMCPReload(ctx)
-		return
-	}
-
-	// Handle /mcp login <server> and /mcp logout <server>.
-	if sub, rest, _ := strings.Cut(serverName, " "); sub == "login" || sub == "logout" {
-		rest = strings.TrimSpace(rest)
-		if sub == "login" {
-			cmdMCPLogin(ctx, rest)
-		} else {
-			cmdMCPLogout(ctx, rest)
-		}
-		return
-	}
-
-	if entry.mcpManager == nil {
-		ctx.sendMessage("No MCP servers configured.")
-		return
-	}
-	details := entry.mcpManager.Details()
-	if len(details) == 0 {
-		ctx.sendMessage("No MCP servers configured.")
-		return
-	}
-
-	// If a server name is given, show full details for that server.
-	if serverName != "" {
-		var found *mcp.ServerDetail
-		for i := range details {
-			if details[i].Name == serverName {
-				found = &details[i]
-				break
-			}
-		}
-		if found == nil {
-			ctx.sendMessage(fmt.Sprintf("MCP server %q not found.", serverName))
-			return
-		}
-		d := found
-		var sb strings.Builder
-		sb.WriteString(fmt.Sprintf("### %s (%s)\n\n", d.Name, d.Status))
-		if d.Error != "" {
-			sb.WriteString(fmt.Sprintf("- **Error:** %s\n", d.Error))
-		}
-		transport := d.Config.Transport
-		if transport == "" {
-			transport = "stdio"
-		}
-		sb.WriteString(fmt.Sprintf("- **Transport:** %s\n", transport))
-		if d.Config.Command != "" {
-			cmd := d.Config.Command
-			if len(d.Config.Args) > 0 {
-				cmd += " " + strings.Join(d.Config.Args, " ")
-			}
-			sb.WriteString(fmt.Sprintf("- **Command:** `%s`\n", cmd))
-		}
-		if d.Config.URL != "" {
-			sb.WriteString(fmt.Sprintf("- **URL:** %s\n", d.Config.URL))
-		}
-		var caps []string
-		if d.HasResources {
-			caps = append(caps, "resources")
-		}
-		if d.HasPrompts {
-			caps = append(caps, "prompts")
-		}
-		if len(caps) > 0 {
-			sb.WriteString(fmt.Sprintf("- **Capabilities:** %s\n", strings.Join(caps, ", ")))
-		}
-		if len(d.Tools) > 0 {
-			sb.WriteString(fmt.Sprintf("\n**Tools (%d):**\n\n", len(d.Tools)))
-			for _, tool := range d.Tools {
-				if tool.Description != "" {
-					sb.WriteString(fmt.Sprintf("- `%s` — %s\n", tool.Name, tool.Description))
-				} else {
-					sb.WriteString(fmt.Sprintf("- `%s`\n", tool.Name))
-				}
-			}
-		} else {
-			sb.WriteString("- **Tools:** none\n")
-		}
-		ctx.sendMessage(strings.TrimRight(sb.String(), "\n"))
-		return
-	}
-
-	// Summary view: no full tool list.
-	var sb strings.Builder
-	sb.WriteString("**MCP Servers**\n\n")
-	for _, d := range details {
-		transport := d.Config.Transport
-		if transport == "" {
-			transport = "stdio"
-		}
-		sb.WriteString(fmt.Sprintf("- **%s** (%s) — %s, %d tools", d.Name, d.Status, transport, len(d.Tools)))
-		if d.Error != "" {
-			sb.WriteString(fmt.Sprintf(" — error: %s", d.Error))
-		}
-		sb.WriteString("\n")
-	}
-	sb.WriteString("\nUse `/mcp <server-name>` to see full tool details.")
-	ctx.sendMessage(sb.String())
-}
-
-// cmdMCPLogin runs the OAuth login flow for one remote MCP server. It is the
-// ACP counterpart of the interactive `/mcp login <server>`.
-func cmdMCPLogin(ctx *commandContext, serverName string) {
-	if serverName == "" {
-		ctx.sendMessage("Usage: /mcp login <server>")
-		return
-	}
-	if ctx.entry.mcpManager == nil {
-		ctx.sendMessage("No MCP servers configured.")
-		return
-	}
-	loginCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
-	err := ctx.entry.mcpManager.LoginServer(loginCtx, serverName, pinoauth.LoginCallbacks{
-		OnAuth: func(info pinoauth.AuthInfo) {
-			msg := fmt.Sprintf("Open this URL to authenticate:\n%s", session.FormatAuthURLs(info.URL, info.ShortURL))
-			if info.Instructions != "" {
-				msg += "\n\n" + info.Instructions
-			}
-			ctx.sendMessage(msg)
-		},
-		OnProgress: func(message string) {
-			ctx.sendMessage(message)
-		},
-		OnPrompt: func(prompt pinoauth.Prompt) (string, error) {
-			ctx.sendMessage(prompt.Message + " (using default)")
-			return "", nil
-		},
-	})
-	if err != nil {
-		if loginCtx.Err() != nil {
-			ctx.sendMessage("MCP login timed out after 5 minutes.")
-		} else {
-			ctx.sendMessage(fmt.Sprintf("MCP login failed: %v", err))
-		}
-		return
-	}
-	ctx.sendMessage(fmt.Sprintf("Logged in to MCP server %q. Credentials saved.", serverName))
-}
-
-// cmdMCPLogout removes stored OAuth credentials for one MCP server.
-func cmdMCPLogout(ctx *commandContext, serverName string) {
-	if serverName == "" {
-		ctx.sendMessage("Usage: /mcp logout <server>")
-		return
-	}
-	if ctx.entry.mcpManager == nil {
-		ctx.sendMessage("No MCP servers configured.")
-		return
-	}
-	if err := ctx.entry.mcpManager.LogoutServer(serverName); err != nil {
-		ctx.sendMessage(fmt.Sprintf("MCP logout failed: %v", err))
-		return
-	}
-	ctx.sendMessage(fmt.Sprintf("Removed stored credentials for MCP server %q.", serverName))
-}
-
-// cmdMCPReload performs an MCP-only reload: re-reads mcp.json and mcp.d/ from disk
-// and surfaces any collisions or errors without triggering a full session reload.
-func cmdMCPReload(ctx *commandContext) {
-	entry := ctx.entry
-	if entry.session == nil {
-		ctx.sendMessage("No session available.")
-		return
-	}
-
-	// Load config with collision reporting.
-	_, collisions, loadErr := mcp.LoadDefaultConfigsReport(entry.cwd)
-	var loadErrMsg string
-	if loadErr != nil {
-		loadErrMsg = loadErr.Error()
-	}
-
-	// Perform the actual reload.
-	reloadErr := session.ReloadMCP(context.Background(), &entry.mcpManager, entry.session, entry.cwd, ctx.agent.options.MCPConfig, nil)
-	entry.mcpStatus = mcp.StatusFunc(entry.mcpManager)
-
-	// Build response message.
-	var sb strings.Builder
-	if reloadErr != nil {
-		sb.WriteString(fmt.Sprintf("MCP reload failed: %v\n", reloadErr))
-	} else if loadErrMsg != "" {
-		sb.WriteString(fmt.Sprintf("MCP config warning: %s\n", loadErrMsg))
-		sb.WriteString("MCP servers reloaded.\n")
-	} else {
-		sb.WriteString("MCP servers reloaded successfully.\n")
-	}
-
-	// Report collisions if any.
-	if len(collisions) > 0 {
-		sb.WriteString("\n**Collisions detected:**\n")
-		for _, c := range collisions {
-			sb.WriteString(fmt.Sprintf("- `%s` — loaded from `%s`, shadows `%s`\n",
-				c.Server, c.WonFile, strings.Join(c.ShadowedFiles, ", ")))
-		}
-	}
-
-	ctx.sendMessage(strings.TrimRight(sb.String(), "\n"))
 }
 
 // ============================================================================
@@ -912,48 +473,4 @@ func splitAtFlag(args string) (rest, at string) {
 		keep = append(keep, fields[i])
 	}
 	return strings.Join(keep, " "), at
-}
-
-// performShare creates a secret GitHub Gist from the session HTML export and
-// sends back both the raw gist URL and a gistpreview.github.io preview link.
-func (pa *firAgent) performShare(sessionID string, entry *firSession) {
-	// Verify gh CLI is installed and authenticated.
-	if err := exec.Command("gh", "auth", "status").Run(); err != nil {
-		if isNotFound(err) {
-			pa.sendAgentMessage(sessionID, "GitHub CLI (gh) is not installed. Install it from https://cli.github.com/")
-		} else {
-			pa.sendAgentMessage(sessionID, "GitHub CLI is not logged in. Run 'gh auth login' first.")
-		}
-		return
-	}
-
-	// Export session to a temp HTML file.
-	tmpPath, err := entry.session.ExportToHTML("")
-	if err != nil {
-		pa.sendAgentMessage(sessionID, fmt.Sprintf("Failed to export session: %v", err))
-		return
-	}
-	defer os.Remove(tmpPath)
-
-	out, err := exec.Command("gh", "gist", "create", "--public=false", tmpPath).Output()
-	if err != nil {
-		pa.sendAgentMessage(sessionID, "Failed to create gist. Check that 'gh' is installed and authenticated.")
-		return
-	}
-
-	gistURL := strings.TrimSpace(string(out))
-	if gistURL == "" {
-		pa.sendAgentMessage(sessionID, "Gist created but no URL returned.")
-		return
-	}
-
-	// Extract the gist ID — last path component of the URL.
-	gistID := gistURL[strings.LastIndex(gistURL, "/")+1:]
-	if !gistIDRegex.MatchString(gistID) {
-		pa.sendAgentMessage(sessionID, fmt.Sprintf("Gist created but could not parse ID from URL: %s", gistURL))
-		return
-	}
-
-	previewURL := "https://gistpreview.github.io/?" + gistID
-	pa.sendAgentMessage(sessionID, fmt.Sprintf("Session shared (secret gist):\nGist: %s\nPreview: %s", gistURL, previewURL))
 }

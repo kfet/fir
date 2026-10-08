@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kfet/fir/pkg/resources"
+	"github.com/kfet/fir/pkg/slashcmd"
 )
 
 // TestCompletionScripts_CoverAllFlagsAndSubcommands is a build-time guard that
@@ -207,12 +207,13 @@ var errParseRange = errors.New("could not locate ParseArgs..PrintHelp range in a
 
 // TestCompletionScripts_SlashCommandsInSync guards the hardcoded slash command
 // lists in the completion scripts against drift from
-// resources.BuiltinSlashCommands (the single source of truth). The scripts are
+// slashcmd.Specs (the single source of truth) for the TUI, which is where
+// `fir /<command>` runs. The scripts are
 // static files, so the list cannot be generated at completion time without
 // shelling out to fir on every TAB.
 func TestCompletionScripts_SlashCommandsInSync(t *testing.T) {
-	want := make([]string, 0, len(resources.BuiltinSlashCommands))
-	for _, cmd := range resources.BuiltinSlashCommands {
+	var want []string
+	for _, cmd := range slashcmd.ForMode(slashcmd.TUI) {
 		want = append(want, cmd.Name)
 	}
 	sort.Strings(want)

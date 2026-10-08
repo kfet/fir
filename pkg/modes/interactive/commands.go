@@ -5,14 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/kfet/agent"
@@ -27,6 +25,7 @@ import (
 	"github.com/kfet/fir/pkg/session"
 	"github.com/kfet/fir/pkg/session/reexec"
 	"github.com/kfet/fir/pkg/session/store"
+	"github.com/kfet/fir/pkg/slashcmd"
 	tuicomp "github.com/kfet/fir/pkg/tui/components"
 	"github.com/kfet/fir/pkg/update"
 )
@@ -47,7 +46,7 @@ func (m *InteractiveMode) isBuiltinSlashCommand(text string) bool {
 	if !strings.HasPrefix(cmd, "/") {
 		return false
 	}
-	if resources.IsBuiltinSlashCommandName(cmd[1:]) {
+	if spec, ok := slashcmd.Lookup(cmd[1:]); ok && spec.Available(slashcmd.TUI) {
 		return true
 	}
 	return false
@@ -230,9 +229,7 @@ func (m *InteractiveMode) handleExtensionSlashCommand(text string) {
 }
 
 // handleSlashCommand dispatches a builtin slash command.
-// Every case in the switch below must have a corresponding entry in
-// resources.BuiltinSlashCommands (or builtinAliases for hidden aliases);
-// TestInteractiveMode_IsBuiltinSlashCommand enforces this.
+// Commands are declared in slashcmd.Specs and bound in newCommandRegistry.
 func (m *InteractiveMode) handleSlashCommand(text string) {
 	parts := strings.Fields(text)
 	if len(parts) == 0 {
@@ -258,91 +255,7 @@ func (m *InteractiveMode) handleSlashCommand(text string) {
 		}
 	}
 
-	switch cmd {
-	case "/help":
-		m.toggleHelpVisibility()
-	case "/new":
-		var initialPrompt string
-		if len(parts) > 1 {
-			initialPrompt = strings.Join(parts[1:], " ")
-		}
-		go m.handleClearCommand(initialPrompt, "")
-	case "/compact":
-		var instructions string
-		if len(parts) > 1 {
-			instructions = strings.Join(parts[1:], " ")
-		}
-		go m.handleCompactCommand(instructions)
-	case "/model":
-		var searchTerm string
-		if len(parts) > 1 {
-			searchTerm = strings.Join(parts[1:], " ")
-		}
-		m.showModelSelector(searchTerm)
-	case "/thinking":
-		m.showThinkingSelector()
-	case "/theme":
-		m.showThemeSelector()
-	case "/settings":
-		m.showSettingsSelector()
-	case "/session":
-		m.handleSessionCommand()
-	case "/resume":
-		m.showSessionSelector()
-	case "/login":
-		m.showOAuthSelector("login")
-	case "/logout":
-		m.showOAuthSelector("logout")
-	case "/tree":
-		m.showTreeSelector()
-	case "/export":
-		m.handleExportCommand(text)
-	case "/share":
-		m.handleShareCommand()
-	case "/name":
-		m.handleNameCommand(text)
-	case "/changelog":
-		m.handleChangelogCommand(strings.Join(parts[1:], " "))
-	case "/reload":
-		m.handleReloadCommand()
-	case "/skills":
-		m.handleSkillsCommand(parts[1:])
-	case "/reexec":
-		m.handleReexecCommand(text)
-	case "/update":
-		go m.handleUpdateCommand()
-	case "/queue":
-		m.handleQueueCommand()
-	case "/dequeue":
-		var arg string
-		if len(parts) > 1 {
-			arg = parts[1]
-		}
-		m.handleDequeueCommand(arg)
-	case "/quit", "/exit":
-		m.Shutdown()
-	case "/plan":
-		m.handlePlanCommand()
-	case "/sections":
-		m.handleSectionsCommand()
-	case "/mcp":
-		if len(parts) > 1 {
-			switch parts[1] {
-			case "reload":
-				m.handleMCPReloadCommand()
-			case "login":
-				m.handleMCPLoginCommand(strings.Join(parts[2:], " "))
-			case "logout":
-				m.handleMCPLogoutCommand(strings.Join(parts[2:], " "))
-			default:
-				m.handleMCPDetailCommand(parts[1])
-			}
-		} else {
-			m.handleMCPCommand()
-		}
-	default:
-		// Not a builtin command.
-		// Check if it's a skill command before declaring unknown.
+	if !tuiCommands.Dispatch(m.cmdCtx(), strings.TrimPrefix(cmd, "/"), strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(text), cmd))) {
 		m.showWarning(fmt.Sprintf("Unknown command: %s. Type /help for available commands.", cmd))
 	}
 }
@@ -604,14 +517,6 @@ func (m *InteractiveMode) handleQueueCommand() {
 	m.showStatus(strings.TrimRight(sb.String(), "\n"))
 }
 
-// handleSectionsCommand shows what fir injects from extension sections.
-func (m *InteractiveMode) handleSectionsCommand() {
-	if m.session == nil {
-		return
-	}
-	m.showStatus(m.session.Sections().Format())
-}
-
 // handleDequeueCommand is the slash-command version of handleDequeue.
 // With no arg it behaves identically to Alt+Up (dequeue all).
 // With a numeric arg it removes only that 1-based item and restores it to the editor.
@@ -864,122 +769,6 @@ func extractEntryText(entry *store.SessionEntry) string {
 	}
 
 	return fmt.Sprintf("[%s message]", msg.Role)
-}
-
-func (m *InteractiveMode) handleExportCommand(text string) {
-	if m.session == nil {
-		m.showWarning("No session available")
-		return
-	}
-	// Parse optional output path: /export [path]
-	var outputPath string
-	parts := strings.Fields(text)
-	if len(parts) >= 2 {
-		outputPath = parts[1]
-	}
-	go func() {
-		filePath, err := m.session.ExportToHTML(outputPath)
-		if err != nil {
-			m.showWarning(fmt.Sprintf("Failed to export session: %s", err))
-			return
-		}
-		m.showStatus(fmt.Sprintf("Session exported to: %s", filePath))
-	}()
-}
-
-func (m *InteractiveMode) handleShareCommand() {
-	if m.session == nil {
-		m.showWarning("No session available")
-		return
-	}
-	go m.performShare()
-}
-
-func (m *InteractiveMode) performShare() {
-	// Check that gh CLI is available and authenticated.
-	if err := exec.Command("gh", "auth", "status").Run(); err != nil {
-		m.showWarning("GitHub CLI is not logged in. Run 'gh auth login' first.")
-		return
-	}
-
-	// Export to a temp file.
-	tmpPath, err := m.session.ExportToHTML("")
-	if err != nil {
-		m.showWarning(fmt.Sprintf("Failed to export session: %s", err))
-		return
-	}
-	defer os.Remove(tmpPath)
-
-	// Show a loader in the editor container while the gist is being created.
-	t := itheme.GetTheme()
-	loader := components.NewBorderedLoader(
-		m.ui.AsRenderRequester(),
-		t,
-		"Creating gist...",
-		nil,
-	)
-
-	var procPtr atomic.Pointer[exec.Cmd]
-	loader.SetOnAbort(func() {
-		if p := procPtr.Load(); p != nil && p.Process != nil {
-			_ = p.Process.Kill()
-		}
-		m.editorContainer.Clear()
-		m.editorContainer.AddChild(m.editor)
-		m.ui.SetFocus(m.editor)
-		m.ui.RequestRender(false)
-		m.showStatus("Share cancelled")
-	})
-
-	m.editorContainer.Clear()
-	m.editorContainer.AddChild(loader)
-	m.ui.SetFocus(loader)
-	m.ui.RequestRender(true)
-
-	restoreEditor := func() {
-		loader.Dispose()
-		m.editorContainer.Clear()
-		m.editorContainer.AddChild(m.editor)
-		m.ui.SetFocus(m.editor)
-		m.ui.RequestRender(false)
-	}
-
-	cmd := exec.Command("gh", "gist", "create", "--public=false", tmpPath)
-	procPtr.Store(cmd)
-	out, err := cmd.Output()
-	restoreEditor()
-	if err != nil {
-		m.showWarning("Failed to create gist. Check that 'gh' is installed and authenticated.")
-		return
-	}
-	gistURL := strings.TrimSpace(string(out))
-	if gistURL == "" {
-		m.showWarning("Gist created but no URL returned")
-		return
-	}
-	link := session.Hyperlink(gistURL, gistURL)
-	m.showStatus(fmt.Sprintf("Session shared: %s", link))
-}
-
-func (m *InteractiveMode) handleNameCommand(text string) {
-	if m.session == nil {
-		m.showWarning("No session available")
-		return
-	}
-	name := strings.TrimSpace(strings.TrimPrefix(text, "/name"))
-	if name == "" {
-		currentName := m.session.SessionStore.GetSessionName()
-		if currentName != "" {
-			t := itheme.GetTheme()
-			m.showMessage(t.Fg("dim", "Session name: "+currentName))
-		} else {
-			m.showWarning("Usage: /name <name>")
-		}
-		return
-	}
-	m.session.SetSessionName(name)
-	t := itheme.GetTheme()
-	m.showMessage(t.Fg("dim", "Session name set: "+name))
 }
 
 func (m *InteractiveMode) handleSessionCommand() {
@@ -1291,215 +1080,6 @@ func (m *InteractiveMode) handleReloadCommand() {
 		}
 	}
 	m.showStatus(status)
-}
-
-// handleMCPReloadCommand performs an MCP-only reload without the full session reload.
-func (m *InteractiveMode) handleMCPReloadCommand() {
-	if m.session == nil {
-		m.showWarning("No session available")
-		return
-	}
-	if m.session.IsStreaming() {
-		m.showWarning("Wait for the current response to finish before reloading.")
-		return
-	}
-	if m.mcpReload == nil {
-		m.showWarning("MCP reload not available")
-		return
-	}
-
-	if err := m.mcpReload(); err != nil {
-		m.showWarning(fmt.Sprintf("MCP reload failed: %v", err))
-		return
-	}
-	m.showStatus("MCP servers reloaded")
-}
-
-// handleMCPLoginCommand runs the OAuth login flow for one remote MCP server.
-//
-// This is the interactive counterpart of `fir mcp login <server>`. fir never
-// starts a login on its own: MCP servers connect from background goroutines
-// that must not touch TUI state, so an automatic prompt is neither safe nor
-// welcome. A server that needs credentials reports the command to run; this is
-// it.
-func (m *InteractiveMode) handleMCPLoginCommand(serverName string) {
-	serverName = strings.TrimSpace(serverName)
-	if serverName == "" {
-		m.showWarning("Usage: /mcp login <server>")
-		return
-	}
-	if m.mcpLogin == nil {
-		m.showWarning("MCP login not available")
-		return
-	}
-	if err := m.mcpLogin(context.Background(), serverName, m.oauthLoginCallbacks()); err != nil {
-		m.showWarning(fmt.Sprintf("MCP login failed: %v", err))
-		return
-	}
-	m.showStatus(fmt.Sprintf("Logged in to MCP server %q. Credentials saved.", serverName))
-}
-
-// handleMCPLogoutCommand removes stored credentials for one MCP server.
-func (m *InteractiveMode) handleMCPLogoutCommand(serverName string) {
-	serverName = strings.TrimSpace(serverName)
-	if serverName == "" {
-		m.showWarning("Usage: /mcp logout <server>")
-		return
-	}
-	if m.mcpLogout == nil {
-		m.showWarning("MCP logout not available")
-		return
-	}
-	if err := m.mcpLogout(serverName); err != nil {
-		m.showWarning(fmt.Sprintf("MCP logout failed: %v", err))
-		return
-	}
-	m.showStatus(fmt.Sprintf("Removed stored credentials for MCP server %q.", serverName))
-}
-
-func (m *InteractiveMode) handleSkillsCommand(args []string) {
-	if len(args) == 0 || args[0] == "list" {
-		m.handleSkillsList()
-		return
-	}
-	if args[0] == "install" {
-		if len(args) < 2 {
-			m.showWarning("Usage: /skills install <name>")
-			return
-		}
-		m.handleSkillsInstall(args[1])
-		return
-	}
-	// Otherwise treat the arg as a loaded-skill name and show its details.
-	m.handleSkillDetail(args[0])
-}
-
-// handleSkillDetail shows name, description, and file location for a loaded skill.
-func (m *InteractiveMode) handleSkillDetail(name string) {
-	if m.session == nil {
-		m.showWarning("No session available")
-		return
-	}
-	skills, _ := m.session.ResourceLoader().GetSkills()
-	for _, s := range skills {
-		if s.Name == name {
-			var sb strings.Builder
-			sb.WriteString(fmt.Sprintf("Name:        %s\n", s.Name))
-			sb.WriteString(fmt.Sprintf("Source:      %s\n", resources.DisplayOrigin(s)))
-			sb.WriteString(fmt.Sprintf("Location:    %s\n", s.FilePath))
-			sb.WriteString(fmt.Sprintf("Description: %s", s.Description))
-			m.showStatus(sb.String())
-			return
-		}
-	}
-	m.showWarning(fmt.Sprintf("Unknown skills subcommand or skill: %s. Usage: /skills [list | install <name> | <name>]", name))
-}
-
-func (m *InteractiveMode) handleSkillsList() {
-	if m.session == nil {
-		m.showWarning("No session available")
-		return
-	}
-
-	skills, _ := m.session.ResourceLoader().GetSkills()
-	if len(skills) == 0 {
-		m.showStatus("No skills loaded.")
-		return
-	}
-
-	// Sort by name
-	sorted := make([]resources.Skill, len(skills))
-	copy(sorted, skills)
-	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Name < sorted[j].Name })
-
-	nameW := 4
-	sourceW := 6
-	origins := make([]string, len(sorted))
-	for i, s := range sorted {
-		origins[i] = resources.DisplayOrigin(s)
-		if len(s.Name) > nameW {
-			nameW = len(s.Name)
-		}
-		if len(origins[i]) > sourceW {
-			sourceW = len(origins[i])
-		}
-	}
-
-	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("%-*s  %-*s  %s\n", nameW, "NAME", sourceW, "SOURCE", "DESCRIPTION"))
-	for i, s := range sorted {
-		desc := s.Description
-		if len(desc) > 50 {
-			desc = desc[:47] + "..."
-		}
-		sb.WriteString(fmt.Sprintf("%-*s  %-*s  %s\n", nameW, s.Name, sourceW, origins[i], desc))
-	}
-
-	m.showStatus(strings.TrimRight(sb.String(), "\n"))
-}
-
-func (m *InteractiveMode) handleSkillsInstall(name string) {
-	builtins := resources.LoadBuiltinSkills()
-	var found bool
-	for _, s := range builtins.Skills {
-		if s.Name == name {
-			found = true
-			break
-		}
-	}
-	if !found {
-		available := make([]string, 0, len(builtins.Skills))
-		for _, s := range builtins.Skills {
-			available = append(available, s.Name)
-		}
-		sort.Strings(available)
-		m.showWarning(fmt.Sprintf("Unknown builtin skill %q. Available: %s", name, strings.Join(available, ", ")))
-		return
-	}
-
-	cwd, _ := os.Getwd()
-	targetDir := filepath.Join(cwd, ".fir", "skills", name)
-
-	if _, err := os.Stat(targetDir); err == nil {
-		m.showWarning(fmt.Sprintf("Skill %q already exists at %s", name, targetDir))
-		return
-	}
-
-	prefix := "builtin_skills/" + name
-	err := fs.WalkDir(resources.BuiltinSkillsFS, prefix, func(path string, d fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		rel := strings.TrimPrefix(path, prefix)
-		if rel == "" {
-			return nil
-		}
-		rel = strings.TrimPrefix(rel, "/")
-		target := filepath.Join(targetDir, rel)
-		if d.IsDir() {
-			return os.MkdirAll(target, 0o755)
-		}
-		data, readErr := resources.BuiltinSkillsFS.ReadFile(path)
-		if readErr != nil {
-			return readErr
-		}
-		if mkErr := os.MkdirAll(filepath.Dir(target), 0o755); mkErr != nil {
-			return mkErr
-		}
-		return os.WriteFile(target, data, 0o644)
-	})
-	if err != nil {
-		m.showWarning(fmt.Sprintf("Failed to install skill %q: %v", name, err))
-		return
-	}
-
-	// Reload so the newly installed skill is picked up
-	if m.session != nil {
-		_ = m.session.Reload()
-		m.setupAutocomplete()
-	}
-
-	m.showStatus(fmt.Sprintf("Installed skill %q to %s (project)", name, targetDir))
 }
 
 func (m *InteractiveMode) handleUpdateCommand() {
@@ -1865,72 +1445,6 @@ func renderServerDetail(lines []string, d *mcp.ServerDetail, t *itheme.Theme) []
 	return lines
 }
 
-func (m *InteractiveMode) handleMCPCommand() {
-	if m.mcpDetails == nil {
-		m.showWarning("No MCP servers configured.")
-		return
-	}
-	details := m.mcpDetails()
-	if len(details) == 0 {
-		m.showStatus("No MCP servers configured.")
-		return
-	}
-
-	t := itheme.GetTheme()
-	var lines []string
-	lines = append(lines, t.Bold("MCP Servers"))
-
-	for i := range details {
-		lines = append(lines, "")
-		lines = renderServerDetail(lines, &details[i], t)
-		lines = append(lines, fmt.Sprintf("  "+t.Fg("dim", "Tools: ")+"%d", len(details[i].Tools)))
-	}
-
-	lines = append(lines, "")
-	lines = append(lines, t.Fg("dim", "Use /mcp <server-name> to see full tool details."))
-	lines = append(lines, t.Fg("dim", "Use /mcp login <server-name> to authenticate a remote server."))
-
-	m.showMCPOverlay(lines)
-}
-
-func (m *InteractiveMode) handleMCPDetailCommand(serverName string) {
-	if m.mcpDetails == nil {
-		m.showWarning("No MCP servers configured.")
-		return
-	}
-	details := m.mcpDetails()
-	var found *mcp.ServerDetail
-	for i := range details {
-		if details[i].Name == serverName {
-			found = &details[i]
-			break
-		}
-	}
-	if found == nil {
-		m.showWarning(fmt.Sprintf("MCP server %q not found.", serverName))
-		return
-	}
-
-	t := itheme.GetTheme()
-	var lines []string
-	lines = renderServerDetail(lines, found, t)
-
-	if len(found.Tools) > 0 {
-		lines = append(lines, "")
-		lines = append(lines, t.Bold(fmt.Sprintf("  Tools (%d)", len(found.Tools))))
-		for _, tool := range found.Tools {
-			lines = append(lines, fmt.Sprintf("    %s", t.Fg("accent", tool.Name)))
-			if tool.Description != "" {
-				lines = append(lines, fmt.Sprintf("      %s", t.Fg("dim", tool.Description)))
-			}
-		}
-	} else {
-		lines = append(lines, "  "+t.Fg("dim", "Tools: none"))
-	}
-
-	m.showMCPOverlay(lines)
-}
-
 // showMCPOverlay renders the given lines into the collapsible MCP overlay above
 // the editor. Unlike the help/session overlays (which toggle), this always
 // refreshes the lines and shows the overlay — a repeat /mcp or /mcp <server>
@@ -2198,29 +1712,7 @@ func (m *InteractiveMode) buildHelpLines() []string {
 		bin = "~/" + bin[len(home)+1:]
 	}
 
-	helpText := fmt.Sprintf(`Available commands:
-  /help           - Toggle this help / keyboard shortcuts overlay
-  /model          - Select model (or /model <search>)
-  /thinking       - Select thinking level
-  /settings       - Open settings menu
-  /plan           - Show/hide the current session plan
-  /theme          - Select theme
-  /new [prompt]   - Start a new session (optionally with an initial prompt)
-  /compact        - Compact conversation context
-  /resume         - Resume a different session
-  /session        - Toggle the session info overlay
-  /name <name>    - Set session display name
-  /login          - Login with OAuth provider
-  /logout         - Logout from OAuth provider
-  /tree           - Navigate session tree (switch branches)
-  /export         - Export session to HTML file
-  /share          - Share session as a secret GitHub gist
-  /changelog [N|all] - Show recent changelog entries (default 5)
-  /reload         - Reload extensions, skills, themes, MCP servers, and provider auth
-  /skills         - List loaded skills (/skills <name> for details, /skills install <name> to install)
-  /mcp            - Show MCP servers (/mcp <name> for details, /mcp reload to reload configs)
-  /reexec [path] - Re-exec into specified or current binary (%s), preserving the session
-  /quit           - Quit fir
+	helpText := slashcmd.HelpText(slashcmd.TUI) + "\n\n/reexec target (current binary): " + bin + `
 
 Keyboard shortcuts:
   Enter           - Send message
@@ -2245,7 +1737,7 @@ Keyboard shortcuts:
   Alt+Enter       - Queue follow-up message
   Alt+Up          - Dequeue last follow-up
   /               - Slash commands
-  !<command>      - Run bash command`, bin)
+  !<command>      - Run bash command`
 
 	return strings.Split(helpText, "\n")
 }

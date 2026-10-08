@@ -4,19 +4,18 @@ package acp
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"github.com/kfet/fir/pkg/slashcmd"
 
 	acpsdk "github.com/coder/acp-go-sdk"
 	"github.com/kfet/agent"
@@ -109,7 +108,7 @@ func (s *firSession) getThinkingAccessor() thinkingAccessor {
 type firAgent struct {
 	conn     acpConn
 	options  Options
-	commands *commandRegistry
+	commands *slashcmd.Registry
 
 	mu          sync.Mutex
 	sessions    map[string]*firSession
@@ -172,7 +171,7 @@ var _ acpsdk.Agent = (*firAgent)(nil)
 // builtInCommands returns the slash commands available in ACP mode
 // by reading them from the global command registry.
 func builtInCommands() []acpsdk.AvailableCommand {
-	return newCommandRegistry().availableCommands()
+	return availableCommands()
 }
 
 // RunAcpMode is the entry point for ACP mode over stdin/stdout.
@@ -684,15 +683,6 @@ func parseInt(s string) int {
 	return n
 }
 
-// isNotFound reports whether an exec error is "command not found".
-func isNotFound(err error) bool {
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) {
-		return false
-	}
-	return true // LookupError / exec.ErrNotFound etc.
-}
-
 // resolveEnabledExtensions merges the CLI --extension names with the
 // project/global settings "extensions" list. When the combined list is empty,
 // all discovered extensions are started. The caller must check NoExtensions
@@ -714,9 +704,3 @@ func resolveEnabledExtensions(cliNames []string, sm *config.SettingsManager) []s
 	}
 	return names
 }
-
-// gistIDRegex matches a valid GitHub Gist ID (hex string of at least 20 characters).
-var gistIDRegex = regexp.MustCompile(`^[a-fA-F0-9]{20,}$`)
-
-// providerIDRegex validates provider IDs (alphanumeric with hyphens).
-var providerIDRegex = regexp.MustCompile(`^[a-zA-Z0-9-]+$`)

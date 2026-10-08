@@ -17,7 +17,7 @@ func runMCPCmd(t *testing.T, mgr *mcp.Manager, args string) string {
 	if !pa.handleSlashCommand("s1", entry, "mcp", args) {
 		t.Fatalf("expected /mcp %s to be handled", args)
 	}
-	return getLastAgentMessage(mc.getUpdates())
+	return waitAnyAgentMessage(t, mc)
 }
 
 func TestCmdMCP_LoginLogout(t *testing.T) {

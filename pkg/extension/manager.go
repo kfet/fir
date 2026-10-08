@@ -12,8 +12,8 @@ import (
 
 	"github.com/kfet/fir/pkg/ai/providers"
 	"github.com/kfet/fir/pkg/extension/sdk"
-	"github.com/kfet/fir/pkg/resources"
 	"github.com/kfet/fir/pkg/sections"
+	"github.com/kfet/fir/pkg/slashcmd"
 )
 
 // ConfirmFunc asks the user whether to trust an extension.
@@ -1045,7 +1045,7 @@ func (m *Manager) StartFailures() []StartFailure {
 // Must be called before adding the bridge to m.bridges.
 func (m *Manager) checkCommandClashes(extName string, cmds []CommandSpec) error {
 	for _, cmd := range cmds {
-		if resources.IsBuiltinSlashCommandName(cmd.Name) {
+		if slashcmd.IsBuiltinName(cmd.Name) {
 			return fmt.Errorf("extension %q: command /%s conflicts with a built-in slash command", extName, cmd.Name)
 		}
 	}

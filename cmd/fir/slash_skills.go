@@ -18,6 +18,7 @@ import (
 	"strings"
 
 	"github.com/kfet/fir/pkg/resources"
+	"github.com/kfet/fir/pkg/slashcmd"
 )
 
 // hasSlashSkillPrefix reports whether s looks like a slash-skill invocation
@@ -131,7 +132,7 @@ func resolveSlashInvocation(args *Args, headless bool) error {
 		return err
 	}
 	if skill == nil {
-		isCommand := resources.IsBuiltinSlashCommandName(name)
+		isCommand := slashcmd.IsBuiltinName(name)
 		if headless {
 			if isCommand {
 				return fmt.Errorf("command /%s requires interactive mode; run `fir /%s` without -p/--output-mode", name, name)

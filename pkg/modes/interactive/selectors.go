@@ -3,14 +3,12 @@
 package interactive
 
 import (
-	"context"
 	"fmt"
 	"strings"
 	"sync"
 
 	"github.com/kfet/agent"
 	"github.com/kfet/fir/pkg/ai"
-	"github.com/kfet/fir/pkg/auth"
 	"github.com/kfet/fir/pkg/modes/interactive/components"
 	itheme "github.com/kfet/fir/pkg/modes/interactive/theme"
 	"github.com/kfet/fir/pkg/session"
@@ -321,126 +319,6 @@ func (m *InteractiveMode) handleResumeSession(sessionPath string) {
 // ============================================================================
 // OAuth / login / logout
 // ============================================================================
-
-func (m *InteractiveMode) showOAuthSelector(mode string) {
-	if m.session == nil {
-		m.showWarning("No session available")
-		return
-	}
-
-	registry := m.session.ModelRegistryRef()
-	if registry == nil {
-		m.showWarning("Model registry not available")
-		return
-	}
-	authStorage := registry.AuthStorage()
-	if authStorage == nil {
-		m.showWarning("Auth storage not available")
-		return
-	}
-
-	if mode == "logout" {
-		// Show only providers that are logged in via OAuth
-		providers := authStorage.List()
-		var loggedIn []string
-		for _, p := range providers {
-			if cred := authStorage.Get(p); cred != nil && cred.Type == auth.CredentialTypeOAuth {
-				loggedIn = append(loggedIn, p)
-			}
-		}
-		if len(loggedIn) == 0 {
-			m.showStatus("No OAuth providers logged in. Use /login first.")
-			return
-		}
-
-		selectItems := make([]tuicomp.SelectItem, len(loggedIn))
-		for i, id := range loggedIn {
-			name := id
-			if p := ai.GetOAuthProvider(id); p != nil {
-				name = p.Name()
-			}
-			selectItems[i] = tuicomp.SelectItem{Label: name, Value: id, Description: "logged in"}
-		}
-
-		m.showSelector(func(done func()) (tui.Component, tui.Component) {
-			list := tuicomp.NewSelectList(selectItems, 10, itheme.GetSelectListTheme())
-			list.OnSelect = func(item tuicomp.SelectItem) {
-				done()
-				providerName := item.Value
-				if p := ai.GetOAuthProvider(item.Value); p != nil {
-					providerName = p.Name()
-				}
-				if err := authStorage.Logout(item.Value); err != nil {
-					m.showWarning(fmt.Sprintf("Logout failed: %v", err))
-					return
-				}
-				registry.Refresh()
-				m.showStatus(fmt.Sprintf("Logged out of %s", providerName))
-			}
-			list.OnCancel = func() { done() }
-			return list, list
-		})
-		return
-	}
-
-	// Login mode — show all available OAuth providers
-	oauthProviders := ai.GetOAuthProviders()
-	if len(oauthProviders) == 0 {
-		m.showWarning("No OAuth providers available")
-		return
-	}
-
-	selectItems := make([]tuicomp.SelectItem, len(oauthProviders))
-	for i, p := range oauthProviders {
-		desc := ""
-		if cred := authStorage.Get(p.ID()); cred != nil && cred.Type == auth.CredentialTypeOAuth {
-			desc = "logged in"
-		}
-		selectItems[i] = tuicomp.SelectItem{Label: p.Name(), Value: p.ID(), Description: desc}
-	}
-
-	m.showSelector(func(done func()) (tui.Component, tui.Component) {
-		list := tuicomp.NewSelectList(selectItems, 10, itheme.GetSelectListTheme())
-		list.OnSelect = func(item tuicomp.SelectItem) {
-			done()
-			go m.performOAuthLogin(item.Value)
-		}
-		list.OnCancel = func() { done() }
-		return list, list
-	})
-}
-
-func (m *InteractiveMode) performOAuthLogin(providerID string) {
-	providerName := providerID
-	if p := ai.GetOAuthProvider(providerID); p != nil {
-		providerName = p.Name()
-	}
-
-	registry := m.session.ModelRegistryRef()
-	if registry == nil {
-		m.showWarning("Model registry not available")
-		return
-	}
-	authStorage := registry.AuthStorage()
-	if authStorage == nil {
-		m.showWarning("Auth storage not available")
-		return
-	}
-
-	callbacks := m.oauthLoginCallbacks()
-
-	err := authStorage.Login(context.Background(), providerID, callbacks)
-	if err != nil {
-		errMsg := err.Error()
-		if errMsg != "Login cancelled" {
-			m.showWarning(fmt.Sprintf("Failed to login to %s: %s", providerName, errMsg))
-		}
-		return
-	}
-
-	registry.Refresh()
-	m.showStatus(fmt.Sprintf("Logged in to %s. Credentials saved.", providerName))
-}
 
 // ============================================================================
 // Tree / fork / user message selectors

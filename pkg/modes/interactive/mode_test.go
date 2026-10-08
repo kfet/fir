@@ -25,6 +25,7 @@ import (
 	"github.com/kfet/fir/pkg/resources/clipboard"
 	"github.com/kfet/fir/pkg/session"
 	"github.com/kfet/fir/pkg/session/store"
+	"github.com/kfet/fir/pkg/slashcmd"
 	tuicomp "github.com/kfet/fir/pkg/tui/components"
 	"github.com/kfet/fir/pkg/update"
 	"github.com/kfet/tui"
@@ -660,7 +661,7 @@ func TestInteractiveMode_MCPCommandShowsOverlay(t *testing.T) {
 		}
 	}
 
-	tm.mode.handleMCPCommand()
+	tm.mode.handleSlashCommand("/mcp")
 	tm.waitRender()
 
 	// /mcp renders a sticky overlay rather than dumping into the stream.
@@ -683,7 +684,7 @@ func TestInteractiveMode_MCPDetailCommandShowsOverlay(t *testing.T) {
 		}
 	}
 
-	tm.mode.handleMCPDetailCommand("demo")
+	tm.mode.handleSlashCommand("/mcp demo")
 	tm.waitRender()
 
 	if tm.mode.mcpHidden || !tm.mode.mcpInContainer {
@@ -694,7 +695,7 @@ func TestInteractiveMode_MCPDetailCommandShowsOverlay(t *testing.T) {
 	}
 
 	// A repeat /mcp re-shows the overlay (refresh-and-show, not toggle).
-	tm.mode.handleMCPCommand()
+	tm.mode.handleSlashCommand("/mcp")
 	tm.waitRender()
 	if tm.mode.mcpHidden || !tm.mode.mcpInContainer {
 		t.Fatal("expected mcp overlay still open after repeat /mcp")
@@ -708,7 +709,7 @@ func TestInteractiveMode_ClearTransientSurfacesCollapsesMCP(t *testing.T) {
 	}
 
 	// Open the mcp overlay.
-	tm.mode.handleMCPCommand()
+	tm.mode.handleSlashCommand("/mcp")
 	tm.waitRender()
 	if tm.mode.mcpHidden || !tm.mode.mcpInContainer {
 		t.Fatal("expected mcp overlay open")
@@ -958,43 +959,17 @@ func TestInteractiveMode_ScheduleReexec_NoSession(t *testing.T) {
 func TestInteractiveMode_IsBuiltinSlashCommand(t *testing.T) {
 	m := NewInteractiveMode(nil, nil, nil, InteractiveModeOptions{})
 
-	// Every entry in resources.BuiltinSlashCommands must be recognised.
-	for _, cmd := range resources.BuiltinSlashCommands {
-		full := "/" + cmd.Name
-		if !m.isBuiltinSlashCommand(full) {
-			t.Errorf("resources.BuiltinSlashCommands entry %q not recognised by isBuiltinSlashCommand", full)
+	// Every TUI command and alias in the shared registry must be recognised.
+	for _, cmd := range slashcmd.ForMode(slashcmd.TUI) {
+		for _, name := range append([]string{cmd.Name}, cmd.Aliases...) {
+			if !m.isBuiltinSlashCommand("/" + name) {
+				t.Errorf("registry command /%s not recognised by isBuiltinSlashCommand", name)
+			}
 		}
 	}
-
-	// Every case handled by handleSlashCommand must also be recognised.
-	// If you add a new case to that switch, add it here AND to
-	// resources.BuiltinSlashCommands (or builtinAliases for hidden aliases).
-	handleCases := []string{
-		"/help",
-		"/new",
-		"/compact",
-		"/model",
-		"/thinking",
-		"/theme",
-		"/settings",
-		"/session",
-		"/resume",
-		"/login", "/logout",
-		"/tree",
-		"/export",
-		"/share",
-		"/name",
-		"/changelog",
-		"/reload",
-		"/reexec",
-		"/queue",
-		"/dequeue",
-		"/quit", "/exit",
-	}
-	for _, cmd := range handleCases {
-		if !m.isBuiltinSlashCommand(cmd) {
-			t.Errorf("handleSlashCommand case %q not recognised; add it to resources.BuiltinSlashCommands or builtinAliases", cmd)
-		}
+	// ACP-only commands are not TUI builtins.
+	if m.isBuiltinSlashCommand("/continue") {
+		t.Error("/continue is ACP-only and must not be a TUI builtin")
 	}
 
 	// Non-builtins must NOT be recognised.
@@ -1751,10 +1726,10 @@ func TestInteractiveMode_SlashLogoutWithSession(t *testing.T) {
 	tm.mode.handleSlashCommand("/logout")
 	tm.waitRender()
 
-	// Should show "No OAuth providers logged in" since none logged in
+	// Should show "No providers currently logged in" since none logged in
 	output := tm.renderedOutput()
-	if !strings.Contains(output, "No OAuth") {
-		t.Error("expected 'No OAuth' message for logout with no logged-in providers")
+	if !strings.Contains(output, "No providers") {
+		t.Error("expected 'No providers' message for logout with no logged-in providers")
 	}
 }
 
@@ -2179,7 +2154,7 @@ func TestPerformShare_NoBinary(t *testing.T) {
 	// "not logged in" warning path is exercised.
 	t.Setenv("PATH", t.TempDir())
 
-	tm.mode.performShare()
+	runCommandSync(tm.mode, "share", "")
 	tm.waitRender()
 
 	output := tm.renderedOutput()
@@ -2842,5 +2817,25 @@ func TestStartNewSession_ClearEmptiesTranscript(t *testing.T) {
 
 	if got := tm.messageCount(); got != 0 {
 		t.Errorf("expected empty transcript after /new, got %d children", got)
+	}
+}
+
+// runCommandSync runs a registry command on the calling goroutine, bypassing
+// the Async dispatch so tests can assert on its output directly.
+func runCommandSync(m *InteractiveMode, name, args string) {
+	h, rest, ok := tuiCommands.Resolve(name, args)
+	if !ok {
+		panic("unknown command " + name)
+	}
+	c := m.cmdCtx()
+	c.Go = func(fn func()) { fn() }
+	h(c, rest)
+}
+
+func TestInteractiveMode_SlashCommandArgsTrimmed(t *testing.T) {
+	tm := newTestModeWithSession(t)
+	tm.mode.handleSlashCommand("  /name  hello world ")
+	if got := tm.mode.session.SessionStore.GetSessionName(); got != "hello world" {
+		t.Fatalf("session name = %q", got)
 	}
 }

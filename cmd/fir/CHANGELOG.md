@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Builtin slash commands now come from one mode-neutral registry (`pkg/slashcmd`): `/mcp` (+ `reload`/`login`/`logout`), `/login`, `/logout`, `/name`, `/skills` (+ `list`/`install`), `/export`, `/share` and `/sections` run the same code in TUI and ACP; `/help`, autocomplete and ACP `available_commands` are generated from it, and a parity test fails when a command exists in one mode without a mode-only mark.
+- TUI gains `/login <provider-id>`, `/logout <provider-id|all>`, `/skills install --user/--force`, the `/share` preview link and `/mcp reload` collision reporting; ACP gains `/help`, `/name` without args, and the TUI's `/skills` column layout. `/logout` lists every non-MCP credential in both modes; result wording is unified (e.g. "Logged out from X.", "MCP servers reloaded.").
+
 ## [1.31.0] - 2026-10-08
 
 ### Removed
