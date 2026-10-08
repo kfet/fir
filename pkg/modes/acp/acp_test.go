@@ -1985,7 +1985,7 @@ func TestRunPendingHandoffs_RunsHandoff(t *testing.T) {
 	sess.SessionStore.NewSession(nil)
 
 	bridge := extension.NewSessionBridge(sess)
-	bridge.SetRestartFn(func(_, _ string) error { return nil })
+	bridge.SetRestartFn(func() {})
 	if err := bridge.RestartSession("Continue from the handoff briefing above.", "## Briefing\nline2\nline3"); err != nil {
 		t.Fatalf("RestartSession: %v", err)
 	}
@@ -1998,7 +1998,7 @@ func TestRunPendingHandoffs_RunsHandoff(t *testing.T) {
 	pa.runPendingHandoffs("s1", entry)
 
 	// Pending consumed.
-	if _, _, ok := bridge.TakePendingRestart(); ok {
+	if _, ok := bridge.TakePendingRestart(); ok {
 		t.Fatal("expected pending restart to be consumed")
 	}
 	// The continuation Prompt fails without a model, surfaced as a message.

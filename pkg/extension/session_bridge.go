@@ -28,11 +28,11 @@ type SessionBridge struct {
 	restartMu sync.RWMutex
 	restartFn RestartFn
 	// pendingRestart records the most recent RestartSession request,
-	// captured synchronously before the in-flight turn is aborted. Modes
-	// that drive the new turn inline (ACP — see TakePendingRestart) consume
-	// it after the aborted turn unwinds; modes that restart via the async
-	// RestartFn (interactive) ignore it.
-	pendingRestart *restartReq
+	// captured synchronously before the in-flight turn is aborted —
+	// including the queued messages taken off the agent so the abort cannot
+	// drain them into the history that is about to be discarded. Every mode
+	// consumes it via TakePendingRestart once the aborted turn has unwound.
+	pendingRestart *RestartRequest
 
 	reloadMu sync.RWMutex
 	reloadFn func(name string) error
@@ -442,10 +442,13 @@ func (b *SessionBridge) ReportProgress(message string) {}
 // mode-specific UI cleanup. When nil, RestartSession returns an error.
 //
 // The function is invoked from a fresh goroutine *after* the in-flight
-// stream has been aborted; it should clear UI state, call NewSessionCmd,
-// (optionally) inject prependContext via session.PrependContext, and
-// submit prompt via session.Prompt. See InteractiveMode.handleHandoff.
-type RestartFn func(prompt, prependContext string) error
+// stream has been aborted. It carries no arguments: the request (prompt,
+// prepend context and carried queued messages) is consumed with
+// TakePendingRestart, after waiting for the aborted turn to unwind. A mode
+// that drives the restart inline (ACP) registers a no-op so that
+// RestartSession reports the feature as supported. See
+// InteractiveMode.handleHandoff.
+type RestartFn func()
 
 // SetRestartFn registers a mode-specific restart handler. Pass nil to
 // remove. Safe to call after the bridge is in use; the field is read on
@@ -456,10 +459,11 @@ func (b *SessionBridge) SetRestartFn(fn RestartFn) {
 	b.restartMu.Unlock()
 }
 
-// RestartSession aborts the in-flight stream synchronously and schedules
-// session clear + optional prepend-context + prompt submission asynchronously.
-// Returns an error when no RestartFn is registered (the current mode does
-// not support restart).
+// RestartSession takes the queued messages off the agent, aborts the
+// in-flight stream synchronously and schedules the mode's restart (session
+// clear + optional prepend-context + prompt submission + carried queue)
+// asynchronously. Returns an error when no RestartFn is registered (the
+// current mode does not support restart).
 func (b *SessionBridge) RestartSession(prompt, prependContext string) error {
 	b.restartMu.RLock()
 	fn := b.restartFn
@@ -467,13 +471,22 @@ func (b *SessionBridge) RestartSession(prompt, prependContext string) error {
 	if fn == nil {
 		return fmt.Errorf("session restart is not supported in this mode")
 	}
-	// Record the request synchronously BEFORE the abort. A mode that runs
-	// the new turn inline (ACP) consumes it via TakePendingRestart after the
-	// aborted turn unwinds; this store happens-before Abort, which
-	// happens-before the in-flight Prompt() returns, so the consumer always
-	// observes it without racing the async RestartFn goroutine.
+	// Record the request synchronously BEFORE the abort, and take the
+	// queues with it: an aborted run drains queued follow-ups into the old
+	// history, which the restart then erases. This store happens-before
+	// Abort, which happens-before the in-flight Prompt() returns, so an
+	// inline consumer (ACP) always observes it without racing fn.
+	req := &RestartRequest{Prompt: prompt, PrependContext: prependContext}
 	b.restartMu.Lock()
-	b.pendingRestart = &restartReq{Prompt: prompt, PrependContext: prependContext}
+	if b.session != nil && b.session.Agent != nil {
+		req.Carried = b.session.TakeQueuedMessages()
+	}
+	if prev := b.pendingRestart; prev != nil && len(prev.Carried) > 0 {
+		// A superseded, unconsumed restart still owns earlier queued
+		// messages; keep them, ahead of anything queued since.
+		req.Carried = append(prev.Carried, req.Carried...)
+	}
+	b.pendingRestart = req
 	b.restartMu.Unlock()
 	// Abort synchronously so the tool-result writeback for the calling
 	// extension tool is short-circuited and never lands in the session.
@@ -483,31 +496,32 @@ func (b *SessionBridge) RestartSession(prompt, prependContext string) error {
 	// The rest must run on a goroutine: the bridge dispatch goroutine is
 	// holding the JSON-RPC handler open, and the mode callback may need
 	// to acquire UI locks that the dispatcher must not block on.
-	go func() {
-		_ = fn(prompt, prependContext)
-	}()
+	go fn()
 	return nil
 }
 
-// restartReq is a captured RestartSession request awaiting inline consumption.
-type restartReq struct {
+// RestartRequest is a captured RestartSession request awaiting consumption.
+type RestartRequest struct {
 	Prompt         string
 	PrependContext string
+	// Carried holds the messages that were queued (steering first, then
+	// follow-ups, each in enqueue order) when the restart was requested.
+	// They belong to the new session: deliver them after Prompt.
+	Carried []agent.AgentMessage
 }
 
-// TakePendingRestart returns and clears any restart request recorded by the
-// most recent RestartSession call. Modes that drive the restart inline
-// (rather than via the async RestartFn) call this after the aborted turn
-// unwinds. Returns ok=false when no restart is pending.
-func (b *SessionBridge) TakePendingRestart() (prompt, prependContext string, ok bool) {
+// TakePendingRestart returns and clears any restart request recorded by
+// RestartSession. Modes call this after the aborted turn unwinds. Returns
+// ok=false when no restart is pending (e.g. already consumed).
+func (b *SessionBridge) TakePendingRestart() (RestartRequest, bool) {
 	b.restartMu.Lock()
 	defer b.restartMu.Unlock()
 	if b.pendingRestart == nil {
-		return "", "", false
+		return RestartRequest{}, false
 	}
-	req := b.pendingRestart
+	req := *b.pendingRestart
 	b.pendingRestart = nil
-	return req.Prompt, req.PrependContext, true
+	return req, true
 }
 
 // SetReloadFn registers the targeted single-extension reload handler. It is

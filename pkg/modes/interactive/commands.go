@@ -16,6 +16,7 @@ import (
 	"github.com/kfet/agent"
 	"github.com/kfet/agent/tools"
 	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/extension"
 	"github.com/kfet/fir/pkg/mcp"
 	"github.com/kfet/fir/pkg/models"
 	"github.com/kfet/fir/pkg/modes/interactive/components"
@@ -640,17 +641,22 @@ func (m *InteractiveMode) handleExternalEditor() {
 
 // handleHandoff is invoked from the extension bridge when an extension
 // triggers a session restart (e.g. via the self_handoff tool). The bridge
-// has already called session.Abort() synchronously to short-circuit the
-// in-flight tool call's result writeback; this method handles the rest:
-// wait for idle, clear UI, NewSessionCmd, optionally PrependContext, and
-// submit the handoff prompt.
+// has already taken the queued messages and called session.Abort()
+// synchronously to short-circuit the in-flight tool call's result writeback;
+// this method handles the rest: wait for idle, consume the pending request,
+// clear UI, NewSessionCmd, optionally PrependContext, and submit the handoff
+// prompt followed by the carried queue.
 //
 // Runs on a goroutine spawned by the bridge.
-func (m *InteractiveMode) handleHandoff(prompt, prependContext string) {
+func (m *InteractiveMode) handleHandoff(bridge *extension.SessionBridge) {
 	if m.session != nil {
 		m.session.Agent.WaitForIdle()
 	}
-	m.startNewSession(prompt, prependContext, true)
+	req, ok := bridge.TakePendingRestart()
+	if !ok {
+		return
+	}
+	m.startNewSession(req.Prompt, req.PrependContext, true, req.Carried)
 }
 
 // handoffNoticeText is the in-line rule appended to the chat transcript when a
@@ -658,20 +664,30 @@ func (m *InteractiveMode) handleHandoff(prompt, prependContext string) {
 const handoffNoticeText = "──── context handoff — new session started (previous context cleared) ────"
 
 func (m *InteractiveMode) handleClearCommand(initialPrompt, prependContext string) {
-	m.startNewSession(initialPrompt, prependContext, false)
+	m.startNewSession(initialPrompt, prependContext, false, nil)
 }
 
 // startNewSession swaps in a fresh agent session and optionally wipes the
 // visible chat transcript. /new and /clear pass preserveTranscript=false and
 // clear everything; a handoff passes true so the terminal scrollback survives
 // (only the LLM context is reset) and gets an in-line notice instead.
-func (m *InteractiveMode) startNewSession(initialPrompt, prependContext string, preserveTranscript bool) {
+//
+// Queued (steer/follow-up) messages are taken off the agent BEFORE any
+// abort, so the aborted turn cannot drain them into the history being
+// discarded. A handoff carries them — plus carried, already taken by the
+// bridge — into the new session as follow-ups after the handoff prompt; a
+// plain /new discards them, but says so instead of losing them silently.
+func (m *InteractiveMode) startNewSession(initialPrompt, prependContext string, preserveTranscript bool, carried []agent.AgentMessage) {
+	queued := append([]agent.AgentMessage(nil), carried...)
 	if m.session != nil {
+		queued = append(queued, m.session.TakeQueuedMessages()...)
 		// Cancel any in-progress LLM stream before starting a new session.
 		if m.session.IsStreaming() {
 			m.session.Abort()
 			m.session.Agent.WaitForIdle()
 		}
+		// Anything queued while the aborted turn unwound.
+		queued = append(queued, m.session.TakeQueuedMessages()...)
 		_, err := m.session.NewSessionCmd()
 		if err != nil {
 			m.showWarning(fmt.Sprintf("Failed to create new session: %s", err))
@@ -679,16 +695,25 @@ func (m *InteractiveMode) startNewSession(initialPrompt, prependContext string, 
 		}
 	}
 	if m.messageContainer != nil {
+		t := itheme.GetTheme()
 		if preserveTranscript {
 			// Keep the visible history; mark the boundary in-line so the new
 			// session's first message reads as a continuation of the scrollback.
-			t := itheme.GetTheme()
 			m.messageContainer.AddChild(tuicomp.NewSpacer(1))
 			m.messageContainer.AddChild(tuicomp.NewText(t.Fg("muted", handoffNoticeText), 1, 0, nil))
+			if len(queued) > 0 {
+				m.messageContainer.AddChild(tuicomp.NewText(t.Fg("muted", session.CarriedQueueNotice(len(queued))), 1, 0, nil))
+			}
 			m.messageContainer.AddChild(tuicomp.NewSpacer(1))
 		} else {
 			m.messageContainer.Clear()
+			if len(queued) > 0 {
+				m.messageContainer.AddChild(tuicomp.NewText(t.Fg("warning", session.DiscardedQueueNotice(len(queued))), 1, 0, nil))
+			}
 		}
+	}
+	if !preserveTranscript {
+		queued = nil
 	}
 	// The aborted turn's streaming state now belongs to history: stop the
 	// spinner and drop the component references so the next turn starts clean.
@@ -718,15 +743,17 @@ func (m *InteractiveMode) startNewSession(initialPrompt, prependContext string, 
 	// If an initial prompt was provided (e.g. "/new read the handoff doc"),
 	// submit it as the first message in the fresh session. This avoids the
 	// race condition of sending /new and a follow-up message as separate
-	// inputs via tmux send-keys.
-	if initialPrompt != "" && m.session != nil {
+	// inputs via tmux send-keys. Carried queued messages follow it.
+	if (initialPrompt != "" || len(queued) > 0) && m.session != nil {
 		// Inject the [SYS_EXT]-wrapped briefing (if any) before the prompt
 		// so it appears ahead of the user message in the new session.
 		if prependContext != "" {
 			m.session.PrependContext(prependContext)
 		}
-		m.AddUserMessage(initialPrompt)
-		if err := m.session.Prompt(initialPrompt); err != nil {
+		if initialPrompt != "" {
+			m.AddUserMessage(initialPrompt)
+		}
+		if err := m.session.PromptWithCarried(initialPrompt, queued); err != nil {
 			m.showWarning(fmt.Sprintf("Failed to send message: %v", err))
 		}
 	}

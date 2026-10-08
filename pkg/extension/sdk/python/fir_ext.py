@@ -2870,9 +2870,14 @@ class Context:
         a ``[SYS_EXT]``-wrapped user message, and submits ``prompt`` as
         the first user-typed message of the new session.
 
+        Messages queued on the agent (steering, then follow-ups) are
+        carried into the new session and delivered after ``prompt``,
+        in order, rather than lost with the old history.
+
         This is the primitive behind the ``self_handoff`` tool. It is
         only supported in modes that register a restart callback
-        (interactive). In other modes the call returns a JSON-RPC error.
+        (interactive, ACP). In other modes the call returns a JSON-RPC
+        error.
 
         Note: when called from inside a tool handler, the tool's result
         will be discarded — the calling turn is being aborted. The new

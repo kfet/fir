@@ -420,7 +420,7 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd, transcrip
 			// briefed turn's output streams within the same prompt
 			// response. See runPendingHandoffs.
 			if extSetup.Bridge != nil {
-				extSetup.Bridge.SetRestartFn(func(_, _ string) error { return nil })
+				extSetup.Bridge.SetRestartFn(func() {})
 				// Wire the MCP reload callback so extensions can call reload_mcp.
 				extSetup.Bridge.SetReloadMCPFn(func() (extension.ReloadMCPResult, error) {
 					// Load config with collision reporting.

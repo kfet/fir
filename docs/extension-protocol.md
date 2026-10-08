@@ -699,21 +699,26 @@ the first user-typed message of the new context. Used by the
 {"jsonrpc":"2.0","id":1013,"method":"restart_session","params":{"prompt":"Continue from the handoff briefing above.","prepend_context":"# Self-Handoff\n…briefing body…"}}
 ```
 
-Behaviour: fir calls `Agent.Abort()` synchronously (so the calling tool's
-result writeback is short-circuited), then asynchronously waits for idle,
-clears UI, calls `NewSessionCmd()`, optionally calls
-`session.PrependContext(prepend_context)` to inject a `[SYS_EXT]`-wrapped
-user message, and submits `prompt` via `Prompt()`. This RPC is the
-primitive behind the `handoff` builtin extension's `self_handoff` tool —
-the briefing is carried via `prepend_context`, no filesystem artifact
-is written.
+Behaviour: fir first takes every queued message (steering, then
+follow-ups, each in enqueue order) off the agent, then calls
+`Agent.Abort()` synchronously (so the calling tool's result writeback is
+short-circuited and the aborted run cannot drain the queue into the
+discarded history). After the aborted turn unwinds it clears UI, calls
+`NewSessionCmd()`, optionally calls `session.PrependContext(prepend_context)`
+to inject a `[SYS_EXT]`-wrapped user message, and submits `prompt`; the
+carried queued messages follow it as follow-ups, in order, and the user
+sees one line "N queued messages carried into the new session". This RPC
+is the primitive behind the `handoff` builtin extension's `self_handoff`
+tool — the briefing is carried via `prepend_context`, no filesystem
+artifact is written.
 
 Response: `{"ok": true}` — but extensions should not rely on receiving it;
 the calling agent turn is being torn down.
 
-Returns a JSON-RPC error when the active mode does not register a restart
-callback (e.g. ACP, headless). Currently only the interactive (TUI) mode
-supports restart.
+Supported in interactive (TUI) mode, where the restart runs on its own
+goroutine, and in ACP mode, where the fresh turn runs inline and streams
+within the current prompt response. Returns a JSON-RPC error when the
+active mode registers no restart callback (e.g. print, headless).
 
 ---
 

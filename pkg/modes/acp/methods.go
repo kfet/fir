@@ -255,10 +255,12 @@ const maxChainedHandoffs = 8
 // runPendingHandoffs consumes any self_handoff restart requested during the
 // just-finished turn and runs the fresh, briefed turn inline. The self_handoff
 // tool aborts the current turn and records the request synchronously on the
-// bridge (TakePendingRestart); here — after the aborted turn has unwound — we
-// reset the session, inject the briefing, and submit the continuation prompt,
-// streaming its output over the same ACP session within the current prompt
-// response. Chained handoffs are followed up to maxChainedHandoffs times.
+// bridge (TakePendingRestart), together with the queued messages taken off the
+// agent before the abort; here — after the aborted turn has unwound — we
+// reset the session, inject the briefing, and submit the continuation prompt
+// (followed by the carried queue), streaming its output over the same ACP
+// session within the current prompt response. Chained handoffs are followed
+// up to maxChainedHandoffs times.
 //
 // Relies on ACP being per-session serial: the relay never issues two
 // concurrent Prompt() calls for one session, so the pendingRestart recorded
@@ -270,22 +272,26 @@ func (pa *firAgent) runPendingHandoffs(sessionID string, entry *firSession) {
 	for i := 0; i < maxChainedHandoffs; i++ {
 		// The aborted turn must be fully unwound before we start a new one.
 		entry.session.Agent.WaitForIdle()
-		prompt, prepend, ok := entry.extSetup.Bridge.TakePendingRestart()
+		req, ok := entry.extSetup.Bridge.TakePendingRestart()
 		if !ok {
 			return
 		}
+		// The bridge took the queues before aborting; pick up anything
+		// queued while the aborted turn unwound too.
+		carried := append(req.Carried, entry.session.TakeQueuedMessages()...)
 		if _, err := entry.session.NewSessionCmd(); err != nil {
 			pa.sendAgentMessage(sessionID, fmt.Sprintf("Handoff failed: could not start a new session: %v", err))
 			return
 		}
-		if prepend != "" {
-			entry.session.PrependContext(prepend)
+		if n := len(carried); n > 0 {
+			pa.sendAgentMessage(sessionID, session.CarriedQueueNotice(n))
 		}
-		if prompt != "" {
-			if err := entry.session.Prompt(prompt); err != nil {
-				pa.sendAgentMessage(sessionID, fmt.Sprintf("Handoff: continuation prompt failed: %v", err))
-				return
-			}
+		if req.PrependContext != "" {
+			entry.session.PrependContext(req.PrependContext)
+		}
+		if err := entry.session.PromptWithCarried(req.Prompt, carried); err != nil {
+			pa.sendAgentMessage(sessionID, fmt.Sprintf("Handoff: continuation prompt failed: %v", err))
+			return
 		}
 	}
 	// Hit the chain cap — surface it rather than silently swallow further

@@ -2766,7 +2766,7 @@ func TestStartNewSession_HandoffPreservesTranscript(t *testing.T) {
 		t.Fatal("expected pre-handoff messages in the container")
 	}
 
-	m.startNewSession("", "", true)
+	m.startNewSession("", "", true, nil)
 
 	if got, want := tm.messageCount(), before+3; got != want {
 		t.Errorf("expected transcript preserved plus notice (%d children), got %d", want, got)

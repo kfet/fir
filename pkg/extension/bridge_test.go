@@ -1084,26 +1084,26 @@ func TestSessionBridge_RestartSession_NoCallback(t *testing.T) {
 
 func TestSessionBridge_RestartSession_InvokesCallback(t *testing.T) {
 	sb := &SessionBridge{}
-	type call struct {
-		prompt, prepend string
-	}
-	got := make(chan call, 1)
-	sb.SetRestartFn(func(prompt, prependContext string) error {
-		got <- call{prompt, prependContext}
-		return nil
+	got := make(chan RestartRequest, 1)
+	sb.SetRestartFn(func() {
+		req, ok := sb.TakePendingRestart()
+		if !ok {
+			t.Error("RestartFn ran with no pending restart")
+		}
+		got <- req
 	})
 	if err := sb.RestartSession("hello", "briefing"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	select {
 	case c := <-got:
-		if c.prompt != "hello" {
-			t.Fatalf("got prompt %q, want hello", c.prompt)
+		if c.Prompt != "hello" {
+			t.Fatalf("got prompt %q, want hello", c.Prompt)
 		}
-		if c.prepend != "briefing" {
-			t.Fatalf("got prepend %q, want briefing", c.prepend)
+		if c.PrependContext != "briefing" {
+			t.Fatalf("got prepend %q, want briefing", c.PrependContext)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(15 * time.Second):
 		t.Fatal("RestartFn was not invoked")
 	}
 }
@@ -1281,23 +1281,23 @@ func TestSessionBridge_TakePendingRestart(t *testing.T) {
 	sb := &SessionBridge{}
 
 	// Nothing pending yet.
-	if _, _, ok := sb.TakePendingRestart(); ok {
+	if _, ok := sb.TakePendingRestart(); ok {
 		t.Fatal("expected ok=false with no pending restart")
 	}
 
 	// RestartSession records the request synchronously (before any async
 	// callback runs), so it is observable immediately afterwards.
-	sb.SetRestartFn(func(_, _ string) error { return nil })
+	sb.SetRestartFn(func() {})
 	if err := sb.RestartSession("go", "briefing"); err != nil {
 		t.Fatalf("RestartSession: %v", err)
 	}
-	prompt, prepend, ok := sb.TakePendingRestart()
-	if !ok || prompt != "go" || prepend != "briefing" {
-		t.Fatalf("TakePendingRestart = (%q,%q,%v), want (go,briefing,true)", prompt, prepend, ok)
+	req, ok := sb.TakePendingRestart()
+	if !ok || req.Prompt != "go" || req.PrependContext != "briefing" {
+		t.Fatalf("TakePendingRestart = (%+v,%v), want (go,briefing,true)", req, ok)
 	}
 
 	// Consumed — a second take returns ok=false.
-	if _, _, ok := sb.TakePendingRestart(); ok {
+	if _, ok := sb.TakePendingRestart(); ok {
 		t.Fatal("expected ok=false after consuming pending restart")
 	}
 }

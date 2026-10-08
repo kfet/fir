@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- **Messages queued during a `self_handoff` are no longer lost.** The handoff aborted the running turn, which drained the follow-up/steer queues into the old history — and the new session then erased it. The queues are now taken off the agent (new `Agent.TakeQueues`, kfet/agent v0.1.4) before the abort and re-queued on the new session after the handoff prompt, steer first, in original order, with one line "N queued messages carried into the new session". Covers both interactive and ACP mode. `/new` and `Ctrl+N` still start clean but now report "Discarded N queued messages" instead of dropping them silently.
+
 ## [1.31.1] - 2026-10-08
 
 ### Changed

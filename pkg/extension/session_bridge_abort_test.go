@@ -1,6 +1,7 @@
 package extension
 
 import (
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -118,5 +119,52 @@ func TestSessionBridge_SendUserMessage_Abort(t *testing.T) {
 
 	if a.HasQueuedMessages() {
 		t.Fatal("abort must not enqueue any message")
+	}
+}
+
+// TestSessionBridge_RestartSession_TakesQueues: RestartSession must take the
+// queued messages off the agent BEFORE aborting (so the aborted run cannot
+// drain them into the discarded history) and hand them to the consumer,
+// steer first. A superseded, unconsumed restart's carried messages are kept
+// ahead of newer ones.
+func TestSessionBridge_RestartSession_TakesQueues(t *testing.T) {
+	a := agent.NewAgent(agent.AgentOptions{})
+	sess := session.NewAgentSession(session.AgentSessionOptions{
+		Agent:          a,
+		SessionStore:   store.InMemorySessionStore(),
+		ResourceLoader: &stubResourceLoader{},
+		Cwd:            t.TempDir(),
+	})
+	t.Cleanup(sess.Close)
+	sb := NewSessionBridge(sess)
+	sb.SetRestartFn(func() {})
+
+	msg := func(s string) agent.AgentMessage { return agent.NewAgentMessage(ai.NewUserMsg(s, 0)) }
+	text := func(ms []agent.AgentMessage) []string {
+		var out []string
+		for _, m := range ms {
+			out = append(out, m.Message.AsUser().Content.(string))
+		}
+		return out
+	}
+
+	a.FollowUp(msg("f1"))
+	a.Steer(msg("s1"))
+	if err := sb.RestartSession("p1", ""); err != nil {
+		t.Fatal(err)
+	}
+	if a.HasQueuedMessages() {
+		t.Fatal("RestartSession must take the queues off the agent")
+	}
+	a.FollowUp(msg("f2"))
+	if err := sb.RestartSession("p2", "b2"); err != nil {
+		t.Fatal(err)
+	}
+	req, ok := sb.TakePendingRestart()
+	if !ok || req.Prompt != "p2" || req.PrependContext != "b2" {
+		t.Fatalf("TakePendingRestart = %+v, %v", req, ok)
+	}
+	if got := strings.Join(text(req.Carried), ","); got != "s1,f1,f2" {
+		t.Fatalf("carried = %s, want s1,f1,f2", got)
 	}
 }

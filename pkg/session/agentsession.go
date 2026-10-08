@@ -737,6 +737,68 @@ func (s *AgentSession) InjectMessage(msg agent.AgentMessage) {
 	}
 }
 
+// TakeQueuedMessages atomically removes and returns every queued message —
+// steering first, then follow-ups, each in enqueue order. Call it BEFORE
+// aborting a run whose history is about to be discarded (session restart):
+// otherwise the aborted loop drains the queues into the old history, which
+// NewSessionCmd then erases.
+func (s *AgentSession) TakeQueuedMessages() []agent.AgentMessage {
+	steer, followUp := s.Agent.TakeQueues()
+	if len(steer) == 0 {
+		return followUp
+	}
+	return append(steer, followUp...)
+}
+
+// PromptWithCarried submits prompt as the first turn of a freshly reset
+// session and delivers carried (messages taken from the previous session's
+// queues via TakeQueuedMessages) as follow-ups after it, in order. With an
+// empty prompt the carried messages start the turn themselves. Blocks until
+// the agent is idle, like Prompt. When the turn cannot start, carried stays
+// queued rather than being lost.
+func (s *AgentSession) PromptWithCarried(prompt string, carried []agent.AgentMessage) error {
+	if prompt == "" {
+		if len(carried) == 0 {
+			return nil
+		}
+		// Same extension-readiness gate as Prompt.
+		if s.extReady != nil {
+			<-s.extReady
+		}
+		if err := s.Agent.PromptMessages(carried); err != nil {
+			for _, m := range carried {
+				s.Agent.FollowUp(m)
+			}
+			return err
+		}
+		s.Agent.WaitForIdle()
+		return nil
+	}
+	for _, m := range carried {
+		s.Agent.FollowUp(m)
+	}
+	return s.Prompt(prompt)
+}
+
+// CarriedQueueNotice is the one-line notice every mode shows when a session
+// restart (handoff) carries n queued messages into the new session.
+func CarriedQueueNotice(n int) string {
+	return fmt.Sprintf("%d %s carried into the new session", n, queuedNoun(n))
+}
+
+// DiscardedQueueNotice is shown when a clean restart (/new) drops n queued
+// messages, so the loss is never silent.
+func DiscardedQueueNotice(n int) string {
+	return fmt.Sprintf("Discarded %d %s", n, queuedNoun(n))
+}
+
+func queuedNoun(n int) string {
+	if n == 1 {
+		return "queued message"
+	}
+	return "queued messages"
+}
+
 // ClearFollowUpQueue clears and returns all queued follow-up message texts.
 // Used by the /dequeue command to restore queued messages to the editor.
 func (s *AgentSession) ClearFollowUpQueue() []string {
