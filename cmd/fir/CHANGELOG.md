@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [1.30.4] - 2026-10-08
+
+### Changed
+
+- Model catalog regenerated: added `opencode-go/step-5-preview-free`, `opencode/step-5-preview-free`; removed `opencode/fledge-alpha-free` (+1 on aggregators); 19 models with changed pricing/limits.
+
 ### Fixed
 
 - ACP mode now supports `/mcp login <server>` and `/mcp logout <server>`; previously `/mcp login slack` replied `MCP server "login slack" not found.`
