@@ -52,10 +52,17 @@ func StreamSimple(ctx context.Context, registry *Registry, model *Model, prompt 
 }
 
 // resolveReasoning applies provider-agnostic reasoning policy before dispatch.
-// A thinking-off request to a model that cannot disable thinking (always-on
+// A model without reasoning support never gets a reasoning level, so no
+// provider adds thinking parameters for it. A thinking-off request to a
+// model that cannot disable thinking (always-on
 // adaptive) is downgraded to minimal effort. Returns the possibly-copied
 // options (never mutates the caller's struct).
 func resolveReasoning(model *Model, options *SimpleStreamOptions) *SimpleStreamOptions {
+	if options != nil && options.Reasoning != "" && model != nil && !model.Reasoning {
+		cp := *options
+		cp.Reasoning = ""
+		return &cp
+	}
 	if options == nil || options.Reasoning != ThinkingOff {
 		return options
 	}

@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- **A model with `reasoning: false` got a `thinking` parameter.** fir no longer sends one. Before, the Anthropic Messages path sent `thinking: enabled` to such a model (e.g. Haiku behind Bifrost), and `--thinking off` did not help on the retry.
+
 ## [1.30.2] - 2026-10-08
 
 ### Fixed

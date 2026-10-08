@@ -144,6 +144,19 @@ func TestResolveReasoning_AdaptiveOffDowngradesToMinimal(t *testing.T) {
 	}
 }
 
+func TestResolveReasoning_NonReasoningModelDropsLevel(t *testing.T) {
+	m := &Model{Reasoning: false}
+	for _, lvl := range []ThinkingLevel{ThinkingOff, ThinkingMinimal, ThinkingHigh} {
+		opts := &SimpleStreamOptions{Reasoning: lvl}
+		if got := resolveReasoning(m, opts); got.Reasoning != "" {
+			t.Errorf("%q on non-reasoning model => want empty, got %q", lvl, got.Reasoning)
+		}
+		if opts.Reasoning != lvl {
+			t.Error("caller options must not be mutated")
+		}
+	}
+}
+
 func TestIsThinkingOffUnsupportedError(t *testing.T) {
 	yes := []string{
 		`"thinking.type.disabled" is not supported for this model.`,
