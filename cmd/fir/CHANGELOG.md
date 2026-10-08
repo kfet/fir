@@ -2,8 +2,13 @@
 
 ## [Unreleased]
 
+## [1.31.0] - 2026-10-08
+
 ### Removed
 - **`google-gemini-cli` provider.** Google retired Gemini CLI / Code Assist for individuals on 2026-06-18; the `gemini-cli-auth` builtin extension, its models and `fir login` entry are gone. Use `google-antigravity`. A stored `google-gemini-cli` credential is harmless and is flagged in `fir login list` with a `fir logout` hint.
+
+### Changed
+- **Model catalog regenerated**: added 1 aggregator model; removed 1 aggregator model; 6 models with changed pricing/limits.
 
 ## [1.30.4] - 2026-10-08
 
