@@ -313,14 +313,18 @@ def batch_example(params, ctx):
     if extra:
         instructions += f"\n\nAdditional focus: {extra}"
 
-    prompt = "\n\n".join(outputs) + f"\n\n--- Instructions ---\n{instructions}"
+    # ``messages`` swaps the session transcript for a caller-supplied thread:
+    # the synthesis only needs the probe outputs, not the whole conversation,
+    # so the call is smaller and its prefix is stable across sessions.
+    thread = [{"role": "user", "text": "\n\n".join(outputs)}]
+    question = f"--- Instructions ---\n{instructions}"
 
     # Streaming side_query — surface partial thinking text via report_progress.
     # Falls back to the blocking flavor if the host doesn't recognise
     # `stream:true` (older fir releases). This is the same pattern as the
     # aside extension; demo.py keeps it tiny on purpose.
     if hasattr(ctx, "side_query_stream"):
-        stream = ctx.side_query_stream(prompt)
+        stream = ctx.side_query_stream(question, messages=thread)
         partial = ""
         usage = ""
         for delta in stream:
@@ -351,7 +355,7 @@ def batch_example(params, ctx):
         footer = " · ".join(p for p in (usage, f"effort {effort}" if effort else "") if p)
         return f"{text}\n\n[{footer}]" if footer else text
 
-    return ctx.side_query(prompt)
+    return ctx.side_query(question, messages=thread)
 
 
 def _extract_text(result):

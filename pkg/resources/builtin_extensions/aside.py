@@ -77,6 +77,30 @@ do anything with the same oversized prompt or the same cancelled context.
 ``/aside-advisor`` and ``/aside-delegate`` set a single pinned model; edit
 ``aside.json`` directly to configure a chain array.
 
+Advisor modes: self vs strong
+-----------------------------
+
+Escalation has a ``mode`` (``auto`` | ``self`` | ``strong``, default auto):
+
+  * ``self`` — the advisor chain answers on the FULL session (unchanged
+    original behaviour).
+  * ``strong`` — the model configured under ``"strong_advisor"`` in
+    aside.json (e.g. ``"anthropic/claude-fable-5:high"``; a chain array also
+    works) answers on a BRIEF the tool composes from the session file: the
+    original user task, the last N turns, the turns named in ``refs`` (turn
+    ids or exact quotes), then the question. No full context. The host's
+    system prompt still leads the call (side_query ``messages`` replaces only
+    the transcript).
+  * ``auto`` — deterministic: strong when the latest user message asks for
+    it, when ``high_stakes`` is set, or when self was already consulted on
+    the same problem (same user ask or same title); otherwise self.
+
+The strong advisor keeps one append-only thread per (session, model) in
+session data; later consults append only a delta, so the prefix stays
+byte-identical for the 1h side-query cache. Unset ``strong_advisor`` makes
+strong fall back to self with a note. Every choice is logged to session data
+(``aside.advisor.log``) and the ``aside/advisor-mode`` card.
+
 Delegate de-escalation
 ----------------------
 
@@ -116,6 +140,7 @@ in every request and survives compaction. There is no separate skill.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import re
 import time
@@ -1265,8 +1290,13 @@ def _run_side_query_with_card(
     model: str | None,
     provider: str | None,
     effort: str | None,
+    messages: list[dict[str, str]] | None = None,
 ) -> tuple[str | None, str | None, dict[str, int], str | None]:
     """Run a streaming side_query and publish a card for the whole lifecycle.
+
+    ``messages`` (strong-advisor mode) replaces the session transcript with a
+    caller-supplied thread; it is forwarded only when set so the call shape
+    of the ordinary full-context path is unchanged.
 
     Returns ``(text, error, usage, resolved_effort)`` — exactly one of
     text/error is non-None. ``usage`` carries the call's token counters (empty
@@ -1291,9 +1321,10 @@ def _run_side_query_with_card(
     # Streaming side_query — fall back to the blocking flavor when the
     # host doesn't have streaming (older fir releases). The card still
     # gets a terminal state in both branches.
+    extra: dict[str, Any] = {} if messages is None else {"messages": messages}
     if not hasattr(ctx, "side_query_stream"):
         try:
-            text = ctx.side_query(question, model=model, provider=provider, effort=effort)
+            text = ctx.side_query(question, model=model, provider=provider, effort=effort, **extra)
         except Exception as exc:
             err = str(exc)
             ctx.put_observable(key, slug="ERR", detail=err)
@@ -1304,7 +1335,7 @@ def _run_side_query_with_card(
         ctx.put_observable(key, slug="stop", detail=text)
         return text, None, {}, None
 
-    stream = ctx.side_query_stream(question, model=model, provider=provider, effort=effort)
+    stream = ctx.side_query_stream(question, model=model, provider=provider, effort=effort, **extra)
 
     partial = ""
     usage: dict[str, int] = {}
@@ -1397,8 +1428,13 @@ def _run_side_query_chain(
     *,
     chain: list[dict[str, str]],
     role_label: str | None,
+    messages: list[dict[str, str]] | None = None,
 ) -> tuple[str | None, str | None, dict[str, str] | None, str, dict[str, int]]:
     """Run a side query, walking a candidate chain with executor fallback.
+
+    ``messages`` (strong-advisor mode) is forwarded to every attempt —
+    candidates and the executor fallback alike — so every model in the walk
+    sees the same brief thread instead of the session transcript.
 
     Walks *chain* (an ordered list of resolved advisor/delegate specs) in
     order. Returns ``(text, error, used_cfg, note, usage)`` — ``usage`` is the
@@ -1552,7 +1588,12 @@ def _run_side_query_chain(
                     time.sleep(_EMPTY_CONTENT_RETRY_BACKOFF)
             attempts_made += 1
             text, err, attempt_usage, resolved = _run_side_query_with_card(
-                ctx, question, model=model, provider=provider, effort=use_effort
+                ctx,
+                question,
+                model=model,
+                provider=provider,
+                effort=use_effort,
+                messages=messages,
             )
             usage = _merge_usage(usage, attempt_usage)
             if asked_off:
@@ -2309,6 +2350,448 @@ def _run_agentic_delegate(
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Advisor modes: self (full context) vs strong (brief thread)
+# ---------------------------------------------------------------------------
+#
+# Mode semantics are in the module docstring. Mechanism notes:
+#
+# The strong thread is append-only: a later consult sends the previous
+# thread unchanged and adds one user block (turns since the last consult +
+# new refs, verbatim even when a ref is an old turn) — never re-sorting,
+# deduping or rewriting earlier blocks, so each consult is a byte-identical
+# prefix of the next and the 1h side-query cache keeps hitting. Over budget,
+# or when the anchor turn is gone, it restarts from one compacted brief.
+
+_STRONG_CONFIG_KEY = "strong_advisor"
+_STRONG_RECENT_TURNS = 8
+_STRONG_DELTA_MAX_TURNS = 2 * _STRONG_RECENT_TURNS
+_STRONG_TURN_CHARS = 3000
+_STRONG_TASK_CHARS = 6000
+_STRONG_BUDGET_TOKENS = 40_000
+_STRONG_COMPACT_ADVICE = 2
+_STRONG_COMPACT_ADVICE_CHARS = 2000
+_STRONG_THREAD_KEY = "aside.strong.thread"
+_CONSULT_LOG_KEY = "aside.advisor.log"
+_CONSULT_LOG_MAX = 50
+_MODES = ("auto", "self", "strong")
+_STRONG_ECHO = "[tool result: aside]\n[advisor mode: strong"
+
+_STRONG_ROLE = (
+    "You are a senior technical advisor to a coding agent (the executor) that "
+    "is working on a user's task. You do NOT see the executor's full session: "
+    "you see a brief — the user's original task, the most recent turns, and "
+    "the turns the executor flagged as relevant — and, on later consults, only "
+    "what happened since. Your earlier advice stays in this thread. Answer the "
+    "executor's question directly and decisively. Where the brief lacks "
+    "something decisive, name exactly what the executor should check rather "
+    "than guessing. Be concise."
+)
+
+# The user asking for the strong advisor in their latest message. Kept narrow
+# on purpose: a false positive spends strong-model money on every escalation
+# of that turn.
+_USER_STRONG_RE = re.compile(
+    r"\b(strong(er)?[ -]advisor|strong[ -]mode|(ask|use|consult|escalate to) "
+    r"(the )?strong(er)?( model)?)\b",
+    re.IGNORECASE,
+)
+
+
+def _strong_source() -> dict[str, str] | list[dict[str, str]] | None:
+    """Configured strong advisor (``strong_advisor`` in aside.json) or None.
+
+    Unlike the advisor there is no bundled default: strong mode is opt-in,
+    and unset means "fall back to self with a note".
+    """
+    return _load_role_config_source(_STRONG_CONFIG_KEY, [])[0]
+
+
+def _clip(text: str, limit: int) -> str:
+    """Head+tail clip with an explicit marker — deterministic for caching."""
+    if len(text) <= limit:
+        return text
+    half = limit // 2
+    return f"{text[:half]}\n… [{len(text) - limit} chars clipped] …\n{text[-half:]}"
+
+
+def _content_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+    parts = [
+        str(b.get("text", "")) for b in content if isinstance(b, dict) and b.get("type") == "text"
+    ]
+    return "\n".join(p for p in parts if p)
+
+
+def _render_turn(msg: dict) -> str:
+    """Render one session message as plain text. Thinking is dropped."""
+    role = msg.get("role", "")
+    content = msg.get("content")
+    if role == "assistant":
+        parts: list[str] = []
+        for block in content if isinstance(content, list) else []:
+            if not isinstance(block, dict):
+                continue
+            kind = block.get("type")
+            if kind == "text" and block.get("text"):
+                parts.append(str(block["text"]))
+            elif kind == "toolCall":
+                name = block.get("name", "?")
+                # The aside call itself would only echo the question.
+                args = "" if name == "aside" else json.dumps(block.get("arguments", {}))
+                parts.append(f"[tool call: {name} {_clip(args, 400)}]".rstrip())
+        return "\n".join(parts)
+    text = _content_text(content)
+    if role == "toolResult":
+        return f"[tool result: {msg.get('toolName', '?')}]\n{text}"
+    return text
+
+
+def _session_turns(ctx: fir_ext.Context) -> list[dict[str, str]]:
+    """Message turns from the session file: ``[{id, role, text}]`` in order."""
+    try:
+        path = ctx.get_session_file()
+    except Exception:
+        return []
+    if not isinstance(path, str) or not path:
+        return []
+    turns: list[dict[str, str]] = []
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                try:
+                    entry = json.loads(line)
+                except ValueError:
+                    continue
+                if not isinstance(entry, dict) or entry.get("type") != "message":
+                    continue
+                msg = entry.get("message")
+                if not isinstance(msg, dict):
+                    continue
+                text = _render_turn(msg)
+                # A strong consult's own result is already in the advisor
+                # thread as its reply; re-sending it in a delta is pure waste.
+                if text.startswith(_STRONG_ECHO):
+                    continue
+                turns.append(
+                    {
+                        "id": str(entry.get("id", "")),
+                        "role": str(msg.get("role", "")),
+                        "text": text,
+                    }
+                )
+    except (OSError, UnicodeDecodeError):
+        return []
+    return turns
+
+
+def _format_turn(turn: dict[str, str], limit: int = _STRONG_TURN_CHARS) -> str:
+    return f"### [{turn['id']}] {turn['role']}\n{_clip(turn['text'], limit)}"
+
+
+def _resolve_refs(
+    turns: list[dict[str, str]], refs: list[str]
+) -> tuple[list[dict[str, str]], list[str]]:
+    """Resolve refs to turns, in the order given. Returns (turns, unresolved).
+
+    A ref matches a turn id exactly, else a unique id prefix (≥4 chars), else
+    — latest first — a turn whose text contains it (a quote).
+    """
+    found: list[dict[str, str]] = []
+    missing: list[str] = []
+    for ref in refs:
+        ref = str(ref).strip()
+        if not ref:
+            continue
+        hit = next((t for t in turns if t["id"] == ref), None)
+        if hit is None and len(ref) >= 4:
+            pref = [t for t in turns if t["id"].startswith(ref)]
+            if len(pref) == 1:
+                hit = pref[0]
+        if hit is None:
+            hit = next((t for t in reversed(turns) if ref in t["text"]), None)
+        if hit is None:
+            missing.append(ref)
+        else:
+            found.append(hit)
+    return found, missing
+
+
+def _original_task(turns: list[dict[str, str]]) -> str:
+    first = next((t for t in turns if t["role"] == "user" and t["text"].strip()), None)
+    return _clip(first["text"], _STRONG_TASK_CHARS) if first else "(no user task found)"
+
+
+def _latest_user_turn(turns: list[dict[str, str]]) -> dict[str, str] | None:
+    return next((t for t in reversed(turns) if t["role"] == "user"), None)
+
+
+def _refs_block(found: list[dict[str, str]], missing: list[str]) -> str:
+    if not found and not missing:
+        return ""
+    out = ["## Turns flagged by the executor"]
+    out += [_format_turn(t) for t in found]
+    if missing:
+        out.append("(unresolved refs: " + ", ".join(missing) + ")")
+    return "\n\n".join(out)
+
+
+def _first_brief(
+    turns: list[dict[str, str]],
+    found: list[dict[str, str]],
+    missing: list[str],
+    question: str,
+    prior_advice: list[str] | None = None,
+) -> str:
+    """First (or compacted) consult message: role, task, recent, refs, question."""
+    parts = [_STRONG_ROLE, "## Original user task\n" + _original_task(turns)]
+    if prior_advice:
+        parts.append(
+            "## Your earlier advice (compacted)\n"
+            + "\n\n---\n\n".join(_clip(a, _STRONG_COMPACT_ADVICE_CHARS) for a in prior_advice)
+        )
+    recent = turns[-_STRONG_RECENT_TURNS:]
+    if recent:
+        parts.append("## Most recent turns\n\n" + "\n\n".join(_format_turn(t) for t in recent))
+    refs = _refs_block(found, missing)
+    if refs:
+        parts.append(refs)
+    parts.append("## Question\n" + question)
+    return "\n\n".join(parts)
+
+
+def _delta_brief(
+    new_turns: list[dict[str, str]],
+    found: list[dict[str, str]],
+    missing: list[str],
+    question: str,
+) -> str:
+    """Follow-up consult message: turns since last consult, refs, question."""
+    parts: list[str] = []
+    omitted = max(0, len(new_turns) - _STRONG_DELTA_MAX_TURNS)
+    shown = new_turns[omitted:]
+    if shown:
+        head = "## Turns since your last advice"
+        if omitted:
+            head += f" ({omitted} earlier turns omitted)"
+        parts.append(head + "\n\n" + "\n\n".join(_format_turn(t) for t in shown))
+    else:
+        parts.append("## Turns since your last advice\n(none)")
+    refs = _refs_block(found, missing)
+    if refs:
+        parts.append(refs)
+    parts.append("## Question\n" + question)
+    return "\n\n".join(parts)
+
+
+def _est_tokens(messages: list[dict[str, str]]) -> int:
+    return sum(len(m.get("text", "")) for m in messages) // 4
+
+
+def _load_thread(ctx: fir_ext.Context, model_key: str) -> dict | None:
+    try:
+        raw = ctx.get_session_data(_STRONG_THREAD_KEY)
+    except Exception:
+        return None
+    if not isinstance(raw, str) or not raw:
+        return None
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        return None
+    if not isinstance(data, dict) or data.get("model") != model_key:
+        # New model => new thread.
+        return None
+    if not isinstance(data.get("messages"), list):
+        return None
+    return data
+
+
+def _compose_strong(
+    thread: dict | None,
+    turns: list[dict[str, str]],
+    refs: list[str],
+    question: str,
+) -> tuple[list[dict[str, str]], str, str, str]:
+    """Plan a strong consult. Returns ``(prior, message, last_id, kind)``.
+
+    ``prior`` is the existing thread sent unchanged (byte-identical prefix),
+    ``message`` the new user block (sent as the side-query question), and
+    ``kind`` one of ``new`` / ``delta`` / ``compacted`` for the trace.
+    """
+    found, missing = _resolve_refs(turns, refs)
+    last_id = turns[-1]["id"] if turns else ""
+    if thread is None:
+        return [], _first_brief(turns, found, missing, question), last_id, "new"
+    prior = list(thread["messages"])
+    ids = [t["id"] for t in turns]
+    anchor = thread.get("last_turn_id", "")
+    if anchor in ids:
+        message = _delta_brief(turns[ids.index(anchor) + 1 :], found, missing, question)
+        if _est_tokens(prior) + len(message) // 4 <= _STRONG_BUDGET_TOKENS:
+            return prior, message, last_id, "delta"
+    # Over budget, or the anchor is gone (session compacted/rewound): restart
+    # from ONE compacted brief that carries the latest advice forward.
+    advice = [m["text"] for m in prior if m.get("role") == "assistant"]
+    advice = advice[-_STRONG_COMPACT_ADVICE:]
+    return [], _first_brief(turns, found, missing, question, advice), last_id, "compacted"
+
+
+def _save_thread(
+    ctx: fir_ext.Context,
+    model_key: str,
+    prior: list[dict[str, str]],
+    message: str,
+    answer: str,
+    last_id: str,
+) -> None:
+    data = {
+        "model": model_key,
+        "messages": [
+            *prior,
+            {"role": "user", "text": message},
+            {"role": "assistant", "text": answer},
+        ],
+        "last_turn_id": last_id,
+    }
+    # Best effort: a lost thread only costs a fresh (uncached) brief next time.
+    with contextlib.suppress(Exception):
+        ctx.set_session_data(_STRONG_THREAD_KEY, json.dumps(data))
+
+
+def _consult_log(ctx: fir_ext.Context) -> list[dict]:
+    try:
+        raw = ctx.get_session_data(_CONSULT_LOG_KEY)
+        data = json.loads(raw) if isinstance(raw, str) and raw else []
+    except Exception:
+        return []
+    return data if isinstance(data, list) else []
+
+
+def _log_consult(ctx: fir_ext.Context, record: dict) -> None:
+    log = _consult_log(ctx)
+    log.append(record)
+    # Best effort: logging must never fail the consult it describes.
+    with contextlib.suppress(Exception):
+        ctx.set_session_data(_CONSULT_LOG_KEY, json.dumps(log[-_CONSULT_LOG_MAX:]))
+        ctx.put_observable(
+            "aside/advisor-mode",
+            slug=f"{record.get('mode')}:{'ok' if record.get('ok') else 'ERR'}",
+            detail=json.dumps(record),
+        )
+
+
+def _norm_title(title: str) -> str:
+    return " ".join(title.lower().split())
+
+
+def _choose_mode(
+    requested: str,
+    *,
+    high_stakes: bool,
+    title: str,
+    user_turn: dict[str, str] | None,
+    log: list[dict],
+) -> tuple[str, str]:
+    """Deterministic mode routing. Returns ``(mode, reason)``.
+
+    Explicit self/strong wins. ``auto`` picks strong when the user asked for
+    it, the executor flagged high stakes, or self was already consulted on the
+    same problem (same user ask or same title); otherwise self.
+    """
+    if requested in ("self", "strong"):
+        return requested, "requested"
+    if user_turn is not None and _USER_STRONG_RE.search(user_turn["text"]):
+        return "strong", "user asked"
+    if high_stakes:
+        return "strong", "high stakes"
+    ask = user_turn["id"] if user_turn else ""
+    key = _norm_title(title)
+    for rec in log:
+        if rec.get("mode") != "self":
+            continue
+        if (ask and rec.get("user_turn") == ask) or (key and rec.get("title") == key):
+            return "strong", "self already consulted on this problem"
+    return "self", "default"
+
+
+def _escalate(
+    ctx: fir_ext.Context,
+    question: str,
+    *,
+    mode: str,
+    refs: list[str],
+    high_stakes: bool,
+    title: str,
+) -> tuple[str | None, str | None, dict[str, str] | None, str, dict[str, int], str]:
+    """Run an escalated side query in the chosen mode.
+
+    Same return shape as :func:`_run_side_query_chain` plus a trailing mode
+    trace line (``[advisor mode: …]``) for the result.
+    """
+    turns = _session_turns(ctx)
+    user_turn = _latest_user_turn(turns)
+    chosen, reason = _choose_mode(
+        mode, high_stakes=high_stakes, title=title, user_turn=user_turn, log=_consult_log(ctx)
+    )
+    record: dict[str, Any] = {
+        "ts": int(time.time()),
+        "requested": mode,
+        "mode": chosen,
+        "reason": reason,
+        "title": _norm_title(title),
+        "user_turn": user_turn["id"] if user_turn else "",
+    }
+
+    strong_chain = (
+        _resolve_role_chain(ctx, _strong_source(), "advisor") if chosen == "strong" else []
+    )
+    if chosen == "strong" and not strong_chain:
+        why = (
+            'not configured — set "strong_advisor" in aside.json'
+            if _strong_source() is None
+            else "unavailable"
+        )
+        record.update(mode="self", fallback=f"strong advisor {why}")
+        chosen, reason = "self", f"{reason}; strong advisor {why}"
+
+    if chosen == "self":
+        text, err, used, note, usage = _run_side_query_chain(
+            ctx, question, chain=_resolve_advisor_chain(ctx), role_label="advisor"
+        )
+        record.update(model=_format_advisor_spec(used) if used else "", ok=err is None)
+        _log_consult(ctx, record)
+        # Plain self escalation keeps its original, unprefixed output; only a
+        # routed-away or degraded choice earns a trace line.
+        trace = "" if reason in ("default", "requested") else f"[advisor mode: self — {reason}]"
+        return text, err, used, note, usage, trace
+
+    head = strong_chain[0]
+    model_key = f"{head['provider']}/{head['model']}"
+    prior, message, last_id, kind = _compose_strong(
+        _load_thread(ctx, model_key), turns, refs, question
+    )
+    text, err, used, note, usage = _run_side_query_chain(
+        ctx, message, chain=strong_chain, role_label="advisor", messages=prior
+    )
+    answered_by_head = (
+        used is not None and f"{used['provider']}/{used['model']}" == model_key and not note
+    )
+    if err is None and text and text.strip() and answered_by_head:
+        _save_thread(ctx, model_key, prior, message, text, last_id)
+    record.update(
+        model=_format_advisor_spec(used) if used else "",
+        thread=kind,
+        refs=list(refs),
+        ok=err is None,
+    )
+    _log_consult(ctx, record)
+    return text, err, used, note, usage, f"[advisor mode: strong ({kind} thread) — {reason}]"
+
+
 def _run_aside(
     tools: list[dict],
     instructions: str,
@@ -2318,6 +2801,10 @@ def _run_aside(
     goal: str = "",
     allow_tools: list | None = None,
     max_iterations: Any = None,
+    mode: str = "auto",
+    refs: list | None = None,
+    high_stakes: bool = False,
+    title: str = "",
 ) -> dict:
     """Execute *tools*, collect outputs, synthesise via side_query().
 
@@ -2346,6 +2833,10 @@ def _run_aside(
         Narrow agentic mode's read-only tool set. Validated against it.
     max_iterations : int, optional
         Agentic iteration budget, clamped to 1..20 (default 8).
+    mode, refs, high_stakes, title
+        Escalation only. ``mode`` is ``auto`` (default), ``self`` or
+        ``strong``; ``refs`` names session turns for the strong brief;
+        ``high_stakes`` steers ``auto`` to strong. See :func:`_escalate`.
 
     Returns
     -------
@@ -2354,6 +2845,14 @@ def _run_aside(
     """
     if escalate and delegate:
         return _error("escalate and delegate are mutually exclusive — pick one")
+    mode = (mode or "auto").strip().lower()
+    if mode not in _MODES:
+        return _error(f"mode must be one of {', '.join(_MODES)}, got {mode!r}")
+    if refs is not None and not isinstance(refs, list):
+        return _error("refs must be a list of turn ids or quotes")
+    refs = [str(r) for r in (refs or [])]
+    if not escalate and (mode != "auto" or refs or high_stakes):
+        return _error("mode, refs and high_stakes apply to escalation — set escalate=true")
 
     goal = (goal or "").strip()
     if goal:
@@ -2398,18 +2897,27 @@ def _run_aside(
     # tier when needed, skipping models cooling off after a recent failure).
     chain: list[dict[str, str]] = []
     role_label: str | None = None
-    if escalate and _advisor() is not None:
-        chain = _resolve_advisor_chain(ctx)
+    advising = escalate and _advisor() is not None
+    if advising:
         role_label = "advisor"
     elif delegate and _delegate() is not None:
         chain = _resolve_delegate_chain(ctx)
         role_label = "delegate"
 
+    def _ask(question: str):
+        """Route one side query; returns the chain tuple plus a mode trace."""
+        if advising:
+            return _escalate(
+                ctx, question, mode=mode, refs=refs, high_stakes=high_stakes, title=title
+            )
+        return (
+            *_run_side_query_chain(ctx, question, chain=chain, role_label=role_label),
+            "",
+        )
+
     # No tools — pure ephemeral side query.
     if not tools:
-        synthesis, err, used_cfg, note, usage = _run_side_query_chain(
-            ctx, instructions, chain=chain, role_label=role_label
-        )
+        synthesis, err, used_cfg, note, usage, trace = _ask(instructions)
         if err is not None:
             return _side_query_error(RuntimeError(err))
         # Belt-and-suspenders: SideQuery should now return an error on truly
@@ -2421,6 +2929,8 @@ def _run_aside(
         # When note is set the answer came from the executor model (chain
         # exhausted) — drop the advisor/delegate trace prefix.
         text = note + synthesis if note else _prefix_for_role(synthesis, used_cfg, role_label)
+        if trace:
+            text = f"{trace}\n{text}"
         return {
             "content": [{"type": "text", "text": _append_usage(text, usage)}],
             "is_error": False,
@@ -2502,9 +3012,7 @@ def _run_aside(
     # Synthesise collected outputs.
     ctx.report_progress("Synthesizing...")
     prompt = _build_synthesis_prompt(results, instructions)
-    synthesis, err, used_cfg, note, usage = _run_side_query_chain(
-        ctx, prompt, chain=chain, role_label=role_label
-    )
+    synthesis, err, used_cfg, note, usage, trace = _ask(prompt)
     if err is not None:
         return _side_query_error(RuntimeError(err))
     if not synthesis or not synthesis.strip():
@@ -2532,9 +3040,12 @@ def _run_aside(
             {
                 "type": "text",
                 "text": _append_usage(
-                    (note + synthesis)
-                    if note
-                    else _prefix_for_role(synthesis, used_cfg, role_label),
+                    (f"{trace}\n" if trace else "")
+                    + (
+                        (note + synthesis)
+                        if note
+                        else _prefix_for_role(synthesis, used_cfg, role_label)
+                    ),
                     usage,
                 ),
             }
@@ -2658,6 +3169,16 @@ def _aside_tool_description() -> str:
             "durable first). The advisor already sees this whole session — ask the "
             "question, add only what is not in it, do not recap. Weigh the advice; "
             "if your evidence contradicts it, say so in one reconcile call."
+            "\n\nAdvisor modes ('mode', default auto): 'self' = the advisor sees the "
+            "full session (above). 'strong' = a configured stronger model that sees "
+            "ONLY a brief the tool composes: the original user task, the last few "
+            "turns, the turns you name in 'refs' (turn ids, or short exact quotes), "
+            "then your question — so in strong mode state the problem in the "
+            "question and pass refs for the turns that matter. It keeps a "
+            "thread of its own earlier advice. auto picks strong when the user asked "
+            "for it, when you set high_stakes, or when self was already consulted "
+            "on the same problem; otherwise self. Strong falls back to self with a "
+            "note when no strong advisor is configured."
         )
     if _delegate() is not None:
         base += (
@@ -2723,6 +3244,32 @@ def _aside_tool_parameters() -> dict[str, Any]:
                 "When true, route this side query to the configured advisor "
                 "model instead of the executor's current model. See the tool "
                 "description for when."
+            ),
+        }
+        mode_prop: dict[str, Any] = {
+            "type": "string",
+            "enum": list(_MODES),
+            "description": (
+                "Escalation only. 'self' = advisor sees the full session; "
+                "'strong' = stronger model on a composed brief (task + recent "
+                "turns + refs + question); 'auto' (default) routes "
+                "deterministically — see the tool description."
+            ),
+        }
+        schema["properties"]["mode"] = mode_prop
+        schema["properties"]["refs"] = {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": (
+                "Escalation, strong mode: session turns the advisor must see — "
+                "turn ids, or short exact quotes from the turn (latest match wins)."
+            ),
+        }
+        schema["properties"]["high_stakes"] = {
+            "type": "boolean",
+            "description": (
+                "Escalation: flag that being wrong is costly; makes mode=auto "
+                "pick the strong advisor."
             ),
         }
     if _delegate() is not None:
@@ -2797,6 +3344,10 @@ def aside(params: dict, ctx: fir_ext.Context):
         goal=params.get("goal", "") or "",
         allow_tools=params.get("allow_tools"),
         max_iterations=params.get("max_iterations"),
+        mode=params.get("mode") or "auto",
+        refs=params.get("refs"),
+        high_stakes=bool(params.get("high_stakes", False)),
+        title=params.get("title", "") or "",
     )
 
 

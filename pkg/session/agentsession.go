@@ -1839,6 +1839,44 @@ type SideQueryOptions struct {
 	// Effort overrides the thinking/reasoning level for this call.
 	// Empty string inherits the agent's current ThinkingLevel.
 	Effort ai.ThinkingLevel
+
+	// Messages, when non-nil (an empty, non-nil slice included), REPLACES the
+	// session transcript snapshot as the conversation the side query runs
+	// on: the call sees the agent's system prompt, then exactly these turns,
+	// then the question. An empty non-nil slice therefore means "no session
+	// context at all". Used by the aside extension's strong-advisor mode,
+	// which keeps its own append-only brief thread instead of shipping the
+	// full session. Turns must alternate starting with "user".
+	Messages []SideQueryMessage
+}
+
+// SideQueryMessage is one plain-text turn of a caller-supplied side-query
+// thread. Role is "user" or "assistant".
+type SideQueryMessage struct {
+	Role string `json:"role"`
+	Text string `json:"text"`
+}
+
+// sideQueryThread converts a caller-supplied thread to agent messages.
+func sideQueryThread(thread []SideQueryMessage) ([]agent.AgentMessage, error) {
+	now := time.Now().UnixMilli()
+	out := make([]agent.AgentMessage, 0, len(thread))
+	for i, m := range thread {
+		switch m.Role {
+		case "user":
+			out = append(out, agent.NewAgentMessage(ai.NewUserMsg(m.Text, now)))
+		case "assistant":
+			out = append(out, agent.NewAgentMessage(ai.NewAssistantMsg(ai.AssistantMessage{
+				Role:       "assistant",
+				Content:    []ai.AssistantContent{ai.NewTextContent(m.Text)},
+				StopReason: ai.StopReasonStop,
+				Timestamp:  now,
+			})))
+		default:
+			return nil, fmt.Errorf("messages[%d]: role must be \"user\" or \"assistant\", got %q", i, m.Role)
+		}
+	}
+	return out, nil
 }
 
 // SideQueryDelta is a single streaming event from SideQueryStream. Type is
@@ -1930,10 +1968,19 @@ func (s *AgentSession) SideQuery(ctx context.Context, question string, opts *Sid
 // NO-COMPACTION CONTRACT: SideQueryStream MUST NOT trigger auto-compaction.
 // Inherited from Agent.SimplePromptStream — see its contract comment.
 func (s *AgentSession) SideQueryStream(ctx context.Context, question string, opts *SideQueryOptions, onDelta func(SideQueryDelta)) (SideQueryResult, error) {
-	// Snapshot current messages.
-	state := s.Agent.State()
-	msgs := make([]agent.AgentMessage, len(state.Messages))
-	copy(msgs, state.Messages)
+	var msgs []agent.AgentMessage
+	if opts != nil && opts.Messages != nil {
+		thread, err := sideQueryThread(opts.Messages)
+		if err != nil {
+			return SideQueryResult{}, fmt.Errorf("side-query: %w", err)
+		}
+		msgs = thread
+	} else {
+		// Snapshot current messages.
+		state := s.Agent.State()
+		msgs = make([]agent.AgentMessage, len(state.Messages))
+		copy(msgs, state.Messages)
+	}
 
 	// Strip any in-flight tool call lacking a result before appending the
 	// question. The assistant turn is committed on EventMessageEnd *before*

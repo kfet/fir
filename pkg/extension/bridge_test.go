@@ -640,7 +640,7 @@ func TestBridge_SideQuery_PassesOverridesThrough(t *testing.T) {
 	go func() { _ = b.Run(ctx, api) }()
 
 	// Send side_query with full override params.
-	params := json.RawMessage(`{"question":"q","model":"claude-opus-4-x","provider":"anthropic","effort":"high"}`)
+	params := json.RawMessage(`{"question":"q","model":"claude-opus-4-x","provider":"anthropic","effort":"high","messages":[{"role":"user","text":"brief"},{"role":"assistant","text":"advice"}]}`)
 	if err := extCodec.WriteRequest(7, "side_query", &params); err != nil {
 		t.Fatal(err)
 	}
@@ -671,6 +671,9 @@ func TestBridge_SideQuery_PassesOverridesThrough(t *testing.T) {
 	if api.sideQueryOpts.Effort != ai.ThinkingHigh {
 		t.Errorf("effort = %q, want %q", api.sideQueryOpts.Effort, ai.ThinkingHigh)
 	}
+	if got := api.sideQueryOpts.Messages; len(got) != 2 || got[0].Role != "user" || got[1].Text != "advice" {
+		t.Errorf("messages = %+v", got)
+	}
 }
 
 func TestBridge_SideQuery_NilOptsWhenAllUnset(t *testing.T) {
@@ -697,6 +700,35 @@ func TestBridge_SideQuery_NilOptsWhenAllUnset(t *testing.T) {
 	defer api.mu.Unlock()
 	if api.sideQueryOpts != nil {
 		t.Errorf("expected nil opts when no overrides set, got %+v", api.sideQueryOpts)
+	}
+}
+
+func TestBridge_SideQuery_EmptyMessagesKeepsIsolation(t *testing.T) {
+	b, extCodec := pipePair(&InitResult{})
+	api := newMockAPI()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = b.Run(ctx, api) }()
+
+	// An explicit empty thread means "no session context" and must survive
+	// decoding as a non-nil slice.
+	params := json.RawMessage(`{"question":"q","messages":[]}`)
+	if err := extCodec.WriteRequest(9, "side_query", &params); err != nil {
+		t.Fatal(err)
+	}
+	msg, err := extCodec.ReadMessage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp, ok := msg.(*Response); !ok || resp.Error != nil {
+		t.Fatalf("expected ok response, got %+v", msg)
+	}
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if api.sideQueryOpts == nil || api.sideQueryOpts.Messages == nil {
+		t.Fatalf("expected non-nil empty Messages, got %+v", api.sideQueryOpts)
 	}
 }
 

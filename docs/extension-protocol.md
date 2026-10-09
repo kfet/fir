@@ -825,12 +825,14 @@ pattern (escalating to a stronger model when stuck):
 | `model`    | string  | Optional. Model id (e.g. `claude-opus-4-x`).                       |
 | `provider` | string  | Optional. Provider id (e.g. `anthropic`); needed only to disambiguate. |
 | `effort`   | string  | Optional. Reasoning level: `off`/`minimal`/`low`/`medium`/`high`/`xhigh`/`max`. |
+| `messages` | array   | Optional. Caller-supplied thread of `{"role":"user"\|"assistant","text":"…"}` turns (alternating, starting with `user`). When present — even as `[]` — it REPLACES the session transcript: the call sees the agent's system prompt, these turns, then `question`. `[]` therefore means a context-free call. Used by `aside`'s strong-advisor mode for its append-only brief thread. |
 | `stream`   | boolean | Optional. When true, host emits `side_query/delta` notifications keyed by this request's id, then sends the terminating response. Defaults to false (legacy block-and-return). |
 
 ```json
 {"jsonrpc":"2.0","id":1013,"method":"side_query","params":{"question":"Summarise this in one sentence."}}
 {"jsonrpc":"2.0","id":1014,"method":"side_query","params":{"question":"Should I refactor this?","model":"claude-opus-4-x","effort":"high"}}
 {"jsonrpc":"2.0","id":1015,"method":"side_query","params":{"question":"long advisor question…","stream":true}}
+{"jsonrpc":"2.0","id":1016,"method":"side_query","params":{"question":"And now?","messages":[{"role":"user","text":"brief…"},{"role":"assistant","text":"earlier advice…"}]}}
 ```
 
 Response shape:

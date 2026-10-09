@@ -446,11 +446,12 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 			}
 		}
 		var opts *session.SideQueryOptions
-		if p.Model != "" || p.Provider != "" || p.Effort != "" {
+		if p.Model != "" || p.Provider != "" || p.Effort != "" || p.Messages != nil {
 			opts = &session.SideQueryOptions{
 				Model:    p.Model,
 				Provider: p.Provider,
 				Effort:   ai.ThinkingLevel(p.Effort),
+				Messages: p.Messages,
 			}
 		}
 		stop := b.keepAlive()

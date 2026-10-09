@@ -677,6 +677,11 @@ class TestDemoTools(DemoTestCase):
         # The synthesis prompt should include instructions
         question = msg["params"]["question"]
         self.assertIn("Instructions", question)
+        # The probe outputs travel as a caller-supplied thread, not the
+        # session transcript.
+        thread = msg["params"]["messages"]
+        self.assertEqual(thread[0]["role"], "user")
+        self.assertIn("git status", thread[0]["text"])
         fake.stop()
 
     def test_batch_example_reports_progress(self) -> None:

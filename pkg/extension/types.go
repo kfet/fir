@@ -1,6 +1,9 @@
 package extension
 
-import "github.com/kfet/agent"
+import (
+	"github.com/kfet/agent"
+	"github.com/kfet/fir/pkg/session"
+)
 
 // This file defines typed structs for every JSON-RPC method and event
 // payload that crosses the extension wire boundary. They replace ad-hoc
@@ -113,6 +116,10 @@ type sideQueryParams struct {
 	Provider string `json:"provider,omitempty"`
 	Effort   string `json:"effort,omitempty"`
 	Stream   bool   `json:"stream,omitempty"`
+	// Messages, when present (even as []), replaces the session transcript
+	// with this caller-supplied thread (see session.SideQueryOptions.Messages).
+	// Decoding keeps the nil/empty distinction: absent → nil, [] → empty.
+	Messages []session.SideQueryMessage `json:"messages,omitempty"`
 }
 
 // setSessionDataParams maps to "set_session_data".

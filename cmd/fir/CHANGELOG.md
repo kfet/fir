@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+- **Strong-advisor mode for `aside` escalation.** New `mode` (`auto`/`self`/`strong`), `refs` and `high_stakes` params: `strong` routes to the `strong_advisor` model from `aside.json` on a composed brief (task + recent turns + referenced turns + question) held in an append-only, prompt-cache-stable thread per session and model; `auto` picks strong deterministically (user asked, high stakes, or self already consulted on the same problem). Unset config falls back to self with a note.
+- **`side_query` `messages` param.** Extensions can run a side query on a caller-supplied thread instead of the session transcript (`[]` = context-free).
+
 ## [1.31.2] - 2026-10-08
 
 ### Changed

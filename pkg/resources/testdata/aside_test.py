@@ -4134,3 +4134,289 @@ class TestDowngradedReasoningOffRetry(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ---------------------------------------------------------------------------
+# Advisor modes: self vs strong
+# ---------------------------------------------------------------------------
+
+
+class _ModeBase(unittest.TestCase):
+    """Fake ctx backed by a real session file and dict session data."""
+
+    def setUp(self):
+        import tempfile
+
+        self.mod = _load_aside()
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.session_file = os.path.join(self.tmp.name, "s.jsonl")
+        self.entries = []
+        self.data = {}
+        self.calls = []
+        self.strong_cfg = {"provider": "anthropic", "model": "claude-fable-5", "effort": "high"}
+        patcher = mock.patch.object(self.mod, "_strong_source", side_effect=lambda: self.strong_cfg)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.mod._resolve_role_chain = lambda ctx, cfg, role: self.mod._normalise_chain(cfg)
+        self.mod._resolve_advisor_chain = lambda ctx: [
+            {"provider": "anthropic", "model": "claude-opus-4-8"}
+        ]
+        self.ctx = _blocking_ctx()
+        self.ctx.get_session_file = mock.MagicMock(return_value=self.session_file)
+        self.ctx.get_session_data = mock.MagicMock(side_effect=lambda k: self.data.get(k))
+        self.ctx.set_session_data = mock.MagicMock(
+            side_effect=lambda k, v: self.data.__setitem__(k, v)
+        )
+        self.answers = iter([f"advice {i}" for i in range(1, 100)])
+
+        def side_query(question, **kw):
+            self.calls.append({"question": question, **kw})
+            return next(self.answers)
+
+        self.ctx.side_query = mock.MagicMock(side_effect=side_query)
+        self._write()
+
+    def add(self, eid, role, text, **extra):
+        msg = {"role": role, "content": [{"type": "text", "text": text}], **extra}
+        self.entries.append({"type": "message", "id": eid, "message": msg})
+        self._write()
+
+    def _write(self):
+        with open(self.session_file, "w") as f:
+            f.write(json.dumps({"type": "session", "id": "sess"}) + "\n")
+            for e in self.entries:
+                f.write(json.dumps(e) + "\n")
+
+    def escalate(self, q, **kw):
+        return self.mod._run_aside([], q, self.ctx, escalate=True, **kw)
+
+
+class TestStrongBriefComposition(_ModeBase):
+    def test_first_consult_is_context_free_brief(self):
+        self.add("u1", "user", "Build the frobnicator")
+        for i in range(12):
+            self.add(f"a{i}", "assistant", f"step {i}")
+        res = self.escalate("Which design?", mode="strong", refs=["a0"])
+        self.assertFalse(res["is_error"], res)
+        call = self.calls[0]
+        # Context-free: an explicit empty thread, never the session.
+        self.assertEqual(call["messages"], [])
+        self.assertEqual(call["model"], "claude-fable-5")
+        brief = call["question"]
+        self.assertIn("## Original user task\nBuild the frobnicator", brief)
+        self.assertIn("[a11] assistant", brief)  # recent
+        self.assertNotIn("[a3] assistant", brief)  # outside last N, not referenced
+        self.assertIn("## Turns flagged by the executor\n\n### [a0] assistant", brief)
+        self.assertTrue(brief.endswith("## Question\nWhich design?"))
+        self.assertIn("[advisor mode: strong (new thread) — requested]", res["content"][0]["text"])
+
+    def test_refs_by_quote_and_unresolved(self):
+        self.add("u1", "user", "task")
+        self.add("a1", "assistant", "the magic constant is 42")
+        res = self.escalate("q", mode="strong", refs=["magic constant", "nope-nothing"])
+        self.assertFalse(res["is_error"])
+        brief = self.calls[0]["question"]
+        self.assertIn("### [a1] assistant\nthe magic constant is 42", brief)
+        self.assertIn("(unresolved refs: nope-nothing)", brief)
+
+    def test_tool_calls_and_results_rendered_thinking_dropped(self):
+        self.add("u1", "user", "task")
+        self.entries.append(
+            {
+                "type": "message",
+                "id": "a1",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {"type": "thinking", "thinking": "SECRET"},
+                        {"type": "toolCall", "name": "bash", "arguments": {"command": "ls"}},
+                    ],
+                },
+            }
+        )
+        self.add("r1", "toolResult", "file.go", toolName="bash")
+        self._write()
+        self.escalate("q", mode="strong")
+        brief = self.calls[0]["question"]
+        self.assertNotIn("SECRET", brief)
+        self.assertIn('[tool call: bash {"command": "ls"}]', brief)
+        self.assertIn("[tool result: bash]\nfile.go", brief)
+
+
+class TestStrongThreadDelta(_ModeBase):
+    def test_delta_appends_and_prefix_is_stable(self):
+        self.add("u1", "user", "task")
+        self.add("a1", "assistant", "early work")
+        self.escalate("first?", mode="strong")
+        first_brief = self.calls[0]["question"]
+
+        self.add("a2", "assistant", "later work")
+        # Ref an OLD turn — it is appended verbatim, earlier blocks untouched.
+        self.escalate("second?", mode="strong", refs=["a1"])
+        second = self.calls[1]
+        self.assertEqual(
+            second["messages"],
+            [{"role": "user", "text": first_brief}, {"role": "assistant", "text": "advice 1"}],
+        )
+        delta = second["question"]
+        self.assertIn("## Turns since your last advice\n\n### [a2] assistant", delta)
+        self.assertNotIn("[u1]", delta)
+        self.assertIn("## Turns flagged by the executor\n\n### [a1] assistant", delta)
+        self.assertTrue(delta.endswith("## Question\nsecond?"))
+
+        self.add("a3", "assistant", "more")
+        self.escalate("third?", mode="strong")
+        third = self.calls[2]["messages"]
+        # Byte-identical prefix: the previous thread is a prefix of the next.
+        self.assertEqual(third[:2], second["messages"])
+        self.assertEqual(third[2], {"role": "user", "text": delta})
+        self.assertEqual(third[3], {"role": "assistant", "text": "advice 2"})
+
+    def test_strong_advice_echo_not_resent(self):
+        self.add("u1", "user", "task")
+        res = self.escalate("q1", mode="strong")
+        self.add("r1", "toolResult", res["content"][0]["text"], toolName="aside")
+        self.add("a2", "assistant", "acted on it")
+        self.escalate("q2", mode="strong")
+        delta = self.calls[1]["question"]
+        self.assertNotIn("[r1]", delta)
+        self.assertIn("[a2] assistant", delta)
+
+    def test_new_model_starts_new_thread(self):
+        self.add("u1", "user", "task")
+        self.escalate("q1", mode="strong")
+        self.strong_cfg = {"provider": "anthropic", "model": "claude-opus-5"}
+        self.escalate("q2", mode="strong")
+        self.assertEqual(self.calls[1]["messages"], [])
+        self.assertIn("## Original user task", self.calls[1]["question"])
+
+    def test_over_budget_restarts_with_compacted_brief(self):
+        self.add("u1", "user", "task")
+        self.escalate("q1", mode="strong")
+        self.mod._STRONG_BUDGET_TOKENS = 10
+        self.add("a1", "assistant", "x" * 400)
+        res = self.escalate("q2", mode="strong")
+        self.assertEqual(self.calls[1]["messages"], [])
+        brief = self.calls[1]["question"]
+        self.assertIn("## Your earlier advice (compacted)\nadvice 1", brief)
+        self.assertIn("(compacted thread)", res["content"][0]["text"])
+
+    def test_executor_fallback_answer_not_committed(self):
+        self.add("u1", "user", "task")
+
+        def fails_then_ok(question, **kw):
+            self.calls.append({"question": question, **kw})
+            if kw.get("model") == "claude-fable-5":
+                raise RuntimeError("side-query: model not found")
+            return "executor answer"
+
+        self.ctx.side_query = mock.MagicMock(side_effect=fails_then_ok)
+        self.escalate("q", mode="strong")
+        self.assertNotIn(self.mod._STRONG_THREAD_KEY, self.data)
+        # Even the executor fallback ran on the brief, not the session.
+        self.assertEqual(self.calls[-1]["messages"], [])
+
+
+class TestAutoRouting(_ModeBase):
+    def mode_of(self, call):
+        return "strong" if "messages" in call else "self"
+
+    def test_default_is_self_full_context(self):
+        self.add("u1", "user", "task")
+        res = self.escalate("q")
+        self.assertEqual(self.mode_of(self.calls[0]), "self")
+        self.assertEqual(self.calls[0]["model"], "claude-opus-4-8")
+        self.assertFalse(res["content"][0]["text"].startswith("[advisor mode"))
+
+    def test_user_ask_routes_strong(self):
+        self.add("u1", "user", "please ask the strong advisor about this")
+        self.escalate("q")
+        self.assertEqual(self.mode_of(self.calls[0]), "strong")
+
+    def test_high_stakes_routes_strong(self):
+        self.add("u1", "user", "task")
+        res = self.escalate("q", high_stakes=True)
+        self.assertEqual(self.mode_of(self.calls[0]), "strong")
+        self.assertIn("high stakes", res["content"][0]["text"])
+
+    def test_repeat_on_same_problem_routes_strong(self):
+        self.add("u1", "user", "task")
+        self.escalate("q1", title="Pick design")
+        self.assertEqual(self.mode_of(self.calls[0]), "self")
+        self.add("a1", "assistant", "tried it")
+        res = self.escalate("q2", title="other")
+        self.assertEqual(self.mode_of(self.calls[1]), "strong")
+        self.assertIn("self already consulted", res["content"][0]["text"])
+
+    def test_same_title_across_user_turns_routes_strong(self):
+        self.add("u1", "user", "task")
+        self.escalate("q1", title="Pick  Design")
+        self.add("u2", "user", "next thing")
+        self.escalate("q2", title="pick design")
+        self.assertEqual(self.mode_of(self.calls[1]), "strong")
+
+    def test_new_user_ask_new_title_stays_self(self):
+        self.add("u1", "user", "task")
+        self.escalate("q1", title="a")
+        self.add("u2", "user", "different problem")
+        self.escalate("q2", title="b")
+        self.assertEqual(self.mode_of(self.calls[1]), "self")
+
+    def test_explicit_self_overrides_rules(self):
+        self.add("u1", "user", "use the strong advisor")
+        self.escalate("q", mode="self", high_stakes=True)
+        self.assertEqual(self.mode_of(self.calls[0]), "self")
+
+    def test_choice_is_logged(self):
+        self.add("u1", "user", "task")
+        self.escalate("q", mode="strong", refs=["u1"])
+        log = json.loads(self.data[self.mod._CONSULT_LOG_KEY])
+        self.assertEqual(log[-1]["mode"], "strong")
+        self.assertEqual(log[-1]["reason"], "requested")
+        self.assertEqual(log[-1]["refs"], ["u1"])
+        self.assertTrue(log[-1]["ok"])
+        self.assertEqual(log[-1]["model"], "anthropic/claude-fable-5:high")
+
+
+class TestStrongFallback(_ModeBase):
+    def test_unset_strong_falls_back_to_self_with_note(self):
+        self.strong_cfg = None
+        self.add("u1", "user", "task")
+        res = self.escalate("q", mode="strong")
+        self.assertNotIn("messages", self.calls[0])
+        self.assertEqual(self.calls[0]["model"], "claude-opus-4-8")
+        text = res["content"][0]["text"]
+        self.assertIn("[advisor mode: self — requested; strong advisor not configured", text)
+        log = json.loads(self.data[self.mod._CONSULT_LOG_KEY])
+        self.assertEqual(log[-1]["mode"], "self")
+        self.assertIn("not configured", log[-1]["fallback"])
+
+    def test_validation(self):
+        res = self.mod._run_aside([], "q", self.ctx, mode="strong")
+        self.assertTrue(res["is_error"])
+        self.assertIn("escalate=true", res["content"][0]["text"])
+        res = self.escalate("q", mode="bogus")
+        self.assertTrue(res["is_error"])
+        res = self.escalate("q", refs="a1")
+        self.assertTrue(res["is_error"])
+
+    def test_strong_source_reads_config_key(self):
+        mod = _load_aside()
+        with mock.patch.object(
+            mod,
+            "_read_existing_config",
+            return_value={"strong_advisor": "anthropic/claude-fable-5"},
+        ):
+            self.assertEqual(
+                mod._strong_source(), {"provider": "anthropic", "model": "claude-fable-5"}
+            )
+        with mock.patch.object(mod, "_read_existing_config", return_value={}):
+            self.assertIsNone(mod._strong_source())
+
+    def test_schema_exposes_mode_params(self):
+        props = self.mod._aside_tool_parameters()["properties"]
+        if "escalate" in props:
+            self.assertEqual(props["mode"]["enum"], ["auto", "self", "strong"])
+            self.assertIn("refs", props)
+            self.assertIn("high_stakes", props)

@@ -426,7 +426,7 @@ otherwise noted.
 | session``        | Triggers a new agent turn.            | SDK timeout: 60 s         |
 +------------------+---------------------------------------+---------------------------+
 | ``side_query``   | ``{question, model?, provider?,       | ``{ok: true,              |
-|                  | effort?}``                            | text: "...",              |
+|                  | effort?, messages?}``                 | text: "...",              |
 |                  | One-shot LLM call, no history.        | tokens_in, tokens_out,    |
 |                  | model/provider/effort override the    | cache_read, cache_write,  |
 |                  | agent's defaults for this call.       | reasoning_effort}``       |
@@ -435,6 +435,9 @@ otherwise noted.
 |                  | downgraded to minimal on always-on    |                           |
 |                  | adaptive models); on failure it       |                           |
 |                  | arrives in the error's ``data``.      |                           |
+|                  | ``messages`` ([{role, text}]) swaps   |                           |
+|                  | the session transcript for a          |                           |
+|                  | caller-supplied thread.               |                           |
 +------------------+---------------------------------------+---------------------------+
 | ``set_session_   | ``{key, value}``                      | ``{ok: true}``            |
 | data``           | Persist string K/V; survives          |                           |
@@ -2957,6 +2960,7 @@ class Context:
         model: str | None = None,
         provider: str | None = None,
         effort: str | None = None,
+        messages: list[dict[str, str]] | None = None,
     ) -> str:
         """Ask a side question using the current session context.
 
@@ -2977,6 +2981,14 @@ class Context:
                    same model id is registered under multiple providers.
           effort   Reasoning effort override. One of ``"off"``, ``"minimal"``,
                    ``"low"``, ``"medium"``, ``"high"``, ``"xhigh"``, ``"max"``.
+          messages Optional caller-supplied thread — a list of
+                   ``{"role": "user"|"assistant", "text": str}`` turns,
+                   alternating and starting with ``"user"``. When given — an
+                   empty list included — it REPLACES the session transcript:
+                   the call sees the agent's system prompt, these turns, then
+                   *question*; ``[]`` is a context-free call. Used by the
+                   ``aside`` strong-advisor mode to run an append-only brief
+                   thread instead of the full session.
 
         These are used by the ``aside`` extension to implement the
         "advisor" pattern — escalating a side query to a stronger model.
@@ -2990,6 +3002,8 @@ class Context:
             params["provider"] = provider
         if effort:
             params["effort"] = effort
+        if messages is not None:
+            params["messages"] = messages
         result = self._call("side_query", params, timeout=timeout)
         if isinstance(result, dict):
             return result.get("text", "")
@@ -3002,6 +3016,7 @@ class Context:
         provider: str | None = None,
         effort: str | None = None,
         idle_timeout: float | None = None,
+        messages: list[dict[str, str]] | None = None,
     ) -> SideQueryStream:
         """Streaming flavor of :py:meth:`side_query`.
 
@@ -3047,6 +3062,8 @@ class Context:
             params["provider"] = provider
         if effort:
             params["effort"] = effort
+        if messages is not None:
+            params["messages"] = messages
         _write_message(_make_request(rid, "side_query", params), self._out)
 
         return SideQueryStream(

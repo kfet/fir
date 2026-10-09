@@ -3548,3 +3548,75 @@ func TestAgentSession_PrependContext_EmptyIsNoop(t *testing.T) {
 		t.Fatalf("empty PrependContext appended %d messages, want 0", got-before)
 	}
 }
+
+func TestSideQuery_MessagesReplaceSessionContext(t *testing.T) {
+	session, _ := newTestAgentSession(t)
+	defer session.Close()
+
+	model := &ai.Model{ID: "test-model", Provider: "anthropic", API: "anthropic"}
+	session.Agent.SetModel(model)
+	session.Agent.AppendMessage(agent.NewAgentMessage(ai.NewUserMsg("session-only message", 0)))
+
+	var capturedMsgs []ai.Message
+	session.Agent.SetStreamFn(func(m *ai.Model, llmCtx ai.Context, opts *ai.SimpleStreamOptions) *ai.AssistantMessageEventStream {
+		capturedMsgs = llmCtx.Messages
+		stream := ai.NewAssistantMessageEventStream()
+		go func() {
+			stream.Push(ai.AssistantMessageEvent{Type: ai.EventDone, Message: &ai.AssistantMessage{Content: []ai.AssistantContent{ai.NewTextContent("ok")}}})
+			stream.End(nil)
+		}()
+		return stream
+	})
+
+	_, err := session.SideQuery(context.Background(), "follow-up", &SideQueryOptions{
+		Messages: []SideQueryMessage{{Role: "user", Text: "brief"}, {Role: "assistant", Text: "advice"}},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(capturedMsgs) != 3 {
+		t.Fatalf("expected thread(2)+question, got %d messages", len(capturedMsgs))
+	}
+	raw, _ := json.Marshal(capturedMsgs)
+	if strings.Contains(string(raw), "session-only message") {
+		t.Fatalf("session transcript leaked into a messages-thread side query: %s", raw)
+	}
+	for _, want := range []string{"brief", "advice", "follow-up"} {
+		if !strings.Contains(string(raw), want) {
+			t.Fatalf("missing %q in %s", want, raw)
+		}
+	}
+
+	_, err = session.SideQuery(context.Background(), "q", &SideQueryOptions{
+		Messages: []SideQueryMessage{{Role: "system", Text: "x"}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "role must be") {
+		t.Fatalf("expected role validation error, got %v", err)
+	}
+}
+
+func TestSideQuery_EmptyMessagesIsContextFree(t *testing.T) {
+	session, _ := newTestAgentSession(t)
+	defer session.Close()
+
+	session.Agent.SetModel(&ai.Model{ID: "test-model", Provider: "anthropic", API: "anthropic"})
+	session.Agent.AppendMessage(agent.NewAgentMessage(ai.NewUserMsg("session-only message", 0)))
+
+	var capturedMsgs []ai.Message
+	session.Agent.SetStreamFn(func(m *ai.Model, llmCtx ai.Context, opts *ai.SimpleStreamOptions) *ai.AssistantMessageEventStream {
+		capturedMsgs = llmCtx.Messages
+		stream := ai.NewAssistantMessageEventStream()
+		go func() {
+			stream.Push(ai.AssistantMessageEvent{Type: ai.EventDone, Message: &ai.AssistantMessage{Content: []ai.AssistantContent{ai.NewTextContent("ok")}}})
+			stream.End(nil)
+		}()
+		return stream
+	})
+
+	if _, err := session.SideQuery(context.Background(), "brief", &SideQueryOptions{Messages: []SideQueryMessage{}}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(capturedMsgs) != 1 {
+		t.Fatalf("expected only the question, got %d messages", len(capturedMsgs))
+	}
+}
