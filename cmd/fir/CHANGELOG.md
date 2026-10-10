@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [1.33.0] - 2026-10-10
+
+### Changed
+- **Model catalog regenerated**: added `huggingface/MiniMaxAI/MiniMax-M1-80k`, `huggingface/Qwen/Qwen3-VL-30B-A3B-Instruct` (+1 on aggregators); removed 12 aggregator models; 27 models with changed pricing/limits.
+
 ### Added
 - **`provider-usage` in ACP mode.** The provider-usage extension now runs in ACP sessions and warns early when a quota window crosses 80% / 95% (system section plus a one-time announcement per reset window).
 
