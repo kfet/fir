@@ -3,12 +3,19 @@
 # name: provider-usage
 # description: Show LLM provider usage/limits in the status bar (Anthropic, Poe)
 # builtin: false
-# modes: tui
+# modes: tui, acp
 # ---
 """Periodically fetch Anthropic and/or Poe usage stats and display in the status bar.
 
 Refreshes every 5 minutes. Uses a shared file cache with flock so multiple
 fir sessions avoid redundant API calls and respect rate limits together.
+
+Early warning (all modes): when a usage window crosses a warning level
+(80% / 95%) the extension publishes a short ``set_section`` so the agent
+sees it on every turn, and announces each crossing exactly once per window
+reset — a ``notify`` in the TUI, a turn-triggering message in ACP (where
+``notify`` and the status bar have no surface). A flock'd state file in the
+shared cache dir makes "exactly once" hold across every concurrent session.
 
 Also listens for ``provider_error`` and, when a Claude subscription (OAuth)
 account hits a usage limit, notifies the user when that limit resets — reusing
@@ -60,6 +67,10 @@ WINDOW_LABELS = {"five_hour": "5-hour", "seven_day": "7-day"}
 _RESET_PIPE_RE = re.compile(r"\|\s*(\d{10,13})\b")
 _RESET_EPOCH_RE = re.compile(r'"resets?_?[aA]t"\s*:\s*"?(\d{10,13})"?')
 _RESET_ISO_RE = re.compile(r'"resets?_?[aA]t"\s*:\s*"(\d{4}-\d{2}-\d{2}[Tt][^"]+)"')
+
+# -- early warning ------------------------------------------------------------
+# Utilization levels (percent) that each announce once per window reset.
+WARN_LEVELS = (80.0, 95.0)
 
 # Cache dict keys
 _K_FETCHED_AT = "fetched_at"
@@ -306,7 +317,11 @@ def _parse_iso(value: object) -> datetime | None:
 
 def _fetch_anthropic_usage(token: str) -> str | None:
     """Fetch Anthropic usage (cached) and return a short status string."""
-    result = _cached_fetch(
+    return _format_anthropic_status(_fetch_anthropic_result(token))
+
+
+def _fetch_anthropic_result(token: str) -> CacheResult:
+    return _cached_fetch(
         "anthropic-usage",
         lambda: _http_get_json(
             "https://api.anthropic.com/api/oauth/usage",
@@ -317,6 +332,9 @@ def _fetch_anthropic_usage(token: str) -> str | None:
             },
         ),
     )
+
+
+def _format_anthropic_status(result: CacheResult) -> str | None:
     if not result.data:
         return "☁ (rate-limited)" if result.is_rate_limited else None
 
@@ -495,6 +513,124 @@ def on_provider_error(params: fir_ext.ProviderErrorParams, ctx: fir_ext.Context)
 
 
 # ---------------------------------------------------------------------------
+# Early warning
+# ---------------------------------------------------------------------------
+
+
+def _usage_warnings(data: dict | None, now: float) -> list[tuple[str, float, float, str]]:
+    """Return (window_key, utilization, reset_epoch, label) for every window at
+    or above the lowest warning level whose reset is still in the future."""
+    out = []
+    if not isinstance(data, dict):
+        return out
+    for key, val in data.items():
+        if key not in WINDOW_LABELS or not isinstance(val, dict):
+            continue
+        util = val.get("utilization")
+        dt = _parse_iso(val.get("resets_at"))
+        if not isinstance(util, (int, float)) or dt is None:
+            continue
+        reset = dt.timestamp()
+        if util >= WARN_LEVELS[0] and reset > now:
+            out.append((key, float(util), reset, WINDOW_LABELS[key]))
+    out.sort(key=lambda w: -w[1])
+    return out
+
+
+def _warning_text(
+    warnings: list[tuple[str, float, float, str]], now: float, *, countdown: bool = True
+) -> str:
+    parts = []
+    for _key, util, reset, label in warnings:
+        when = datetime.fromtimestamp(reset).astimezone().strftime("%a %H:%M %Z")
+        if countdown:
+            when += f", in {_fmt_countdown(max(0, int(reset - now) // 60))}"
+            pct = f"{util:.0f}%"
+        else:
+            # Section text: crossed level only, so it stays byte-stable as usage creeps.
+            pct = f"≥{max(lv for lv in WARN_LEVELS if util >= lv):.0f}%"
+        parts.append(f"{label} window at {pct} (resets {when})")
+    return "Anthropic usage warning: " + "; ".join(parts) + "."
+
+
+def _claim_crossings(
+    warnings: list[tuple[str, float, float, str]], now: float
+) -> list[tuple[str, float, float, str]]:
+    """Atomically record (window, level, reset) crossings not yet announced by
+    any session; return the warnings that this caller must announce."""
+    cd = _cache_dir()
+    cd.mkdir(parents=True, exist_ok=True)
+    state_file = cd / "anthropic-usage-warned.json"
+    fresh = []
+    with open(cd / "anthropic-usage-warned.lock", "w") as lf:
+        fcntl.flock(lf, fcntl.LOCK_EX)
+        try:
+            state = _read_json(state_file) or {}
+            # Forget crossings whose window has reset.
+            state = {k: v for k, v in state.items() if isinstance(v, (int, float)) and v > now}
+            for w in warnings:
+                key, util, reset, _label = w
+                level = max(lv for lv in WARN_LEVELS if util >= lv)
+                tag = f"{key}:{level:.0f}:{int(reset) // 60}"
+                if tag not in state:
+                    state[tag] = reset
+                    fresh.append(w)
+            tmp_fd, tmp_path = tempfile.mkstemp(dir=str(cd), suffix=".tmp")
+            try:
+                with os.fdopen(tmp_fd, "w") as f:
+                    json.dump(state, f)
+                os.replace(tmp_path, state_file)
+            except BaseException:
+                with contextlib.suppress(OSError):
+                    os.unlink(tmp_path)
+                raise
+        finally:
+            fcntl.flock(lf, fcntl.LOCK_UN)
+    return fresh
+
+
+def _active_mode(ctx: fir_ext.Context) -> str:
+    try:
+        return str(ctx.agent_info().get("mode") or "")
+    except Exception:
+        return ""
+
+
+def _publish_warnings(ctx: fir_ext.Context, data: dict | None, mode: str) -> None:
+    now = time.time()
+    warnings = _usage_warnings(data, now)
+    if not warnings:
+        with contextlib.suppress(Exception):
+            ctx.clear_section()
+        return
+    text = _warning_text(warnings, now)
+    # No countdown in the section: a ticking string would re-inject it on
+    # every turn and bust the prompt cache.
+    with contextlib.suppress(Exception):
+        ctx.set_section(
+            _warning_text(warnings, now, countdown=False)
+            + " Tell the user about this when relevant; do not start heavy work without saying so."
+        )
+    try:
+        fresh = _claim_crossings(warnings, now)
+    except Exception:
+        return
+    if not fresh:
+        return
+    with contextlib.suppress(Exception):
+        if mode == "acp":
+            ctx.send_message(
+                "provider-usage-warning",
+                text + " Post this warning to the user now, in one or two lines.",
+                display=True,
+                deliver_as="followUp",
+                trigger_turn=True,
+            )
+        else:
+            ctx.notify(text, level="warning")
+
+
+# ---------------------------------------------------------------------------
 # Extension lifecycle
 # ---------------------------------------------------------------------------
 
@@ -507,10 +643,14 @@ def _refresh_loop(ctx: fir_ext.Context) -> None:
     if not anthropic_token and not poe_key:
         return
 
+    mode = _active_mode(ctx)
     while not _stop_event.is_set():
         parts = []
-        if anthropic_token and (s := _fetch_anthropic_usage(anthropic_token)):
-            parts.append(s)
+        if anthropic_token:
+            result = _fetch_anthropic_result(anthropic_token)
+            if s := _format_anthropic_status(result):
+                parts.append(s)
+            _publish_warnings(ctx, result.data, mode)
         if poe_key and (s := _fetch_poe_usage(poe_key)):
             parts.append(s)
         if parts:

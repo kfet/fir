@@ -286,5 +286,103 @@ class HandlerTest(unittest.TestCase):
         self.handler({"kind": "rate_limit", "provider": "anthropic", "error_text": ""}, ctx)
 
 
+class EarlyWarningTest(unittest.TestCase):
+    def setUp(self):
+        self.mod, _ = _load()
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        mock.patch.object(self.mod, "_cache_dir", return_value=pathlib.Path(self.tmp.name)).start()
+        self.addCleanup(mock.patch.stopall)
+        mock.patch.object(self.mod.time, "time", return_value=NOW).start()
+
+    def _data(self, five=50.0, seven=50.0, reset5=3600, reset7=86400):
+        return {
+            "five_hour": {"utilization": five, "resets_at": _iso(reset5)},
+            "seven_day": {"utilization": seven, "resets_at": _iso(reset7)},
+            "extra_usage": {"utilization": 99.0},
+        }
+
+    def test_below_threshold_clears_section_and_says_nothing(self):
+        ctx = mock.Mock()
+        self.mod._publish_warnings(ctx, self._data(), "acp")
+        ctx.clear_section.assert_called_once()
+        ctx.set_section.assert_not_called()
+        ctx.send_message.assert_not_called()
+        ctx.notify.assert_not_called()
+
+    def test_acp_crossing_sets_section_and_triggers_turn_once(self):
+        ctx = mock.Mock()
+        data = self._data(seven=94.0)
+        self.mod._publish_warnings(ctx, data, "acp")
+        self.mod._publish_warnings(ctx, data, "acp")
+        self.assertEqual(ctx.set_section.call_count, 2)
+        sect = ctx.set_section.call_args[0][0]
+        self.assertIn("7-day window at ≥80%", sect)
+        self.assertNotIn(" in ", sect.split("resets")[1].split(")")[0])
+        ctx.send_message.assert_called_once()
+        self.assertTrue(ctx.send_message.call_args.kwargs["trigger_turn"])
+        ctx.notify.assert_not_called()
+
+    def test_section_stable_as_usage_creeps(self):
+        ctx = mock.Mock()
+        self.mod._publish_warnings(ctx, self._data(five=81.0), "acp")
+        first = ctx.set_section.call_args[0][0]
+        self.mod._publish_warnings(ctx, self._data(five=84.0), "acp")
+        self.assertEqual(first, ctx.set_section.call_args[0][0])
+
+    def test_second_session_does_not_reannounce(self):
+        a, b = mock.Mock(), mock.Mock()
+        data = self._data(five=85.0)
+        self.mod._publish_warnings(a, data, "acp")
+        self.mod._publish_warnings(b, data, "acp")
+        a.send_message.assert_called_once()
+        b.send_message.assert_not_called()
+        b.set_section.assert_called_once()
+
+    def test_higher_level_announces_again(self):
+        ctx = mock.Mock()
+        self.mod._publish_warnings(ctx, self._data(five=85.0), "acp")
+        self.mod._publish_warnings(ctx, self._data(five=96.0), "acp")
+        self.assertEqual(ctx.send_message.call_count, 2)
+
+    def test_new_window_reset_announces_again(self):
+        ctx = mock.Mock()
+        self.mod._publish_warnings(ctx, self._data(five=85.0, reset5=3600), "acp")
+        self.mod._publish_warnings(ctx, self._data(five=85.0, reset5=3600 + 5 * 3600), "acp")
+        self.assertEqual(ctx.send_message.call_count, 2)
+
+    def test_tui_uses_notify(self):
+        ctx = mock.Mock()
+        self.mod._publish_warnings(ctx, self._data(five=81.0), "interactive")
+        ctx.notify.assert_called_once()
+        self.assertEqual(ctx.notify.call_args.kwargs["level"], "warning")
+        ctx.send_message.assert_not_called()
+
+    def test_past_reset_is_ignored(self):
+        ctx = mock.Mock()
+        self.mod._publish_warnings(ctx, self._data(five=99.0, reset5=-60), "acp")
+        ctx.clear_section.assert_called_once()
+        ctx.send_message.assert_not_called()
+
+    def test_expired_state_is_pruned(self):
+        self.state_file = pathlib.Path(self.tmp.name) / "anthropic-usage-warned.json"
+        ctx = mock.Mock()
+        self.mod._publish_warnings(ctx, self._data(five=85.0, reset5=60), "acp")
+        state = json.loads(self.state_file.read_text())
+        self.assertEqual(len(state), 1)
+        with mock.patch.object(self.mod.time, "time", return_value=NOW + 120):
+            self.mod._publish_warnings(ctx, self._data(five=10.0), "acp")
+            self.mod._publish_warnings(ctx, self._data(five=85.0, reset5=7200), "acp")
+        state = json.loads(self.state_file.read_text())
+        self.assertEqual(len(state), 1)
+
+    def test_failed_state_write_leaves_no_tmp(self):
+        ctx = mock.Mock()
+        with mock.patch.object(self.mod.json, "dump", side_effect=OSError("disk full")):
+            self.mod._publish_warnings(ctx, self._data(five=85.0), "acp")
+        self.assertEqual(list(pathlib.Path(self.tmp.name).glob("*.tmp")), [])
+        ctx.send_message.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()
