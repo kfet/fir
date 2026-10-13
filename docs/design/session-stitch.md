@@ -288,6 +288,23 @@ If that skill, hand-driven, reliably stitches across two real prior
 sessions, the thesis holds and we earn the next pieces. If it doesn't,
 no amount of structure will save it.
 
+### Status — Phase 1 shipped, plus project seeding
+
+Builtin skills `recall` (the loop above; candidates ranked by the cwd's
+git **common dir**, so all worktrees of a repo are one locality tier) and
+`orient`. Spawn skills (`wt`, `ship-wt`, `acp-shepherd`) tell children to
+run `recall` before exploring.
+
+**Decision — the project seed is the `orient:` bookmark set.** A fresh
+session on a repo needs a map (layout, build/test, key packages,
+gotchas). Rather than a seeds directory, manifest, or `--seed` flag, the
+`orient` skill has the agent explore briefly and `bookmark()` the map
+with note prefix `orient:`; `recall` greps that prefix first and runs
+`orient` itself when none exists. No human step, no new storage, no Go
+code — the seed is just bookmarks, stale-able and greppable like any
+other. Fork-at-leaf (`--resume --at`) is kept only for hot same-cwd
+sibling bursts where the parent's prompt cache is still warm.
+
 ## How we'll know it works (falsifiable — do not skip)
 
 The architecture lives or dies on one metric, and it is *not* answer

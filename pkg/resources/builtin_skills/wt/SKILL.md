@@ -18,6 +18,8 @@ Delegate all to a new agent!
    ```
    You are in a dedicated git worktree on branch work/<feature>.
    Do all work and commits in this CWD.
+   Before exploring, run the `recall` skill for this repo (it runs
+   `orient` if no repo map exists yet).
 
    <original task here>
    ```

@@ -18,7 +18,8 @@ The work happens over there. Don't draft designs or touch code here.
 1. Pick a short kebab-case feature name from the whole task.
 
 2. Build the task text. Start from the user's full task, ensure it carries a
-   `Mode: do.` tag, and **append the ship-it instruction** verbatim:
+   `Mode: do.` tag, prepend "Before exploring, run the `recall` skill for this
+   repo.", and **append the ship-it instruction** verbatim:
    > "When implementation is complete and `make all` passes, invoke the `ship-it`
    > skill to finish: it loops review-and-fix until clean, ff-merges to main,
    > cuts and publishes a release, and removes the worktree. Do not ask

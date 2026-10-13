@@ -89,6 +89,10 @@ fleet cancel worker-1
 fleet kill worker-1
 ```
 
+Start every fresh worker's first prompt with "Before exploring, run the
+`recall` skill for this repo." so it loads prior sessions' `orient:` map and
+bookmarks instead of re-exploring. (Forked children already hold the context.)
+
 `fleet prompt` blocks. To run prompts in parallel, background them:
 
 ```bash
