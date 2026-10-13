@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Removed
+- ACP `-32010 session_needs_reload`: a resumed session no longer waits up to 30s for client MCP servers and no longer fails when one is down; like config servers, they connect in the background and are advertised from saved tool schemas (calls return a tool error until connected).
+
+### Fixed
+- A session resumed with no MCP servers configured forgets the saved tool schemas of removed servers, so a later server reusing the name does not advertise stale tools.
+
 ## [1.34.1] - 2026-10-13
 
 ### Changed

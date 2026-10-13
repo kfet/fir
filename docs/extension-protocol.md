@@ -1038,12 +1038,13 @@ Returns `[]` on hosts with no extension manager wired (e.g. the auth helper).
 #### `prepend_context`
 
 Append a `[SYS_EXT]` block to the live agent conversation.  The content is
-wrapped in `[SYS_EXT]` tags and appended as a user message to the agent's
-in-memory state (`AgentSession.PrependContext`), so the LLM treats it as an
+wrapped in `[SYS_EXT]` tags and appended as a user message to the
+conversation (`AgentSession.PrependContext`), so the LLM treats it as an
 authoritative extension of the system prompt.  The system prompt itself is
-**not** mutated — the provider's prompt cache stays valid.  The message is not
-persisted to the session store and does not start a turn; the model sees it on
-its next turn.
+**not** mutated — the provider's prompt cache stays valid.  The message is
+saved in the transcript, so a resumed session replays it in place; text
+identical to an injection already in the conversation is not added again.  It
+does not start a turn; the model sees it on its next turn.
 
 ```json
 {"jsonrpc":"2.0","id":1018,"method":"prepend_context","params":{"content":"Project language: Go."}}

@@ -228,6 +228,7 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 // Server lifecycle events are surfaced via the Manager's ServerEvents channel.
 func StartMCPManager(ctx context.Context, sess *AgentSession, configs map[string]mcp.ServerConfig) *mcp.Manager {
 	if len(configs) == 0 {
+		sess.mcpAdvertised(nil) // forget the saved tools of every server
 		return nil
 	}
 	mgr := mcp.NewManager(configs, false)
@@ -385,19 +386,17 @@ func ReloadMCP(ctx context.Context, mgrPtr **mcp.Manager, sess *AgentSession, cw
 		_, err := (*mgrPtr).Reload(ctx, servers)
 		return err
 	}
-	// No manager yet — create one if configs appeared. Re-read credentials
-	// first: Manager.Reload does this for an existing manager, but a manager
-	// created here inherits the session's long-lived AuthStorage, whose
-	// in-memory view was loaded at session start. Without this, a reload that
-	// brings up the *first* MCP server would miss a token minted out-of-band
-	// by `fir mcp login`.
-	if len(servers) > 0 {
-		if reg := sess.ModelRegistryRef(); reg != nil {
-			if as := reg.AuthStorage(); as != nil {
-				as.Reload()
-			}
+	// No manager yet — create one (nil if still no servers). Re-read
+	// credentials first: Manager.Reload does this for an existing manager,
+	// but a manager created here inherits the session's long-lived
+	// AuthStorage, whose in-memory view was loaded at session start. Without
+	// this, a reload that brings up the *first* MCP server would miss a token
+	// minted out-of-band by `fir mcp login`.
+	if reg := sess.ModelRegistryRef(); reg != nil {
+		if as := reg.AuthStorage(); as != nil {
+			as.Reload()
 		}
-		*mgrPtr = StartMCPManager(ctx, sess, servers)
 	}
+	*mgrPtr = StartMCPManager(ctx, sess, servers)
 	return nil
 }

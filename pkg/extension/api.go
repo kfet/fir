@@ -63,8 +63,8 @@ type BridgeAPI interface {
 	CallTool(ctx context.Context, name string, params map[string]any) (ToolResult, error)
 	// ListTools returns the names and parameter schemas of all registered tools.
 	ListTools() []ToolInfo
-	// PrependContext adds a [SYS_EXT] block to the system prompt.
-	// Extensions use this to inject dynamic context.
+	// PrependContext appends a [SYS_EXT] user message to the conversation
+	// and saves it in the transcript; text already injected is not re-added.
 	PrependContext(content string)
 	// ReportProgress sends a transient status message to the UI
 	// (e.g. "Calling Read..."). Only meaningful while a tool is executing.

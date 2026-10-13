@@ -86,9 +86,10 @@ ACP keeps only protocol behaviour (`pkg/modes/acp/restore.go`):
   even after a fir restart — rebuilds the session in place.
 - `session/new`/`load`/`resume` values (cwd, `mcpServers`, `_meta`) override
   the saved ones via `StateOverride` and are saved in turn.
-- If a restored client MCP server fails to start, the prompt returns `-32010`
-  with `data.reason: "session_needs_reload"` and the failed server names; the
-  client recovers with `session/load` and fresh `mcpServers`.
+- A resume never waits for MCP: every server (config or client) connects in
+  the background and is advertised from its saved tool schemas until then;
+  calls to a server that is down return a tool error. A client replaces its
+  servers with `session/load` and fresh `mcpServers`.
 - `session/release`/`close` forget the handle; handles untouched for 30 days
   are pruned.
 - Legacy v1.24.0 `<agentDir>/acp-sessions/<hash>.json` configs are migrated to

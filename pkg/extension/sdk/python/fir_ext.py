@@ -477,8 +477,9 @@ otherwise noted.
 +------------------+---------------------------------------+---------------------------+
 | ``prepend_       | ``{content}``                         | ``{ok: true}``            |
 | context``        | Appends a ``[SYS_EXT]`` user message  |                           |
-|                  | to live agent state; leaves the       |                           |
-|                  | system prompt (and cache) intact.     |                           |
+|                  | to the transcript (identical text is  |                           |
+|                  | not re-added); leaves the system      |                           |
+|                  | prompt (and cache) intact.            |                           |
 +------------------+---------------------------------------+---------------------------+
 | ``set_section``  | ``{text}``                            | ``{ok: true}``            |
 |                  | Persist this extension's section      | error when over cap       |
@@ -3210,11 +3211,12 @@ class Context:
         Extensions use this to inject dynamic context that the LLM treats
         as an authoritative extension of the system prompt. The content is
         wrapped in ``[SYS_EXT]`` tags automatically by the runtime and
-        appended as a user message to the agent's in-memory state — the
-        system prompt itself is left untouched, so this does not invalidate
-        the provider's prompt cache. The message is not persisted to the
-        session store, and it does not start a turn: the model sees it on
-        its next turn.
+        appended as a user message to the conversation and saved in the
+        transcript, so a resumed session replays it in place — the system
+        prompt itself is left untouched, so this does not invalidate the
+        provider's prompt cache. Text identical to an injection already in
+        the conversation is not added again. It does not start a turn: the
+        model sees it on its next turn.
 
         Parameters
         ----------

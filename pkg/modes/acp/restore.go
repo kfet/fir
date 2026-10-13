@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -31,27 +30,6 @@ type clientSetup struct {
 	meta       map[string]any
 	transcript string
 }
-
-// SessionNeedsReloadError is returned on a prompt when a restored session's
-// client-supplied MCP server failed to start. The client should call
-// session/load with fresh mcpServers.
-const SessionNeedsReloadError = -32010
-
-func newSessionNeedsReload(sessionID string, servers []string) *acpsdk.RequestError {
-	return &acpsdk.RequestError{
-		Code:    SessionNeedsReloadError,
-		Message: "Session needs reload: restored MCP servers failed to start",
-		Data: map[string]any{
-			"sessionId": sessionID,
-			"reason":    "session_needs_reload",
-			"servers":   servers,
-		},
-	}
-}
-
-// restoredMCPWait bounds how long a restore waits for client MCP servers to
-// finish their handshake before judging them failed.
-var restoredMCPWait = 30 * time.Second
 
 // handleMaxAge is how long an untouched sessionId binding is kept. Every
 // turn refreshes it, so only abandoned sessions age out.
@@ -203,50 +181,11 @@ func (pa *firAgent) openSession(ctx context.Context, sessionID string, req *clie
 		return nil, false, fmt.Errorf("create session: %w", err)
 	}
 
+	// Client MCP servers connect in the background like any other: a slow
+	// or broken one never delays the resume, and its saved tools answer
+	// "not connected" until it is up (session/load replaces them).
 	client := entry.session.SessionMCPServers()
-	if req == nil && len(client) > 0 {
-		if failed := restoredMCPFailures(ctx, entry, client); len(failed) > 0 {
-			firlog.Warn("acp restore: client MCP servers failed to start", "sessionId", sessionID, "servers", failed)
-			pa.discardSession(ctx, sessionID, entry)
-			return nil, false, newSessionNeedsReload(sessionID, failed)
-		}
-	}
-
 	firlog.Info("acp session opened", "sessionId", sessionID, "restore", req == nil,
 		"mcpServers", session.ServerNames(client), "transcript", transcript != "")
 	return entry, forked, nil
-}
-
-// discardSession drops a half-built session; its saved state stays on disk.
-func (pa *firAgent) discardSession(ctx context.Context, sessionID string, entry *firSession) {
-	pa.mu.Lock()
-	if pa.sessions[sessionID] == entry {
-		delete(pa.sessions, sessionID)
-	}
-	pa.mu.Unlock()
-	pa.teardownSession(ctx, sessionID, entry)
-}
-
-// restoredMCPFailures waits for MCP startup and returns the client-supplied
-// servers that are not connected.
-func restoredMCPFailures(ctx context.Context, entry *firSession, client map[string]mcp.ServerConfig) []string {
-	if entry.mcpManager == nil {
-		return session.ServerNames(client)
-	}
-	waitCtx, cancel := context.WithTimeout(ctx, restoredMCPWait)
-	_ = entry.mcpManager.WaitReady(waitCtx)
-	cancel()
-	connected := map[string]bool{}
-	for _, st := range entry.mcpManager.Status() {
-		// A server waiting on OAuth is not fixed by a reload.
-		var authErr *mcp.AuthRequiredError
-		connected[st.Name] = st.Connected || errors.As(st.Error, &authErr)
-	}
-	var failed []string
-	for _, name := range session.ServerNames(client) {
-		if !connected[name] {
-			failed = append(failed, name)
-		}
-	}
-	return failed
 }

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -232,6 +233,10 @@ func TestReapRehydrate_RestoresSessionState(t *testing.T) {
 
 	reapNow(t, pa, sid, entry)
 	back := rehydrate(t, pa, sid)
+	// The resume does not wait for MCP; the server connects in the background.
+	waitCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	_ = back.mcpManager.WaitReady(waitCtx)
+	cancel()
 
 	tests := []struct {
 		name      string
@@ -271,8 +276,9 @@ func TestReapRehydrate_AnyRuntimePropertySurvives(t *testing.T) {
 
 	reapNow(t, pa, sid, entry)
 	back := rehydrate(t, pa, sid)
-	got := back.session.SessionState().Runtime
 	// Saved MCP tools are refreshed from the server once it connects.
+	waitMCPTools(t, back, "mcp__srv__echo")
+	got := back.session.SessionState().Runtime
 	if tools := got.McpTools["srv"]; len(tools) != 1 || tools[0].Name != "mcp__srv__echo" {
 		t.Fatalf("srv tools after connect = %+v, want the live echo tool", tools)
 	}
@@ -313,33 +319,30 @@ func TestLoad_ClientOverridesSaved(t *testing.T) {
 	}
 }
 
-// TestRehydrate_FailedClientMCP_NeedsReload: a restored client MCP server that
-// cannot start yields a typed error telling the client to session/load.
-func TestRehydrate_FailedClientMCP_NeedsReload(t *testing.T) {
+// TestRehydrate_BrokenClientMCP_DoesNotBlock: a restored client MCP server
+// that cannot start neither delays nor fails the resume; its saved tools stay
+// advertised and answer "not connected".
+func TestRehydrate_BrokenClientMCP_DoesNotBlock(t *testing.T) {
 	pa, cwd := newRehydrateAgent(t)
 	const sid = "acp-sid-badmcp"
 	bad := acpsdk.McpServer{Stdio: &acpsdk.McpServerStdio{
 		Name: "relay", Command: "/nonexistent/zulip-acp", Args: []string{"mcp-serve"}, Env: []acpsdk.EnvVariable{}}}
 	entry := openNew(t, pa, sid, &clientSetup{cwd: cwd, mcpServers: []acpsdk.McpServer{bad}})
+	entry.session.UpdateSessionState(func(st *session.SessionState) {
+		st.Runtime.McpTools = map[string][]ai.Tool{"relay": {{Name: "mcp__relay__reply",
+			Parameters: map[string]any{"type": "object"}}}}
+	})
 	reapNow(t, pa, sid, entry)
 
-	_, err := pa.Prompt(context.Background(), acpsdk.PromptRequest{
-		SessionId: acpsdk.SessionId(sid),
-		Prompt:    []acpsdk.ContentBlock{acpsdk.TextBlock("hi")},
-	})
-	re, ok := err.(*acpsdk.RequestError)
-	if !ok || re.Code != SessionNeedsReloadError {
-		t.Fatalf("err = %v, want code %d", err, SessionNeedsReloadError)
+	back := rehydrate(t, pa, sid)
+	var tool agent.AgentTool
+	back.session.Agent.UpdateTools(func(ts *agent.ToolSet) { tool, _ = ts.Get("mcp__relay__reply") })
+	if tool.Execute == nil {
+		t.Fatal("saved client MCP tool not advertised after rehydrate")
 	}
-	data, _ := re.Data.(map[string]any)
-	if data["reason"] != "session_needs_reload" {
-		t.Errorf("data = %#v, want reason session_needs_reload", re.Data)
-	}
-	if pa.lookupSession(sid) != nil {
-		t.Error("failed restore left a session in the map")
-	}
-	if _, ok := savedState(pa, sid); !ok {
-		t.Error("failed restore dropped the saved state")
+	if _, err := tool.Execute(context.Background(), "id", map[string]any{}, nil); err == nil ||
+		!strings.Contains(err.Error(), "not connected") {
+		t.Errorf("call to broken server: err = %v, want not connected", err)
 	}
 }
 
