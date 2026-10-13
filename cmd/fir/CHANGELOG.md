@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [1.34.1] - 2026-10-13
+
+### Changed
+- **Model catalog regenerated**: 4 model(s) with changed pricing/limits (amazon-bedrock: amazon.nova-2-lite-v1:0; openrouter: deepseek v4 flash/pro variants).
+
 ### Fixed
 - ACP: a session resumed after an idle reap now sends a byte-identical request prefix, so the prompt cache hits. Context injected by extensions (`ctx.prepend`, e.g. watchers at session_start) is saved in the transcript at its original position and not injected twice. MCP tool schemas are saved per server and advertised from saved state while a server is still connecting or down (calls return a tool error), so a late-connecting server no longer rewrites the cache on the second call of every resumed turn.
 
