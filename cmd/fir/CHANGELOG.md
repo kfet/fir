@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [1.35.0] - 2026-10-13
+
+### Changed
+- **Model catalog regenerated**: added `opencode/cat-jam-free`; 6 model(s) with changed pricing/limits (amazon-bedrock: amazon.nova-2-lite-v1:0; openrouter: deepseek v4 flash/pro, gemma-4-26b variants).
+
 ### Removed
 - ACP `-32010 session_needs_reload`: a resumed session no longer waits up to 30s for client MCP servers and no longer fails when one is down; like config servers, they connect in the background and are advertised from saved tool schemas (calls return a tool error until connected).
 
