@@ -67,6 +67,30 @@ a remote MCP server over HTTP. No `command` is needed — only `url`.
 Each top-level key under `mcpServers` is the **server name** — choose something short and
 descriptive, as it appears in every tool name the server exposes.
 
+### Environment variables in config values
+
+`${VAR}` / `$VAR` references are expanded **only** in `auth.token` and `auth.client_secret`
+(and only when the whole value is a reference). `command`, `args`, `env` and `url` are passed
+through literally, so `"args": ["--header", "Authorization:${TOKEN}"]` sends the text
+`${TOKEN}`, not its value. To feed a secret from the environment into a stdio server's
+arguments, let a shell expand it:
+
+```json
+{
+  "mcpServers": {
+    "example": {
+      "command": "sh",
+      "args": ["-c", "exec my-mcp-server --token \"$MY_SERVER_TOKEN\""]
+    }
+  }
+}
+```
+
+HTTP servers have no `headers` field. A server that needs a non-bearer header (for example
+HTTP Basic auth) can be reached through a stdio bridge such as
+[`mcp-remote`](https://www.npmjs.com/package/mcp-remote), combined with the shell pattern above:
+`exec npx -y mcp-remote https://host/mcp --header "Authorization:Basic $B64_CREDS"`.
+
 ---
 
 ## Authentication (OAuth)
