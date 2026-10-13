@@ -2,7 +2,10 @@
 
 ## [Unreleased]
 
+## [1.33.1] - 2026-10-13
+
 ### Changed
+- **Model catalog regenerated**: added 54 aggregator model(s); removed 15 aggregator model(s); 29 model(s) with changed pricing/limits.
 - ACP: the default idle-session reap is now 90m (was 15m). It must stay above the 1h prompt-cache TTL. A reap restarts the session in a new process, and that loses the whole cached prefix. At 15m most 15-60 min reply gaps paid a full history rewrite, so the 1h cache from 1.29 cost more than it saved.
 
 ## [1.33.0] - 2026-10-10
