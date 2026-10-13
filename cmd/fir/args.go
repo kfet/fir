@@ -51,7 +51,16 @@ type Args struct {
 	MCPConfig   string
 	WaitMCP     bool
 	// ACPSessionIdleTTL is how long an ACP in-memory session may sit idle
-	// before the background reaper tears it down. Defaults to 1h; 0 disables.
+	// before the background reaper tears it down. Defaults to 90m; 0 disables.
+	//
+	// DO NOT LOWER BELOW 60m without re-measuring prompt-cache cost. A reap
+	// starts a fresh process on the next turn, and a fresh process today does
+	// not rebuild a byte-identical request (late MCP tools change the tool
+	// list; extension prepend_context lands in a new position), so every
+	// cached prefix is lost. The turn-anchored 1h cache (1.29) only pays off
+	// if the session survives the whole 1h TTL: at 15m, zbox relay data
+	// (2026-10-07..10) showed 66-94% history misses on 15-60 min gaps and a
+	// net cost rise. 90m = 1h cache TTL + headroom.
 	ACPSessionIdleTTL  time.Duration
 	Extensions         []string
 	DisabledExtensions []string
@@ -132,7 +141,7 @@ func ParseArgs(args []string) *Args {
 		Messages:          []string{},
 		FileArgs:          []string{},
 		Seen:              make(map[string]bool),
-		ACPSessionIdleTTL: 15 * time.Minute,
+		ACPSessionIdleTTL: 90 * time.Minute, // see field comment: must stay >= 1h cache TTL
 	}
 	mark := func(flag string) { result.Seen[flag] = true }
 	hasAt := false
@@ -462,7 +471,7 @@ Options:
                                  first prompt. Applies in all modes — print/JSON
                                  always waits; interactive and ACP opt in here.
   --acp-session-idle-ttl <dur>   ACP mode: tear down in-memory sessions idle
-                                 longer than <dur> (e.g. 1h, 30m). Default 15m;
+                                 longer than <dur> (e.g. 2h, 30m). Default 90m;
                                  0 disables the idle reaper. Idle sessions cost
                                  zero sidecars; the next prompt re-hydrates them
                                  transparently under the same sessionId.
