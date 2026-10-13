@@ -117,6 +117,34 @@ export MISTRAL_API_KEY="..."
 export AWS_PROFILE="..."           # for Bedrock
 ```
 
+#### Amazon Bedrock with AWS SSO (IAM Identity Center)
+
+fir's Bedrock client resolves static keys, `credential_process`, assume-role,
+web identity, ECS and IMDS credentials, but not SSO profiles
+(`sso_session` / `sso_start_url`) directly. Use an SSO profile through a small
+wrapper profile that asks the AWS CLI for the cached SSO credentials:
+
+```ini
+# ~/.aws/config
+[profile my-sso]            # created by `aws configure sso`
+sso_session = my-org
+sso_account_id = 123456789012
+sso_role_name = Developer
+region = us-west-2
+
+[profile my-sso-fir]
+credential_process = /usr/local/bin/aws configure export-credentials --profile my-sso --format process
+region = us-west-2
+```
+
+```bash
+aws sso login --profile my-sso
+fir login bedrock --mode iam-profile --profile my-sso-fir --region us-west-2
+```
+
+When the SSO session expires, `aws sso login --profile my-sso` refreshes it;
+fir picks up the new credentials on the next request.
+
 ### Global config (`~/.config/fir/`)
 
 The global config directory (override with `FIR_AGENT_DIR` or the `--agent-dir <dir>` CLI flag) holds:
