@@ -120,3 +120,64 @@ func TestBedrockAccountModelOverrides(t *testing.T) {
 		t.Errorf("clone ID (ARN override) = %q", clone.ID)
 	}
 }
+
+// TestBedrockDefaultAccountRegionalEndpoint verifies the DEFAULT Bedrock
+// account's region rewrites the endpoint of its (non-cloned) models, while the
+// model id stays the catalog id and named accounts without a region keep the
+// catalog endpoint. Regression: the default account used to keep the catalog's
+// us-east-1 endpoint while its credential signed for the configured region,
+// so every request failed with "Credential should be scoped to a valid region".
+func TestBedrockDefaultAccountRegionalEndpoint(t *testing.T) {
+	const id = "anthropic.claude-default-region-test"
+	ai.RegisterModel(&ai.Model{
+		ID:            id,
+		Name:          "Claude Default Region (Bedrock)",
+		Provider:      "amazon-bedrock",
+		API:           "amazon-bedrock",
+		BaseURL:       "https://bedrock-runtime.us-east-1.amazonaws.com",
+		ContextWindow: 200000,
+		MaxTokens:     8192,
+	})
+	t.Cleanup(func() { ai.UnregisterModel("amazon-bedrock", id) })
+
+	authStore := auth.NewInMemoryAuthStorage(auth.AuthStorageData{
+		"amazon-bedrock": {
+			Type:  auth.CredentialTypeAWSIAM,
+			Extra: map[string]any{"mode": "profile", "profile": "dev", "region": "us-west-2"},
+		},
+		"amazon-bedrock#noregion": {
+			Type:  auth.CredentialTypeAWSIAM,
+			Label: "noregion",
+			Extra: map[string]any{"mode": "profile", "profile": "other"},
+		},
+	})
+	r := NewModelRegistry(authStore, "")
+
+	var dflt, named *ai.Model
+	for _, m := range r.GetAll() {
+		if m.ID != id {
+			continue
+		}
+		switch m.Provider {
+		case "amazon-bedrock":
+			dflt = m
+		case "amazon-bedrock#noregion":
+			named = m
+		}
+	}
+	if dflt == nil {
+		t.Fatal("default-account Bedrock model missing (or its id was rewritten)")
+	}
+	if dflt.BaseURL != "https://bedrock-runtime.us-west-2.amazonaws.com" {
+		t.Errorf("default account baseURL = %q, want the us-west-2 endpoint", dflt.BaseURL)
+	}
+	if named == nil {
+		t.Fatal("named-account clone missing")
+	}
+	if named.BaseURL != "https://bedrock-runtime.us-east-1.amazonaws.com" {
+		t.Errorf("named account without region inherited %q, want the catalog endpoint", named.BaseURL)
+	}
+	if m := ai.GetModel("amazon-bedrock", id); m == nil || m.BaseURL != "https://bedrock-runtime.us-east-1.amazonaws.com" {
+		t.Errorf("global catalog model was mutated: %+v", m)
+	}
+}
