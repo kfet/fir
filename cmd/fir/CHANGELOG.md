@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- **Default Bedrock account now uses its configured region's endpoint.** `fir login bedrock --region us-west-2` on the default account signed requests for us-west-2 but sent them to the catalog's hard-coded us-east-1 endpoint, so every call failed with `Credential should be scoped to a valid region`. The per-account regional endpoint rewrite now applies to the default account too (endpoint only; model ids and custom `models.json` baseUrls are left alone).
+
 ## [1.35.0] - 2026-10-13
 
 ### Changed
