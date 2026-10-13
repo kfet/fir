@@ -556,3 +556,24 @@ func TestLogoutDoesNotGuessBetweenSurvivors(t *testing.T) {
 		t.Errorf("accounts = %d want 2", n)
 	}
 }
+
+// A Bedrock bearer account with a region must hand that region to the
+// provider: catalog Bedrock models carry no endpoint, so the region in the
+// resolved key is what selects the regional endpoint.
+func TestGetApiKey_BedrockBearerCarriesRegion(t *testing.T) {
+	s := NewInMemoryAuthStorage(AuthStorageData{
+		"amazon-bedrock":       {Type: CredentialTypeAPIKey, Key: "tok", Extra: map[string]any{"region": "us-west-2"}},
+		"amazon-bedrock#plain": {Type: CredentialTypeAPIKey, Key: "tok2"},
+		"openai":               {Type: CredentialTypeAPIKey, Key: "sk", Extra: map[string]any{"region": "x"}},
+	})
+	c, ok := ai.DecodeBedrockIAMCreds(s.GetApiKey("amazon-bedrock"))
+	if !ok || c.Mode != "bearer" || c.Token != "tok" || c.Region != "us-west-2" {
+		t.Fatalf("bearer+region envelope = %+v ok=%v", c, ok)
+	}
+	if got := s.GetApiKey("amazon-bedrock#plain"); got != "tok2" {
+		t.Errorf("bearer without region = %q, want raw token", got)
+	}
+	if got := s.GetApiKey("openai"); got != "sk" {
+		t.Errorf("non-Bedrock key = %q, want raw key", got)
+	}
+}

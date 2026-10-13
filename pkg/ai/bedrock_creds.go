@@ -12,7 +12,9 @@ import (
 // StreamOptions.ApiKey:
 //
 //   - bearer token  (CredentialType api_key)  — a plain string, used as the
-//     Bedrock API key (skipstone WithBearerToken, suppresses SigV4).
+//     Bedrock API key (skipstone WithBearerToken, suppresses SigV4). A bearer
+//     account with a region is wrapped in the envelope (Mode "bearer") so the
+//     region reaches the client.
 //   - AWS IAM       (CredentialType aws_iam)   — a JSON envelope (prefixed with
 //     BedrockIAMEnvelopePrefix) describing how skipstone should obtain SigV4
 //     credentials: a named profile, or explicit static keys, plus a region.
@@ -28,8 +30,8 @@ const BedrockIAMEnvelopePrefix = "fir-bedrock-iam:"
 // BedrockIAMCreds carries the per-account AWS IAM configuration used to build a
 // SigV4-signing Bedrock client.
 type BedrockIAMCreds struct {
-	// Mode is "profile" (resolve via a named ~/.aws profile) or "keys"
-	// (explicit static credentials).
+	// Mode is "profile" (resolve via a named ~/.aws profile), "keys"
+	// (explicit static credentials) or "bearer" (Token).
 	Mode string `json:"mode"`
 	// Profile is the ~/.aws profile name (Mode == "profile").
 	Profile string `json:"profile,omitempty"`
@@ -38,6 +40,8 @@ type BedrockIAMCreds struct {
 	AccessKey    string `json:"accessKey,omitempty"`
 	SecretKey    string `json:"secretKey,omitempty"`
 	SessionToken string `json:"sessionToken,omitempty"`
+	// Token is the Bedrock bearer token (Mode == "bearer").
+	Token string `json:"token,omitempty"`
 	// Region is the AWS region for signing and endpoint selection.
 	Region string `json:"region,omitempty"`
 }

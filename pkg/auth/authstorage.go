@@ -582,6 +582,11 @@ func (s *AuthStorage) GetApiKey(provider string) string {
 	if cred, ok := s.data[provider]; ok {
 		if cred.Type == CredentialTypeAPIKey && cred.Key != "" {
 			s.mu.RUnlock()
+			if base, _ := SplitSlot(provider); base == "amazon-bedrock" {
+				if region := AccountRegion(cred.Extra); region != "" {
+					return ai.EncodeBedrockIAMCreds(ai.BedrockIAMCreds{Mode: "bearer", Token: cred.Key, Region: region})
+				}
+			}
 			return cred.Key
 		}
 		if cred.Type == CredentialTypeAWSIAM {

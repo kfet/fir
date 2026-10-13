@@ -3,7 +3,7 @@
 ## [Unreleased]
 
 ### Fixed
-- **Default Bedrock account now uses its configured region's endpoint.** `fir login bedrock --region us-west-2` on the default account signed requests for us-west-2 but sent them to the catalog's hard-coded us-east-1 endpoint, so every call failed with `Credential should be scoped to a valid region`. The per-account regional endpoint rewrite now applies to the default account too (endpoint only; model ids and custom `models.json` baseUrls are left alone).
+- **Bedrock requests now go to the resolved region's endpoint.** The model catalog hardcoded the us-east-1 endpoint on all 194 Bedrock models, so an account set to another region (`fir login bedrock --region`, `AWS_REGION`, or the profile's region) signed for that region but called us-east-1, and every request failed with `Credential should be scoped to a valid region`. Catalog Bedrock models no longer carry a base URL; the endpoint is derived from the resolved region, including for bearer-token accounts, and `AWS_ENDPOINT_URL_BEDROCK_RUNTIME` is now honoured. A custom `models.json` baseUrl still wins.
 
 ## [1.35.0] - 2026-10-13
 

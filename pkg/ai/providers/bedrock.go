@@ -384,6 +384,9 @@ func chooseBedrockAuth(apiKey string, skipAuth bool) bedrockAuthChoice {
 		}
 		c := bedrockAuthChoice{Region: iam.Region}
 		switch {
+		case iam.Mode == "bearer" && iam.Token != "":
+			c.Kind = bedrockAuthBearer
+			c.Bearer = iam.Token
 		case iam.Mode == "keys" && iam.AccessKey != "":
 			c.Kind = bedrockAuthIAMKeys
 			c.AccessKey, c.SecretKey, c.SessionToken = iam.AccessKey, iam.SecretKey, iam.SessionToken

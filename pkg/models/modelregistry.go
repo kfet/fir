@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 	"sync"
 
 	"github.com/kfet/fir/pkg/ai"
@@ -822,31 +821,14 @@ func (r *ModelRegistry) loadBuiltInModels(
 	// accounts. Each clone is presented under the account's composite slot id
 	// so the OAuth ModifyModels pass injects that account's credentials/headers
 	// and the selector groups it separately. Bedrock accounts additionally
-	// apply per-account region (regional endpoint) and model-id/ARN overrides.
-	//
-	// The default Bedrock account gets its regional endpoint too, applied to
-	// a copy of the base model. Without it, a default account configured with
-	// `--region us-west-2` signs requests for us-west-2 (the region travels
-	// with the credential) while sending them to the catalog's hard-coded
-	// us-east-1 endpoint, and AWS rejects every call with "Credential should
-	// be scoped to a valid region". Only the endpoint is rewritten: the model
-	// id stays the catalog id so defaultModel and --model lookups keep
-	// resolving. Clones for named accounts are still taken from the untouched
-	// catalog model, so a named account without its own region does not
-	// inherit the default's.
-	baseCount := len(result)
-	for i := 0; i < baseCount; i++ {
-		base := result[i]
+	// apply a per-account model-id/ARN override. Region needs no rewrite:
+	// catalog Bedrock models carry no BaseURL, and the account's region
+	// travels with its credential, so skipstone derives the regional
+	// endpoint at request time (providers/bedrock.go).
+	for _, base := range result {
 		for _, acct := range r.authStorage.AccountsForProvider(base.Provider) {
 			if acct.AccountID == "" {
-				// isStockBedrockEndpoint: never clobber a provider-level
-				// baseUrl override from models.json (e.g. a VPC endpoint).
-				if url := bedrockRegionalBaseURL(acct); url != "" && url != base.BaseURL && isStockBedrockEndpoint(base.BaseURL) {
-					dflt := *base
-					dflt.BaseURL = url
-					result[i] = &dflt
-				}
-				continue
+				continue // default account uses the base models as-is
 			}
 			clone := *base
 			clone.Provider = acct.SlotKey
@@ -861,37 +843,13 @@ func (r *ModelRegistry) loadBuiltInModels(
 	return result
 }
 
-// bedrockRegionalBaseURL returns the regional Bedrock runtime endpoint for an
-// Amazon Bedrock account with a configured region, or "" for any other
-// account (non-Bedrock provider, or no region set).
-func bedrockRegionalBaseURL(acct auth.Account) string {
-	baseProvider, _ := auth.SplitSlot(acct.SlotKey)
-	if baseProvider != "amazon-bedrock" {
-		return ""
-	}
-	if region := auth.AccountRegion(acct.Extra); region != "" {
-		return "https://bedrock-runtime." + region + ".amazonaws.com"
-	}
-	return ""
-}
-
-// isStockBedrockEndpoint reports whether u is a public regional Bedrock
-// runtime endpoint ("https://bedrock-runtime.<region>.amazonaws.com"), as
-// opposed to a user-configured custom endpoint.
-func isStockBedrockEndpoint(u string) bool {
-	return strings.HasPrefix(u, "https://bedrock-runtime.") && strings.HasSuffix(u, ".amazonaws.com")
-}
-
 // applyBedrockAccountOverrides rewrites a cloned Amazon Bedrock model with an
-// account's per-account region (regional endpoint) and model-id/ARN override.
+// account's per-account model-id/ARN override.
 // No-op for non-Bedrock providers or accounts without overrides.
 func applyBedrockAccountOverrides(clone, base *ai.Model, acct auth.Account) {
 	baseProvider, _ := auth.SplitSlot(acct.SlotKey)
 	if baseProvider != "amazon-bedrock" {
 		return
-	}
-	if url := bedrockRegionalBaseURL(acct); url != "" {
-		clone.BaseURL = url
 	}
 	if override := auth.AccountModelOverride(acct.Extra, base.ID); override != "" {
 		clone.ID = override

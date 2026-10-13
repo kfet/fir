@@ -24,6 +24,8 @@ func TestChooseBedrockAuth(t *testing.T) {
 		{"iam profile", profileEnv, false, bedrockAuthIAMProfile, "eu-west-1"},
 		{"iam keys", keysEnv, false, bedrockAuthIAMKeys, "us-west-2"},
 		{"iam profile missing name -> default chain", profileNoName, false, bedrockAuthDefaultChain, "ap-south-1"},
+		{"bearer envelope", ai.EncodeBedrockIAMCreds(ai.BedrockIAMCreds{Mode: "bearer", Token: "t", Region: "us-west-2"}), false, bedrockAuthBearer, "us-west-2"},
+		{"bearer envelope missing token -> default chain", ai.EncodeBedrockIAMCreds(ai.BedrockIAMCreds{Mode: "bearer", Region: "us-west-2"}), false, bedrockAuthDefaultChain, "us-west-2"},
 		{"empty -> default chain", "", false, bedrockAuthDefaultChain, ""},
 	}
 	for _, tc := range tests {

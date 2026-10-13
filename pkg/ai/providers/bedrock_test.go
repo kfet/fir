@@ -1,7 +1,10 @@
 package providers
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -401,4 +404,64 @@ func TestBedrockNormalizeID(t *testing.T) {
 	assert.Equal(t, "tool_call_123", normalize("tool_call_123"))
 	assert.Equal(t, "tool_call_123", normalize("tool.call.123"))
 	assert.Equal(t, "abc-def_ghi", normalize("abc-def_ghi"))
+}
+
+// hostRecorder captures the request host and fails the request without
+// touching the network.
+type hostRecorder struct{ host string }
+
+func (h *hostRecorder) RoundTrip(req *http.Request) (*http.Response, error) {
+	h.host = req.URL.Host
+	return nil, errors.New("recorded")
+}
+
+// bedrockRequestHost builds a client for a catalog-shaped model (no
+// BaseURL) and returns the host its first request is sent to.
+func bedrockRequestHost(t *testing.T, apiKey string) string {
+	t.Helper()
+	rec := &hostRecorder{}
+	orig := http.DefaultClient.Transport
+	http.DefaultClient.Transport = rec
+	t.Cleanup(func() { http.DefaultClient.Transport = orig })
+
+	model := &ai.Model{ID: "anthropic.claude-test", API: ai.ApiBedrockConverseStream, Provider: ai.ProviderAmazonBedrock}
+	var opts *ai.StreamOptions
+	if apiKey != "" {
+		opts = &ai.StreamOptions{APIKey: apiKey}
+	}
+	client, err := newBedrockClient(model, opts)
+	require.NoError(t, err)
+	_, _ = client.ConverseStream(context.Background(), &skipstone.ConverseStreamInput{
+		ModelID:  model.ID,
+		Messages: []skipstone.Message{{Role: skipstone.RoleUser, Content: []skipstone.Block{{Text: "hi"}}}},
+	})
+	return rec.host
+}
+
+// Regression: the default account's --region must pick the endpoint, not a
+// hardcoded us-east-1 catalog BaseURL.
+func TestNewBedrockClient_AccountRegionSetsEndpoint(t *testing.T) {
+	t.Setenv("AWS_REGION", "")
+	t.Setenv("AWS_DEFAULT_REGION", "")
+	t.Setenv("AWS_ENDPOINT_URL_BEDROCK_RUNTIME", "")
+	key := ai.EncodeBedrockIAMCreds(ai.BedrockIAMCreds{Mode: "keys", AccessKey: "AK", SecretKey: "SK", Region: "us-west-2"})
+	assert.Equal(t, "bedrock-runtime.us-west-2.amazonaws.com", bedrockRequestHost(t, key))
+}
+
+// AWS_REGION alone (no --region on the account) must pick the endpoint.
+func TestNewBedrockClient_AWSRegionSetsEndpoint(t *testing.T) {
+	t.Setenv("AWS_REGION", "eu-central-1")
+	t.Setenv("AWS_DEFAULT_REGION", "")
+	t.Setenv("AWS_ENDPOINT_URL_BEDROCK_RUNTIME", "")
+	t.Setenv("AWS_BEDROCK_SKIP_AUTH", "1")
+	assert.Equal(t, "bedrock-runtime.eu-central-1.amazonaws.com", bedrockRequestHost(t, ""))
+}
+
+// A bearer account's region (carried in the envelope) must pick the endpoint.
+func TestNewBedrockClient_BearerRegionSetsEndpoint(t *testing.T) {
+	t.Setenv("AWS_REGION", "")
+	t.Setenv("AWS_DEFAULT_REGION", "")
+	t.Setenv("AWS_ENDPOINT_URL_BEDROCK_RUNTIME", "")
+	key := ai.EncodeBedrockIAMCreds(ai.BedrockIAMCreds{Mode: "bearer", Token: "tok", Region: "ap-south-1"})
+	assert.Equal(t, "bedrock-runtime.ap-south-1.amazonaws.com", bedrockRequestHost(t, key))
 }

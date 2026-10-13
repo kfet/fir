@@ -1122,11 +1122,12 @@ func loadModelsDevData() ([]modelSpec, error) {
 				input = append(input, "image")
 			}
 			models = append(models, modelSpec{
-				ID:             id,
-				Name:           stringOr(m.Name, id),
-				API:            "bedrock-converse-stream",
-				Provider:       "amazon-bedrock",
-				BaseURL:        "https://bedrock-runtime.us-east-1.amazonaws.com",
+				ID:       id,
+				Name:     stringOr(m.Name, id),
+				API:      "bedrock-converse-stream",
+				Provider: "amazon-bedrock",
+				// No BaseURL: skipstone derives the regional endpoint from the
+				// resolved region (--region, AWS_REGION, profile region).
 				Reasoning:      m.Reasoning,
 				Input:          input,
 				CostInput:      m.Cost.Input,
@@ -1749,7 +1750,6 @@ func applyOverridesAndAdditions(all []modelSpec) []modelSpec {
 			Name:      "Claude Opus 4.6 (EU)",
 			API:       "bedrock-converse-stream",
 			Provider:  "amazon-bedrock",
-			BaseURL:   "https://bedrock-runtime.us-east-1.amazonaws.com",
 			Reasoning: true,
 			Input:     []string{"text", "image"},
 			CostInput: 5, CostOutput: 25, CostCacheRead: 0.5, CostCacheWrite: 6.25,
