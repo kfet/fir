@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [1.35.1] - 2026-10-13
+
+### Changed
+- **Model catalog regenerated**: added `google/gemini-4-argon`, `opencode-go/cat-jam-free`, `opencode/gemini-4-argon` (+5 on aggregators); removed 4 aggregator model(s); 20 model(s) with changed pricing/limits (openrouter: deepseek v4 flash/pro, kimi-k3, glm-5.3-flash, qwen3.5-35b-a3b, hy3, ling-3.1-flash, +more).
+
 ### Fixed
 - **Bedrock requests now go to the resolved region's endpoint.** The model catalog hardcoded the us-east-1 endpoint on all 194 Bedrock models, so an account set to another region (`fir login bedrock --region`, `AWS_REGION`, or the profile's region) signed for that region but called us-east-1, and every request failed with `Credential should be scoped to a valid region`. Catalog Bedrock models no longer carry a base URL; the endpoint is derived from the resolved region, including for bearer-token accounts, and `AWS_ENDPOINT_URL_BEDROCK_RUNTIME` is now honoured. A custom `models.json` baseUrl still wins.
 
