@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.34.0] - 2026-10-13
+
 ### Added
 
 - Builtin skills `recall` (cross-session recall over bookmarks/transcripts, ranked by repo incl. worktrees) and `orient` (seed an `orient:` repo-map bookmark); `wt`, `ship-wt`, `acp-shepherd` children run `recall` first
