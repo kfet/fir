@@ -7,6 +7,7 @@ import (
 
 	"github.com/kfet/agent"
 
+	"github.com/kfet/fir/pkg/ai"
 	firlog "github.com/kfet/fir/pkg/log"
 	"github.com/kfet/fir/pkg/mcp"
 	"github.com/kfet/fir/pkg/session/store"
@@ -33,8 +34,13 @@ type RuntimeState struct {
 	// McpServers are session-scoped MCP servers (e.g. supplied by an ACP
 	// client or added at runtime), started on top of the config-file ones.
 	McpServers map[string]mcp.ServerConfig `json:"mcpServers,omitempty"`
-	Meta       map[string]any              `json:"meta,omitempty"`
-	Mode       string                      `json:"mode,omitempty"`
+	// McpTools are the tool schemas each MCP server (config or session)
+	// listed when it last connected, keyed by server. They are advertised
+	// while the server is not connected, so the request does not depend
+	// on connection timing (see AgentSession.mcpAdvertised).
+	McpTools map[string][]ai.Tool `json:"mcpTools,omitempty"`
+	Meta     map[string]any       `json:"meta,omitempty"`
+	Mode     string               `json:"mode,omitempty"`
 	// Handle is an external name for the session (e.g. an ACP sessionId);
 	// every save points it at the current transcript, see store.BindHandle.
 	Handle string `json:"handle,omitempty"`

@@ -578,6 +578,21 @@ func (m *Manager) allTools() []agent.AgentTool {
 	return out
 }
 
+// ToolsByServer returns every configured server keyed by name. A connected
+// server maps to its tools (a non-nil slice, empty if it has none); one that
+// is connecting, failed or disconnected maps to nil.
+func (m *Manager) ToolsByServer() map[string][]agent.AgentTool {
+	out := make(map[string][]agent.AgentTool)
+	m.forEachServer(func(name string, e *serverEntry) bool {
+		out[name] = nil
+		if e.session != nil {
+			out[name] = append(make([]agent.AgentTool, 0, len(e.tools)), e.tools...)
+		}
+		return true
+	})
+	return out
+}
+
 // hasSession reports whether the named server has an active session.
 // Intended for tests; production code should use withEntry.
 func (m *Manager) hasSession(name string) bool {

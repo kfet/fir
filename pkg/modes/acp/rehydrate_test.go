@@ -264,13 +264,20 @@ func TestReapRehydrate_AnyRuntimePropertySurvives(t *testing.T) {
 	entry := openNew(t, pa, sid, &clientSetup{cwd: cwd})
 
 	var want session.RuntimeState
-	statetest.FillNonZero(t, &want, cwd, map[string]mcp.ServerConfig{"srv": echoServer()})
+	statetest.FillNonZero(t, &want, cwd, map[string]mcp.ServerConfig{"srv": echoServer()},
+		map[string][]ai.Tool{"srv": {{Name: "mcp__srv__stale", Parameters: map[string]any{"type": "object"}}}})
 	want.Handle = sid
 	entry.session.UpdateSessionState(func(st *session.SessionState) { st.Runtime = want })
 
 	reapNow(t, pa, sid, entry)
 	back := rehydrate(t, pa, sid)
-	if got := back.session.SessionState().Runtime; !reflect.DeepEqual(got, want) {
+	got := back.session.SessionState().Runtime
+	// Saved MCP tools are refreshed from the server once it connects.
+	if tools := got.McpTools["srv"]; len(tools) != 1 || tools[0].Name != "mcp__srv__echo" {
+		t.Fatalf("srv tools after connect = %+v, want the live echo tool", tools)
+	}
+	got.McpTools = want.McpTools
+	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("runtime after rehydrate:\n got %#v\nwant %#v", got, want)
 	}
 }

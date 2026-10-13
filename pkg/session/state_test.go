@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"github.com/kfet/fir/pkg/ai"
 	"os"
 	"reflect"
 	"testing"
@@ -43,7 +44,9 @@ func TestSessionState_AnyFieldSurvivesReopen(t *testing.T) {
 	// A server that never starts is fine: only its config must survive.
 	srv := map[string]mcp.ServerConfig{"srv": {Command: "/nonexistent/mcp", Env: map[string]string{"TOKEN": "secret"}}}
 	var want SessionState
-	statetest.FillNonZero(t, &want, cwd, srv)
+	tools := map[string][]ai.Tool{"srv": {{Name: "mcp__srv__t", Description: "d",
+		Parameters: map[string]any{"type": "object"}}}}
+	statetest.FillNonZero(t, &want, cwd, srv, tools)
 
 	s := openForTest(t, cwd, agentDir, "", nil)
 	s.UpdateSessionState(func(st *SessionState) { *st = want })

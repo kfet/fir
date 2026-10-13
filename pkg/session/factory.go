@@ -277,15 +277,24 @@ func StartMCPManager(ctx context.Context, sess *AgentSession, configs map[string
 		return len(sess.SessionStore.BuildSessionContext().Messages)
 	})
 
-	// OnToolsChanged fires concurrently from each server's start goroutine;
+	// The advertised MCP tool list is built from saved session state, not
+	// from connection timing: each server's tool schemas are saved when it
+	// connects, and a server that has not (yet) connected is advertised from
+	// its saved list. A rehydrated session therefore sends the same tools on
+	// its first request as before the reap, and a late or broken server
+	// never changes the request (see mcpAdvertised).
+	//
+	// OnToolsChanged fires concurrently from each server's goroutine;
 	// serialise so prevMCPNames is read and swapped atomically.
 	var (
 		toolsMu      sync.Mutex
 		prevMCPNames []string
 	)
-	mgr.SetOnToolsChanged(func(mcpTools []agent.AgentTool) {
+	advertise := func() {
 		toolsMu.Lock()
 		defer toolsMu.Unlock()
+		mcpTools := sess.mcpAdvertised(mgr.ToolsByServer())
+
 		// Bound each model-dispatched MCP tool call with the default timeout,
 		// innermost — on the RAW Execute, before hook wrapping — so N covers
 		// only the MCP round-trip and never a blocking OnToolCall hook.
@@ -329,7 +338,10 @@ func StartMCPManager(ctx context.Context, sess *AgentSession, configs map[string
 			names[i] = t.Name
 		}
 		prevMCPNames = names
-	})
+	}
+	mgr.SetOnToolsChanged(func([]agent.AgentTool) { advertise() })
+	// Advertise the saved tools before any server connects.
+	advertise()
 
 	mgr.Start(ctx)
 	firlog.Info("MCP servers starting", "servers", len(configs))

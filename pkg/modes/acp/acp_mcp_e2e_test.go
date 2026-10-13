@@ -25,6 +25,7 @@ package acp_test
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"strings"
 	"testing"
@@ -52,7 +53,15 @@ func TestMain(m *testing.M) {
 // runMCPEchoServer runs a minimal MCP server on stdin/stdout.
 // It exposes a single "echo" tool that returns its "text" argument unchanged.
 // Blocks until stdin is closed (fir disconnects after the session ends).
+// While the file named by MCP_TEST_HOLD exists it never answers, so the
+// server stays "connecting" for the life of the client.
 func runMCPEchoServer() {
+	if hold := os.Getenv("MCP_TEST_HOLD"); hold != "" {
+		if _, err := os.Stat(hold); err == nil {
+			_, _ = io.Copy(io.Discard, os.Stdin)
+			return
+		}
+	}
 	server := sdk.NewServer(&sdk.Implementation{Name: "echo-srv", Version: "1"}, nil)
 	server.AddTool(
 		&sdk.Tool{

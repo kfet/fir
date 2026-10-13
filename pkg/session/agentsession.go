@@ -1244,13 +1244,27 @@ func (s *AgentSession) GetSystemPrompt() string {
 // line is present in the base system prompt (see buildSystemPrompt and
 // GetEnableSysExtensions). That gating happens at system-prompt construction
 // time, so flipping the setting later naturally reinterprets already-
-// injected messages on the next render. We never silently drop content.
+// injected messages on the next render. We never silently drop content;
+// content identical to an earlier injection is already in the history.
 func (s *AgentSession) PrependContext(content string) {
 	if content == "" {
 		return
 	}
-	msg := fmt.Sprintf("[SYS_EXT]\n%s\n[/SYS_EXT]", content)
-	s.Agent.AppendMessage(agent.NewAgentMessage(ai.NewUserMsg(msg, time.Now().UnixMilli())))
+	text := fmt.Sprintf("[SYS_EXT]\n%s\n[/SYS_EXT]", content)
+	// The request is built only from saved state: persist the injection as
+	// a normal transcript entry so a reloaded session replays it at its
+	// original position. A re-run of the same injector (e.g. session_start
+	// after an ACP idle reap) finds it already present and adds nothing.
+	for _, m := range s.Agent.State().Messages {
+		if u := m.AsUser(); u != nil && u.Content == text {
+			return
+		}
+	}
+	msg := agent.NewAgentMessage(ai.NewUserMsg(text, time.Now().UnixMilli()))
+	s.Agent.AppendMessage(msg)
+	if s.SessionStore != nil {
+		s.SessionStore.AppendAgentMessage(msg)
+	}
 }
 
 // GetCwd returns the working directory.
