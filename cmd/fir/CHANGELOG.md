@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [1.35.3] - 2026-10-14
+
+### Changed
+- **Model catalog regenerated**: 3 models with changed pricing/limits (amazon-bedrock: amazon.nova-2-lite-v1:0; openrouter: deepseek v4.1 flash, glm-5.x).
+
 ### Fixed
 - **GitHub releases now carry highlights** — the release body on kfet/fir and kfet/fir-dist is the version's CHANGELOG section plus the compare link (`scripts/release-notes.sh`), not just the compare link.
 
