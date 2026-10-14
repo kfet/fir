@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -214,20 +215,34 @@ func freeLoopbackPort(t *testing.T) int {
 func TestMCPOAuth_PinnedRedirectURI(t *testing.T) {
 	// The Okta shape: no dynamic registration, a pre-registered client_id and
 	// a redirect URI that must match byte for byte, port included.
-	redirectURI := fmt.Sprintf("http://127.0.0.1:%d/fir/callback", freeLoopbackPort(t))
-	as := newFakeAuthServer(t, asOptions{
-		noDCR:                 true,
-		preRegistered:         "okta-client",
-		preRegisteredRedirect: redirectURI,
-	})
-	srv := newFakeMCPServer(t, as, mcpOptions{})
-
-	mgr, _ := newTestManager(t, srv.config(&AuthConfig{
-		ClientID:    "okta-client",
-		RedirectURI: redirectURI,
-	}))
-
-	require.NoError(t, loginAndConnect(t, mgr, browserCallbacks(t, nil)))
+	//
+	// The callback server binds the pinned port itself, so the port must be
+	// released first; under -race a parallel test can grab it in between.
+	// Retry with a fresh port when that happens.
+	var (
+		redirectURI string
+		as          *fakeAuthServer
+		mgr         *Manager
+	)
+	for attempt := 0; ; attempt++ {
+		redirectURI = fmt.Sprintf("http://127.0.0.1:%d/fir/callback", freeLoopbackPort(t))
+		as = newFakeAuthServer(t, asOptions{
+			noDCR:                 true,
+			preRegistered:         "okta-client",
+			preRegisteredRedirect: redirectURI,
+		})
+		srv := newFakeMCPServer(t, as, mcpOptions{})
+		mgr, _ = newTestManager(t, srv.config(&AuthConfig{
+			ClientID:    "okta-client",
+			RedirectURI: redirectURI,
+		}))
+		err := loginAndConnect(t, mgr, browserCallbacks(t, nil))
+		if err != nil && attempt < 5 && errors.Is(err, syscall.EADDRINUSE) {
+			continue
+		}
+		require.NoError(t, err)
+		break
+	}
 	requireToolsWork(t, mgr)
 	registrations, _, issued := as.counters()
 	require.Zero(t, registrations)
@@ -270,11 +285,10 @@ func TestMCPOAuth_PinnedRedirectURIRejectedByStrictServer(t *testing.T) {
 }
 
 func TestMCPOAuth_PinnedRedirectURIPortInUseIsActionable(t *testing.T) {
-	port := freeLoopbackPort(t)
-	redirectURI := fmt.Sprintf("http://127.0.0.1:%d/fir/callback", port)
-	// Squat on the port so the callback server cannot bind it.
-	squatter, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+	// Squat on a port so the callback server cannot bind it.
+	squatter, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
+	redirectURI := fmt.Sprintf("http://127.0.0.1:%d/fir/callback", squatter.Addr().(*net.TCPAddr).Port)
 	t.Cleanup(func() { _ = squatter.Close() })
 
 	as := newFakeAuthServer(t, asOptions{noDCR: true, preRegistered: "okta-client"})
@@ -288,6 +302,8 @@ func TestMCPOAuth_PinnedRedirectURIPortInUseIsActionable(t *testing.T) {
 	// A bare "address already in use" says nothing about which knob to turn.
 	require.ErrorContains(t, err, "auth.redirect_uri")
 	require.ErrorContains(t, err, redirectURI)
+	// The bind error stays in the chain; TestMCPOAuth_PinnedRedirectURI retries on it.
+	require.ErrorIs(t, err, syscall.EADDRINUSE)
 }
 
 func TestAuthConfigCallbackTarget(t *testing.T) {

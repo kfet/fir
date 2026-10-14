@@ -80,13 +80,13 @@ class _FakeServer(HTTPServer):
 
 
 class _Handler(BaseHTTPRequestHandler):
-    # last_body is stashed per-server by do_POST for assertions.
-    server: "_FakeServer"
-
     def do_POST(self):
         length = int(self.headers.get("Content-Length", 0))
         body = json.loads(self.rfile.read(length) or b"{}")
-        self.server.last_body = body
+        # last_body is stashed per-server for assertions.
+        server = self.server
+        assert isinstance(server, _FakeServer)
+        server.last_body = body
         if body.get("code") == "good":
             payload, status = {"key": "sk-or-v1-fake"}, 200
         elif self.path == "/api/v1/auth/keys":
