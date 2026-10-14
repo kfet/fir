@@ -2,9 +2,14 @@
 
 ## [Unreleased]
 
+## [1.35.2] - 2026-10-14
+
 ### Fixed
 - **CI: `ty` invalid-mutable-override in `openrouter_auth_test.py`** — the handler narrows `self.server` with `isinstance` instead of re-annotating the attribute.
 - **Flaky `TestMCPOAuth_PinnedRedirectURI` under `-race`** — retries with a fresh port when the released port is grabbed before the callback server binds it.
+
+### Changed
+- **Model catalog regenerated**: added `github-copilot/gemini-4-argon` (+4 on aggregators); removed 1 aggregator model; 17 models with changed pricing/limits.
 
 ## [1.35.1] - 2026-10-13
 
