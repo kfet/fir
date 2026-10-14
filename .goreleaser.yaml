@@ -37,6 +37,9 @@ release:
     owner: kfet
     name: fir
   prerelease: auto
+  # The workflow passes --release-notes (CHANGELOG section + compare link,
+  # from scripts/release-notes.sh); replace so a re-run refreshes the body.
+  mode: replace
   name_template: "fir {{.Version}}"
   extra_files:
     - glob: LICENSE

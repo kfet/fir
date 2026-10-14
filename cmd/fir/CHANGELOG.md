@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- **GitHub releases now carry highlights** — the release body on kfet/fir and kfet/fir-dist is the version's CHANGELOG section plus the compare link (`scripts/release-notes.sh`), not just the compare link.
+
 ## [1.35.2] - 2026-10-14
 
 ### Fixed

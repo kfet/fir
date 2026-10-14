@@ -89,6 +89,16 @@ jobs:
       - name: Generate third-party notices
         run: make notices
 
+      # Release body = this version's CHANGELOG section + compare link.
+      # GoReleaser's github-native changelog alone yields only the compare
+      # link, so we hand it the extracted notes. The mirror step below
+      # copies the body to kfet/fir-dist.
+      - name: Extract release notes
+        run: |
+          set -euo pipefail
+          scripts/release-notes.sh "$TAG" > "$RUNNER_TEMP/release-notes.md"
+          cat "$RUNNER_TEMP/release-notes.md"
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@ec59f474b9834571250b370d4735c50f8e2d1e29 # v7.0.0
         with:
@@ -100,7 +110,7 @@ jobs:
           # GoReleaser's git-state validation rejects ("git is in a dirty
           # state"). The tag is already resolved and guarded by the
           # release-guard step, so validation buys nothing here.
-          args: release --clean --skip=validate
+          args: release --clean --skip=validate --release-notes=${{ runner.temp }}/release-notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # May be unset: .goreleaser.yaml skips the tap push rather than
@@ -196,7 +206,8 @@ jobs:
               --notes-file "$NOTES_FILE" \
               --verify-tag=false
           else
-            echo "Release $TAG already exists on $MIRROR_REPO — updating assets."
+            echo "Release $TAG already exists on $MIRROR_REPO — updating notes and assets."
+            gh release edit "$TAG" --repo "$MIRROR_REPO" --notes-file "$NOTES_FILE"
           fi
 
           gh release upload "$TAG" \

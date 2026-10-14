@@ -83,6 +83,8 @@ step 1); that line alone is not grounds for a minor bump either.
 
 After the user confirms, run `make publish` to regenerate the PGO profile and amend the release commit if it changed, push the commit and tag to origin, and let GoReleaser CI build and create the release.
 
+The release body is automatic: CI runs `scripts/release-notes.sh <tag>` (the version's `CHANGELOG.md` section as **Highlights** + compare link) and passes it to GoReleaser; the mirror step copies it to kfet/fir-dist. So the CHANGELOG section *is* the release notes — write it for users. After CI is green, check `gh release view vVERSION --repo kfet/fir-dist` shows the highlights; if not, fix with `scripts/release-notes.sh vVERSION > n.md && gh release edit vVERSION --repo kfet/fir --notes-file n.md` (and the same for `kfet/fir-dist`).
+
 Alternatively, `make deploy HOST=<host>` scp's a locally built binary straight
 onto a host. That is **not** the update path — it installs an unpublished,
 locally built artifact and leaves a `~/.local/bin/fir.prev` backup file behind.
