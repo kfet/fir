@@ -1038,6 +1038,17 @@ func (e *Editor) HandleInput(data string) {
 			return
 		}
 		if kb.matches(data, ActSelectConfirm) {
+			// Inside a slash command's arguments, Enter submits what is
+			// typed. The highlighted suggestion is only a hint until the
+			// user accepts it with Tab.
+			before := e.state.lines[e.state.cursorLine][:e.state.cursorCol]
+			if e.isInSlashCommandContext(before) &&
+				strings.ContainsAny(strings.TrimLeft(before, " \t"), " \t") {
+				e.cancelAutocomplete()
+				// Fall through to submit below
+			}
+		}
+		if e.autocompleteState != "" && kb.matches(data, ActSelectConfirm) {
 			selected := e.autocompleteList.GetSelectedItem()
 			if selected != nil && e.autocompleteProvider != nil {
 				e.pushUndoSnapshot()

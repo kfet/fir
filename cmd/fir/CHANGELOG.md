@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+## [1.35.4] - 2026-10-17
+
+### Changed
+- **Model catalog regenerated**: added opencode/opencode-go free models (beam-free, deepseek-v4.1-flash-free, glm-5.3-flash-free, +13 on aggregators); removed 11 opencode(-go) models (+6 on aggregators); 38 models with changed pricing/limits.
+
+### Fixed
+- **TUI: Enter in slash-command arguments submits what you typed** — e.g. `/mcp ` + Enter no longer applies the highlighted (not yet accepted) menu item. Tab still accepts a suggestion; Enter still completes a partial command name.
+
 ## [1.35.3] - 2026-10-14
 
 ### Changed

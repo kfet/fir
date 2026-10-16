@@ -1166,3 +1166,20 @@ func TestEditor_TabAcceptSlashArgOpensNextLevel(t *testing.T) {
 		t.Error("Tab accept should open the server list, like typing a space")
 	}
 }
+
+func TestEditor_EnterInSlashArgsSubmitsTypedText(t *testing.T) {
+	e := newTestEditor()
+	e.SetAutocompleteProvider(mockSlashArgs{})
+	var got string
+	e.OnSubmit = func(s string) { got = s }
+	for _, r := range "/mcp lo" {
+		e.HandleInput(string(r))
+	}
+	if !e.IsShowingAutocomplete() {
+		t.Fatal("expected subcommand list")
+	}
+	e.HandleInput("\r")
+	if got != "/mcp lo" {
+		t.Fatalf("Enter must submit typed text, not the highlighted item; got %q", got)
+	}
+}
