@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [1.35.6] - 2026-10-21
+
+### Changed
+- **Model catalog regenerated**: added `google/gemini-pro-latest`, `opencode/muse-wonder-1.0`; removed 7 aggregator model(s); 19 model(s) with changed pricing/limits.
+
 ### Fixed
 - **`aside`: tool-call-only side-query replies were returned as answers.** A reply with tool calls and no text is retried once with a "no tools available" instruction, then becomes an error — never the `[tool X …]` marker.
 - **`aside` agentic `goal` mode: native tool_use replies ended the loop as the answer.** Host-rendered `[tool X …]` markers now run as tool calls when allowlisted and are refused (loop continues) otherwise.
