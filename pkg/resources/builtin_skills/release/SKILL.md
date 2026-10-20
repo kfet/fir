@@ -209,3 +209,10 @@ asset for that host's OS/arch, there is nothing to self-update from. Then, and
 only then, build and install into the PATH location deliberately: state out loud
 which path you are overwriting and why, get the user's confirmation first, and do
 not leave a backup file behind. This is the exception, never the offer.
+
+## Known pitfalls
+
+- **Re-tagging a tag GoReleaser already published fails with 422 `already_exists`**, and the fir-dist mirror step then never runs. Fix: `gh release delete <tag> --yes --cleanup-tag=false`, then rerun with `gh workflow run release.yml -f tag=<tag>`. Prefer a new patch version over amending a pushed release commit.
+- **Python linters are unpinned**: `make lint-python` runs `uvx ruff@latest` and `uvx ty@latest`. If lint fails on files you did not touch, suspect a new linter release. Do not chase it inside a release, and do not mass-`--fix` noqa.
+- `.fir/extensions` is a symlink to `pkg/resources/builtin_extensions`: lint errors under the former are in the latter. Root `CHANGELOG.md` is a symlink into `cmd/fir/`.
+- **Fleet deploy:** the fleet is not a fixed list. Enumerate hosts with `rhosts probe=true` and run `fir update` on every reachable host that has fir. Then grep each host's `~/.config/fir/settings.json` `defaultModel` and `~/.config/poe-acp/*/config.json` `model`: a pin there beats any built-in default. Deploy the binary before changing a bot's model. On slow hosts (Raspberry Pi) `fir update` can outlast the ssh timeout; re-check `fir --version` before calling it failed.

@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Changed
+- **`release` skill: Known pitfalls section** — covers GoReleaser 422 `already_exists` on re-tag (which skips the fir-dist mirror), unpinned `@latest` Python linters, the `.fir/extensions`/`CHANGELOG.md` symlinks, and fleet-deploy rules (enumerate hosts, check model pins).
+
 ## [1.35.4] - 2026-10-17
 
 ### Changed
