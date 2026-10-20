@@ -2,7 +2,10 @@
 
 ## [Unreleased]
 
+## [1.35.5] - 2026-10-20
+
 ### Changed
+- **Model catalog regenerated**: added `huggingface/deepseek-ai/DeepSeek-V4.1-Flash-1017`, `opencode-go/minimax-m3.1-flash-free`, `opencode/minimax-m3.1-flash-free` (+12 on aggregators); removed `azure-openai-responses/gpt-5.2-chat-latest`, `azure-openai-responses/gpt-5.3-chat-latest`, `mistral/open-mistral-7b`, `mistral/open-mixtral-8x22b`, `mistral/open-mixtral-8x7b`, `openai/gpt-5.2-chat-latest`, `openai/gpt-5.3-chat-latest`, `opencode-go/space-bunny` +3 more (+2 on aggregators); 40 model(s) with changed pricing/limits.
 - **`release` skill: Known pitfalls section** — covers GoReleaser 422 `already_exists` on re-tag (which skips the fir-dist mirror), unpinned `@latest` Python linters, the `.fir/extensions`/`CHANGELOG.md` symlinks, and fleet-deploy rules (enumerate hosts, check model pins).
 
 ## [1.35.4] - 2026-10-17
