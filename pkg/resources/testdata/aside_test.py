@@ -3790,7 +3790,7 @@ class TestAgenticLoop(_AgenticBase):
         mod = self.mod
         seen = []
 
-        def fake(ctx, question, *, model, provider, effort):
+        def fake(ctx, question, *, model, provider, effort, allow_tool_calls=False):
             seen.append(question)
             reply = _calls_block(("ls", {})) if len(seen) == 1 else _answer_block("done")
             return (
@@ -4132,6 +4132,129 @@ class TestDowngradedReasoningOffRetry(unittest.TestCase):
         self.assertEqual(calls, [("claude-fable-5", None), ("claude-fable-5", "off")])
 
 
+# ---------------------------------------------------------------------------
+# Tool-call-only side-query replies (host-rendered "[tool X {...}]" markers)
+# ---------------------------------------------------------------------------
+
+
+class TestToolCallOnlyReplies(unittest.TestCase):
+    def setUp(self):
+        self.mod = _load_aside()
+        self.mod._EMPTY_CONTENT_RETRY_BACKOFF = 0.0
+
+    def test_parse_tool_markers(self):
+        calls, rest = self.mod._parse_tool_markers('hi\n[tool read {"path": "a]b"}]\n[tool ls {}]')
+        self.assertEqual(
+            calls, [{"name": "read", "params": {"path": "a]b"}}, {"name": "ls", "params": {}}]
+        )
+        self.assertEqual(rest.strip(), "hi")
+
+    def test_is_tool_call_only(self):
+        f = self.mod._is_tool_call_only
+        self.assertTrue(f("[tool read {}]", None))
+        self.assertTrue(f("[think] hmm\n[tool read {}]", None))
+        self.assertFalse(f("prose\n[tool read {}]", None))
+        self.assertFalse(f("plain answer", None))
+        self.assertTrue(f("x", [{"type": "thinking", "len": 3}, {"type": "toolCall", "len": 2}]))
+        self.assertFalse(f("x", [{"type": "text", "len": 1}, {"type": "toolCall", "len": 2}]))
+
+    def test_blocking_retry_then_prose_answer(self):
+        ctx = _blocking_ctx()
+        ctx.side_query = mock.MagicMock(side_effect=['[tool grep {"pattern": "x"}]', "prose"])
+        text, err, _, _ = self.mod._run_side_query_with_card(
+            ctx, "Q", model="m", provider="p", effort=None
+        )
+        self.assertEqual((text, err), ("prose", None))
+        retry_q = ctx.side_query.call_args_list[1].args[0]
+        self.assertTrue(retry_q.startswith("Q"))
+        self.assertIn("no tools are available", retry_q.lower())
+
+    def test_repeat_is_error_never_marker(self):
+        ctx = _blocking_ctx()
+        ctx.side_query = mock.MagicMock(side_effect=["[tool read {}]", "[tool read {}]"])
+        text, err, _, _ = self.mod._run_side_query_with_card(
+            ctx, "Q", model="m", provider="p", effort=None
+        )
+        self.assertIsNone(text)
+        self.assertIn("tool calls only", err)
+        self.assertFalse(self.mod._is_empty_content_error(err))
+
+    def test_streaming_uses_blocks(self):
+        replies = iter(
+            [
+                ("[tool read {}]", [{"type": "toolCall", "len": 2}]),
+                ("answer", [{"type": "text", "len": 6}]),
+            ]
+        )
+
+        def factory(q, m, p, e):
+            t, b = next(replies)
+            return _FakeStream([{"type": "text", "text": ""}], result={"text": t, "blocks": b})
+
+        ctx = _streaming_ctx(factory)
+        text, err, _, _ = self.mod._run_side_query_with_card(
+            ctx, "Q", model="m", provider="p", effort=None
+        )
+        self.assertEqual((text, err), ("answer", None))
+
+    def test_escalation_never_returns_marker(self):
+        ctx = _blocking_ctx()
+        ctx.available_models = mock.MagicMock(return_value=[])
+        ctx.side_query = mock.MagicMock(return_value="[tool read {}]")
+        self.mod._ADVISOR = {"provider": "anthropic", "model": "claude-opus-4-8"}
+        self.mod._resolve_advisor_chain = lambda c: [
+            {"provider": "anthropic", "model": "claude-opus-4-8"}
+        ]
+        res = self.mod._run_aside([], "q", ctx, escalate=True, mode="self")
+        self.assertTrue(res["is_error"])
+        self.assertNotIn("[tool read", res["content"][0]["text"])
+
+    def test_mixed_reply_strips_markers(self):
+        ctx = _blocking_ctx()
+        ctx.side_query = mock.MagicMock(return_value="the answer\n[tool read {}]")
+        text, err, _, _ = self.mod._run_side_query_with_card(
+            ctx, "Q", model="m", provider="p", effort=None
+        )
+        self.assertEqual((text, err), ("the answer", None))
+        self.assertEqual(ctx.side_query.call_count, 1)
+
+    def test_whitespace_text_block_counts_as_tool_only(self):
+        blocks = [{"type": "text", "len": 1}, {"type": "toolCall", "len": 2}]
+        self.assertTrue(self.mod._is_tool_call_only(" \n[tool read {}]", blocks))
+
+
+class TestAgenticNativeToolUse(_AgenticBase):
+    def test_marker_maps_to_tool_call(self):
+        ctx = self._ctx(['[tool read {"path": "a.go"}]', _answer_block("in a.go")])
+        result = self._run(ctx)
+        ctx.call_tool.assert_called_once_with("read", {"path": "a.go"})
+        self.assertIn("in a.go", result["content"][0]["text"])
+
+    def test_disallowed_marker_refused_and_loop_continues(self):
+        ctx = self._ctx(['[tool bash {"command": "rm -rf /"}]', _answer_block("ok")])
+        result = self._run(ctx)
+        ctx.call_tool.assert_not_called()
+        second = ctx.side_query.call_args_list[1].args[0]
+        self.assertIn("[tool bash] refused", second)
+        self.assertIn("ok", result["content"][0]["text"])
+
+    def test_final_synthesis_never_returns_marker(self):
+        ctx = self._ctx(["[tool read {}]"] * 3)
+        result = self._run(ctx, max_iterations=1)
+        self.assertTrue(result["is_error"])
+        self.assertNotIn("[tool read {}]", result["content"][0]["text"])
+
+
+class TestAgenticToolDescriptions(unittest.TestCase):
+    def test_descriptions_do_not_promise_fixed_tool_set(self):
+        mod = _load_aside()
+        mod._DELEGATE = {"provider": "anthropic", "model": "claude-haiku-4-5"}
+        props = mod._aside_tool_parameters()["properties"]
+        self.assertIn("present in this session", props["goal"]["description"])
+        self.assertIn("present in this session", props["allow_tools"]["description"])
+        self.assertIn("present in this session", mod._aside_tool_description())
+
+
 if __name__ == "__main__":
     unittest.main()
 
@@ -4155,7 +4278,9 @@ class _ModeBase(unittest.TestCase):
         self.data = {}
         self.calls = []
         self.strong_cfg = {"provider": "anthropic", "model": "claude-fable-5", "effort": "high"}
-        patcher = mock.patch.object(self.mod, "_strong_source", side_effect=lambda: self.strong_cfg)
+        patcher = mock.patch.object(
+            self.mod, "_strong_source_with_default", side_effect=lambda: (self.strong_cfg, False)
+        )
         patcher.start()
         self.addCleanup(patcher.stop)
         self.mod._resolve_role_chain = lambda ctx, cfg, role: self.mod._normalise_chain(cfg)
@@ -4380,17 +4505,41 @@ class TestAutoRouting(_ModeBase):
 
 
 class TestStrongFallback(_ModeBase):
-    def test_unset_strong_falls_back_to_self_with_note(self):
+    def test_disabled_strong_falls_back_to_self_with_note(self):
         self.strong_cfg = None
         self.add("u1", "user", "task")
         res = self.escalate("q", mode="strong")
         self.assertNotIn("messages", self.calls[0])
         self.assertEqual(self.calls[0]["model"], "claude-opus-4-8")
         text = res["content"][0]["text"]
-        self.assertIn("[advisor mode: self — requested; strong advisor not configured", text)
+        self.assertIn("[advisor mode: self — requested; strong advisor disabled", text)
+        self.assertNotIn('set "strong_advisor"', text)
         log = json.loads(self.data[self.mod._CONSULT_LOG_KEY])
         self.assertEqual(log[-1]["mode"], "self")
-        self.assertIn("not configured", log[-1]["fallback"])
+        self.assertIn("disabled", log[-1]["fallback"])
+
+    def test_unset_strong_uses_default_strong_advisor(self):
+        # Missing strong_advisor key → bundled default chain (Fable first),
+        # NOT a fallback to self.
+        mod = _load_aside()
+        mod._dynamic_default_chain = lambda ctx, role: None
+        mod._resolve_role_chain = lambda ctx, cfg, role: mod._normalise_chain(cfg)
+        with mock.patch.object(mod, "_read_existing_config", return_value={}):
+            chain = mod._resolve_strong_chain(self.ctx)
+        self.assertEqual(chain[0]["model"], "claude-fable-5")
+        default = (mod._parse_advisor_chain(mod._DEFAULT_ADVISOR_CHAIN), True)
+        with mock.patch.object(
+            self.mod, "_strong_source_with_default", side_effect=lambda: default
+        ):
+            self.mod._dynamic_default_chain = lambda ctx, role: None
+            self.add("u1", "user", "task")
+            res = self.escalate("q", mode="strong")
+        self.assertIn("messages", self.calls[0])
+        self.assertEqual(self.calls[0]["model"], "claude-fable-5")
+        self.assertIn("[advisor mode: strong", res["content"][0]["text"])
+
+    def test_description_does_not_tell_agents_to_configure_strong(self):
+        self.assertNotIn("strong_advisor", self.mod._aside_tool_description())
 
     def test_validation(self):
         res = self.mod._run_aside([], "q", self.ctx, mode="strong")
@@ -4412,7 +4561,15 @@ class TestStrongFallback(_ModeBase):
                 mod._strong_source(), {"provider": "anthropic", "model": "claude-fable-5"}
             )
         with mock.patch.object(mod, "_read_existing_config", return_value={}):
+            self.assertEqual(mod._strong_source()[0]["model"], "claude-fable-5")
+        with mock.patch.object(
+            mod, "_read_existing_config", return_value={"strong_advisor": "off"}
+        ):
             self.assertIsNone(mod._strong_source())
+        with mock.patch.object(
+            mod, "_read_existing_config", return_value={"strong_advisor": "bad"}
+        ):
+            self.assertEqual(mod._strong_source()[0]["model"], "claude-fable-5")
 
     def test_schema_exposes_mode_params(self):
         props = self.mod._aside_tool_parameters()["properties"]

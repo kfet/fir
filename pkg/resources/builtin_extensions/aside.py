@@ -86,7 +86,7 @@ Escalation has a ``mode`` (``auto`` | ``self`` | ``strong``, default auto):
     original behaviour).
   * ``strong`` — the model configured under ``"strong_advisor"`` in
     aside.json (e.g. ``"anthropic/claude-fable-5:high"``; a chain array also
-    works) answers on a BRIEF the tool composes from the session file: the
+    works; default: the strongest available advisor chain) answers on a BRIEF the tool composes from the session file: the
     original user task, the last N turns, the turns named in ``refs`` (turn
     ids or exact quotes), then the question. No full context. The host's
     system prompt still leads the call (side_query ``messages`` replaces only
@@ -97,8 +97,10 @@ Escalation has a ``mode`` (``auto`` | ``self`` | ``strong``, default auto):
 
 The strong advisor keeps one append-only thread per (session, model) in
 session data; later consults append only a delta, so the prefix stays
-byte-identical for the 1h side-query cache. Unset ``strong_advisor`` makes
-strong fall back to self with a note. Every choice is logged to session data
+byte-identical for the 1h side-query cache. Unset ``strong_advisor`` uses
+the default advisor chain (live strongest-first, Fable first when offline);
+only an explicit ``"off"`` — or no available model — makes strong fall back
+to self with a note. Every choice is logged to session data
 (``aside.advisor.log``) and the ``aside/advisor-mode`` card.
 
 Delegate de-escalation
@@ -1283,6 +1285,89 @@ def _usage_from_result(result: Mapping[str, Any]) -> dict[str, int]:
     return {k: int(result.get(k, 0) or 0) for k in _USAGE_KEYS}
 
 
+# A side query runs WITHOUT tools, but a model may still emit a native
+# tool_use block. The host flattens such blocks into ``[tool <name> <json>]``
+# marker lines (kfet/agent renderSimplePromptContent) and thinking blocks into
+# ``[think] …`` lines. A reply made only of those markers is NOT an answer:
+# returning it would hand the caller machine noise dressed up as advice.
+_TOOL_MARKER_START_RE = re.compile(r"\[tool ([^\s\]]+) ")
+_TOOL_ONLY_RETRY_SUFFIX = (
+    "\n\n[Answer in prose. No tools are available in this reply — do not call "
+    "any tool; answer from what you already have.]"
+)
+_TOOL_ONLY_ERROR = (
+    "side query replied with tool calls only (no text) twice, even after being "
+    "told no tools are available — no answer was produced"
+)
+
+
+def _parse_tool_markers(text: str) -> tuple[list[dict[str, Any]], str]:
+    """Extract host-rendered ``[tool <name> <json>]`` markers from *text*.
+
+    Returns ``(calls, residual)`` where each call is ``{name, params}`` and
+    *residual* is the text with the markers removed. JSON args may contain
+    ``]`` so they are decoded with ``raw_decode`` rather than a regex.
+    """
+    calls: list[dict[str, Any]] = []
+    residual: list[str] = []
+    decoder = json.JSONDecoder()
+    pos = 0
+    src = text or ""
+    while True:
+        m = _TOOL_MARKER_START_RE.search(src, pos)
+        if m is None:
+            break
+        try:
+            args, end = decoder.raw_decode(src, m.end())
+        except ValueError:
+            residual.append(src[pos : m.end()])
+            pos = m.end()
+            continue
+        if end >= len(src) or src[end] != "]":
+            residual.append(src[pos:end])
+            pos = end
+            continue
+        residual.append(src[pos : m.start()])
+        calls.append({"name": m.group(1), "params": args if isinstance(args, dict) else {}})
+        pos = end + 1
+    residual.append(src[pos:])
+    return calls, "".join(residual)
+
+
+def _strip_tool_markers(text: str | None) -> str | None:
+    """Drop ``[tool …]`` markers from a prose reply; unchanged when none."""
+    calls, residual = _parse_tool_markers(text or "")
+    return residual.strip() if calls else text
+
+
+def _strip_think_lines(text: str) -> str:
+    """Drop host-rendered ``[think] …`` lines, keeping only answer prose."""
+    return "\n".join(
+        ln for ln in (text or "").splitlines() if not ln.lstrip().startswith("[think]")
+    ).strip()
+
+
+def _is_tool_call_only(text: str | None, blocks: list | None) -> bool:
+    """True when a side-query reply carries tool calls but no answer text.
+
+    Prefers the host's block summary (``toolCall`` present, no non-empty
+    ``text`` block). Without blocks (blocking flavor, older hosts) it falls
+    back to the rendered text: markers present and nothing left once markers
+    and ``[think]`` lines are removed.
+    """
+    if blocks:
+        kinds = [(b.get("type"), b.get("len", 0)) for b in blocks if isinstance(b, dict)]
+        has_tool = any(t == "toolCall" for t, _ in kinds)
+        has_text = any(t == "text" and n for t, n in kinds)
+        if has_tool or has_text:
+            if not has_tool:
+                return False
+            # A whitespace-only text block is not an answer either.
+            return not has_text or not _strip_think_lines(_parse_tool_markers(text or "")[1])
+    calls, residual = _parse_tool_markers(text or "")
+    return bool(calls) and not _strip_think_lines(residual)
+
+
 def _run_side_query_with_card(
     ctx: fir_ext.Context,
     question: str,
@@ -1291,14 +1376,53 @@ def _run_side_query_with_card(
     provider: str | None,
     effort: str | None,
     messages: list[dict[str, str]] | None = None,
+    allow_tool_calls: bool = False,
 ) -> tuple[str | None, str | None, dict[str, int], str | None]:
+    """Run one side query, rejecting tool-call-only replies.
+
+    A reply with tool calls and no text (see :func:`_is_tool_call_only`) is
+    retried ONCE with an explicit "answer in prose; no tools" instruction; a
+    repeat is an error, never the marker string as an answer.
+    ``allow_tool_calls=True`` (the agentic loop, which executes markers)
+    returns the raw reply untouched.
+    """
+    text, err, usage, resolved, blocks = _run_side_query_once(
+        ctx, question, model=model, provider=provider, effort=effort, messages=messages
+    )
+    if allow_tool_calls or err is not None:
+        return text, err, usage, resolved
+    if not _is_tool_call_only(text, blocks):
+        return _strip_tool_markers(text), err, usage, resolved
+    text, err, usage2, resolved, blocks = _run_side_query_once(
+        ctx,
+        question + _TOOL_ONLY_RETRY_SUFFIX,
+        model=model,
+        provider=provider,
+        effort=effort,
+        messages=messages,
+    )
+    usage = _merge_usage(usage, usage2)
+    if err is None and _is_tool_call_only(text, blocks):
+        return None, _TOOL_ONLY_ERROR, usage, resolved
+    return (_strip_tool_markers(text) if err is None else text), err, usage, resolved
+
+
+def _run_side_query_once(
+    ctx: fir_ext.Context,
+    question: str,
+    *,
+    model: str | None,
+    provider: str | None,
+    effort: str | None,
+    messages: list[dict[str, str]] | None = None,
+) -> tuple[str | None, str | None, dict[str, int], str | None, list | None]:
     """Run a streaming side_query and publish a card for the whole lifecycle.
 
     ``messages`` (strong-advisor mode) replaces the session transcript with a
     caller-supplied thread; it is forwarded only when set so the call shape
     of the ordinary full-context path is unchanged.
 
-    Returns ``(text, error, usage, resolved_effort)`` — exactly one of
+    Returns ``(text, error, usage, resolved_effort, blocks)`` — exactly one of
     text/error is non-None. ``usage`` carries the call's token counters (empty
     when unknown). ``resolved_effort`` is the reasoning level the host
     ACTUALLY dispatched with, or ``None`` when the host doesn't report it
@@ -1328,12 +1452,12 @@ def _run_side_query_with_card(
         except Exception as exc:
             err = str(exc)
             ctx.put_observable(key, slug="ERR", detail=err)
-            return None, err, {}, None
+            return None, err, {}, None, None
         if not text or not text.strip():
             ctx.put_observable(key, slug="empty", detail="advisor returned no content")
-            return None, "advisor returned no content", {}, None
+            return None, "advisor returned no content", {}, None, None
         ctx.put_observable(key, slug="stop", detail=text)
-        return text, None, {}, None
+        return text, None, {}, None, None
 
     stream = ctx.side_query_stream(question, model=model, provider=provider, effort=effort, **extra)
 
@@ -1385,7 +1509,7 @@ def _run_side_query_with_card(
     except Exception as exc:
         msg = str(exc)
         ctx.put_observable(key, slug="ERR", detail=f"{msg}\n\n{partial}")
-        return None, msg, usage, None
+        return None, msg, usage, None, None
 
     if stream.error is not None:
         err = stream.error
@@ -1400,7 +1524,7 @@ def _run_side_query_with_card(
         # A scrubbed response arrives as an ERROR, so the level the call
         # actually ran at travels in the error's structured data — this is
         # the one place the reasoning-off retry can learn it was downgraded.
-        return None, err, usage, _resolved_effort_from_error(stream)
+        return None, err, usage, _resolved_effort_from_error(stream), None
 
     result = stream.result or {}
     text = result.get("text", partial)
@@ -1419,7 +1543,7 @@ def _run_side_query_with_card(
         detail=f"{text}\n\n— {footer}" if footer else text,
     )
     resolved = result.get("reasoning_effort") or None
-    return text, None, usage, (str(resolved) if resolved else None)
+    return text, None, usage, (str(resolved) if resolved else None), result.get("blocks")
 
 
 def _run_side_query_chain(
@@ -2061,7 +2185,14 @@ def _parse_agentic_reply(text: str) -> tuple[str, Any]:
     """
     obj = _extract_json_object(text)
     if obj is None:
-        return "answer", (text or "").strip()
+        # A native tool_use block arrives host-rendered as a
+        # ``[tool <name> <json>]`` marker. It is a tool call, never an answer:
+        # route it down the same path as a json ``tool_calls`` object (the
+        # loop refuses anything outside the allowlist).
+        markers, _ = _parse_tool_markers(text or "")
+        if markers:
+            return "calls", markers
+        return "answer", _strip_think_lines(text or "")
     if "tool_calls" in obj:
         calls = obj.get("tool_calls")
         if not isinstance(calls, list) or not calls:
@@ -2092,7 +2223,7 @@ def _agentic_exhausted_error(errs: list[str]) -> str:
         "delegate chain exhausted — agentic mode deliberately does NOT fall back to "
         "the executor model, because running an autonomous tool loop on it is exactly "
         f"the cost you delegated away{detail}. Do this investigation inline instead: "
-        "call the read/glob/grep/ls tools yourself."
+        "call your own read-only tools yourself."
     )
 
 
@@ -2100,6 +2231,8 @@ def _agentic_probe(
     ctx: fir_ext.Context,
     question: str,
     chain: list[dict[str, str]],
+    *,
+    allow_tool_calls: bool = True,
 ) -> tuple[str | None, str | None, dict[str, str] | None, dict[str, int], list[dict[str, str]]]:
     """One LLM call for the loop, walking *chain* with NO executor fallback.
 
@@ -2133,6 +2266,7 @@ def _agentic_probe(
                 model=cfg["model"],
                 provider=cfg["provider"],
                 effort=cfg.get("effort"),
+                allow_tool_calls=allow_tool_calls,
             )
             spent = _merge_usage(spent, usage)
             if err is None or _is_request_shaped_error(err) or not _is_empty_content_error(err):
@@ -2306,7 +2440,9 @@ def _run_agentic_delegate(
             cap_note = "hit iteration cap"
         ctx.report_progress("delegate synthesising…")
         question = _build_agentic_prompt(goal, tool_specs, log, final=True, cap_note=cap_note)
-        text, err, cfg, usage, chain = _agentic_probe(ctx, question, chain)
+        # Toolless turn: a tool-call-only reply here is retried once with a
+        # "no tools" instruction and then becomes an error — never the answer.
+        text, err, cfg, usage, chain = _agentic_probe(ctx, question, chain, allow_tool_calls=False)
         spent = _merge_usage(spent, usage)
         if cfg is not None:
             used_cfg = cfg
@@ -2317,7 +2453,7 @@ def _run_agentic_delegate(
                 if _is_request_shaped_error(err)
                 else _error(err)
             )
-        answer = (text or "").strip()
+        answer = _strip_think_lines(_parse_tool_markers(text or "")[1])
 
     if not answer:
         _publish("empty")
@@ -2398,13 +2534,28 @@ _USER_STRONG_RE = re.compile(
 )
 
 
-def _strong_source() -> dict[str, str] | list[dict[str, str]] | None:
-    """Configured strong advisor (``strong_advisor`` in aside.json) or None.
+def _strong_source_with_default() -> tuple[dict[str, str] | list[dict[str, str]] | None, bool]:
+    """Strong advisor config and whether it is the bundled default.
 
-    Unlike the advisor there is no bundled default: strong mode is opt-in,
-    and unset means "fall back to self with a note".
+    A missing ``strong_advisor`` key uses the same bundled flagship-first
+    chain as the advisor (Fable first), which runtime resolution replaces
+    with the live strongest-first chain. A malformed value also falls back to
+    the default. Only an explicit opt-out
+    (``null``/``"off"``/``"none"``) disables strong mode.
     """
-    return _load_role_config_source(_STRONG_CONFIG_KEY, [])[0]
+    return _load_role_config_source(_STRONG_CONFIG_KEY, _DEFAULT_ADVISOR_CHAIN)
+
+
+def _strong_source() -> dict[str, str] | list[dict[str, str]] | None:
+    """Strong advisor config (``strong_advisor`` in aside.json, else the
+    bundled default chain), or None when explicitly disabled."""
+    return _strong_source_with_default()[0]
+
+
+def _resolve_strong_chain(ctx: fir_ext.Context) -> list[dict[str, str]]:
+    """Availability-aware strong-advisor chain (dynamic default when unset)."""
+    cfg, from_default = _strong_source_with_default()
+    return _resolve_role_chain_dynamic(ctx, cfg, "advisor", from_default)
 
 
 def _clip(text: str, limit: int) -> str:
@@ -2746,15 +2897,9 @@ def _escalate(
         "user_turn": user_turn["id"] if user_turn else "",
     }
 
-    strong_chain = (
-        _resolve_role_chain(ctx, _strong_source(), "advisor") if chosen == "strong" else []
-    )
+    strong_chain = _resolve_strong_chain(ctx) if chosen == "strong" else []
     if chosen == "strong" and not strong_chain:
-        why = (
-            'not configured — set "strong_advisor" in aside.json'
-            if _strong_source() is None
-            else "unavailable"
-        )
+        why = "disabled in aside.json" if _strong_source() is None else "unavailable"
         record.update(mode="self", fallback=f"strong advisor {why}")
         chosen, reason = "self", f"{reason}; strong advisor {why}"
 
@@ -3170,7 +3315,8 @@ def _aside_tool_description() -> str:
             "question, add only what is not in it, do not recap. Weigh the advice; "
             "if your evidence contradicts it, say so in one reconcile call."
             "\n\nAdvisor modes ('mode', default auto): 'self' = the advisor sees the "
-            "full session (above). 'strong' = a configured stronger model that sees "
+            "full session (above). 'strong' = a stronger model (the strongest "
+            "available advisor by default) that sees "
             "ONLY a brief the tool composes: the original user task, the last few "
             "turns, the turns you name in 'refs' (turn ids, or short exact quotes), "
             "then your question — so in strong mode state the problem in the "
@@ -3178,7 +3324,7 @@ def _aside_tool_description() -> str:
             "thread of its own earlier advice. auto picks strong when the user asked "
             "for it, when you set high_stakes, or when self was already consulted "
             "on the same problem; otherwise self. Strong falls back to self with a "
-            "note when no strong advisor is configured."
+            "note only when no strong model is available or it is disabled."
         )
     if _delegate() is not None:
         base += (
@@ -3189,7 +3335,8 @@ def _aside_tool_description() -> str:
             "Route by judgement density, not just size."
             "\n\nAgentic delegation: instead of 'tools' + 'instructions', set 'goal' "
             "(with delegate=true) to let the delegate model drive its OWN read-only "
-            "tool calls (read/glob/grep/ls) in a loop until it can answer. Use 'goal' "
+            "tool calls (the subset of read/glob/grep/ls present in this session) "
+            "in a loop until it can answer. Use 'goal' "
             "when the chain of calls is adaptive and not knowable upfront ('find where "
             "X is configured and how it's used'); use 'tools' when you already know "
             "the exact calls. Agentic mode is delegate-only — escalation is for "
@@ -3286,7 +3433,8 @@ def _aside_tool_parameters() -> dict[str, Any]:
             "type": "string",
             "description": (
                 "AGENTIC mode: state what you want found out and let the delegate "
-                "drive its own read-only tool calls (read/glob/grep/ls) until it can "
+                "drive its own read-only tool calls (the subset of read/glob/grep/ls "
+                "present in this session) until it can "
                 "answer. Requires delegate=true. Mutually exclusive with 'tools' — "
                 "use 'goal' when the chain of calls is not knowable upfront, 'tools' "
                 "when it is."
@@ -3297,8 +3445,8 @@ def _aside_tool_parameters() -> dict[str, Any]:
             "items": {"type": "string"},
             "description": (
                 "Agentic mode only: narrow the delegate's tool set. Must be a subset "
-                "of the read-only set (read, glob, grep, ls); anything else is "
-                "rejected."
+                "of the read-only tools present in this session (drawn from read, "
+                "glob, grep, ls); anything else is rejected."
             ),
         }
         schema["properties"]["max_iterations"] = {

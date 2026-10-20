@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Fixed
+- **`aside`: tool-call-only side-query replies were returned as answers.** A reply with tool calls and no text is retried once with a "no tools available" instruction, then becomes an error — never the `[tool X …]` marker.
+- **`aside` agentic `goal` mode: native tool_use replies ended the loop as the answer.** Host-rendered `[tool X …]` markers now run as tool calls when allowlisted and are refused (loop continues) otherwise.
+- **`aside` schema promised read/glob/grep/ls** even when the session registers fewer; descriptions now say the subset present this session.
+- **`aside` `mode: strong` fell back to self when `strong_advisor` was unset.** The default strong advisor chain (Fable first, live strongest-first) now runs; only an explicit `"off"` disables it, and messages no longer tell agents to edit aside.json.
+
 ## [1.35.5] - 2026-10-20
 
 ### Changed
