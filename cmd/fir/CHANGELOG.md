@@ -2,9 +2,15 @@
 
 ## [Unreleased]
 
+## [1.36.0] - 2026-10-21
+
 ### Added
 
 - Builtin `prompt-optimize` skill for writing and fixing model-facing instructions.
+
+### Changed
+
+- **Model catalog regenerated**: added `huggingface/Qwen/Qwen3-8B`; removed 12 `github-copilot` models (incl. `claude-opus-4.7`, `gpt-5.4`, `gpt-5.5`, `gemini-3.x-flash`); 29 models with changed pricing/limits.
 
 ## [1.35.8] - 2026-10-21
 
