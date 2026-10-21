@@ -864,3 +864,83 @@ func TestObserve_NoModelStatus(t *testing.T) {
 		t.Errorf("send --wait to a model-less session: exit %d: %s", code, out)
 	}
 }
+
+// TestObserve_HostAliveExtensionDead_IsObserveLost is the 2026-10-21
+// regression: the observe extension (`pid`) died while the fir host
+// (`host_pid`) kept working. observe must not call that `crashed` — a
+// supervisor killed a healthy session over it.
+func TestObserve_HostAliveExtensionDead_IsObserveLost(t *testing.T) {
+	stateHome := t.TempDir()
+	sid := "lost0031-aaaa-bbbb-cccc-000000000031"
+	writeSidecar(t, stateHome, sid, map[string]any{
+		"session_name": "orphan", "pid": 999999, "host_pid": os.Getpid(),
+	})
+
+	out, code := firObserve(t, stateHome)
+	if code != 0 {
+		t.Fatalf("fir observe exit %d: %s", code, out)
+	}
+	assertNoPanic(t, out)
+	if !strings.Contains(out, "orphan") || !strings.Contains(out, "observe-lost") {
+		t.Errorf("default listing should show the session as observe-lost:\n%s", out)
+	}
+	if strings.Contains(out, "crashed") {
+		t.Errorf("host is alive — must not say crashed:\n%s", out)
+	}
+
+	out, code = firObserve(t, stateHome, sid[:8], "--status", "--json")
+	if code != 0 {
+		t.Fatalf("--status exit %d: %s", code, out)
+	}
+	var st map[string]any
+	if err := json.Unmarshal([]byte(out), &st); err != nil {
+		t.Fatalf("bad json: %v\n%s", err, out)
+	}
+	if st["status"] != "observe-lost" || st["live"] != true {
+		t.Errorf("want status observe-lost, live true; got %v", st)
+	}
+
+	out, code = runFir(t, "", 10*time.Second,
+		map[string]string{"XDG_STATE_HOME": stateHome}, "send", sid[:8], "hello")
+	if code == 0 {
+		t.Fatalf("send to observe-lost session should fail: %s", out)
+	}
+	if !strings.Contains(out, "observe-lost") || strings.Contains(out, "nothing to send to") {
+		t.Errorf("send should explain observe-lost:\n%s", out)
+	}
+}
+
+// TestObserve_HostDead_IsCrashed: the fir host is gone even though some
+// process still holds the extension pid → crashed.
+func TestObserve_HostDead_IsCrashed(t *testing.T) {
+	stateHome := t.TempDir()
+	sid := "dead0041-aaaa-bbbb-cccc-000000000041"
+	writeSidecar(t, stateHome, sid, map[string]any{
+		"session_name": "gone", "pid": os.Getpid(), "host_pid": 999999,
+	})
+	out, code := firObserve(t, stateHome, sid[:8], "--status", "--json")
+	if code != 0 {
+		t.Fatalf("--status exit %d: %s", code, out)
+	}
+	if !strings.Contains(out, `"status": "crashed"`) {
+		t.Errorf("dead host should be crashed:\n%s", out)
+	}
+}
+
+// TestObserve_OldSidecarWithoutHostPid falls back to `pid` for liveness.
+func TestObserve_OldSidecarWithoutHostPid(t *testing.T) {
+	stateHome := t.TempDir()
+	alive := "olda0051-aaaa-bbbb-cccc-000000000051"
+	dead := "oldd0052-aaaa-bbbb-cccc-000000000052"
+	writeSidecar(t, stateHome, alive, map[string]any{"session_name": "oldalive"})
+	writeSidecar(t, stateHome, dead, map[string]any{"session_name": "olddead", "pid": 999999})
+	for sid, want := range map[string]string{alive: "running", dead: "crashed"} {
+		out, code := firObserve(t, stateHome, sid[:8], "--status", "--json")
+		if code != 0 {
+			t.Fatalf("--status exit %d: %s", code, out)
+		}
+		if !strings.Contains(out, `"status": "`+want+`"`) {
+			t.Errorf("%s: want %s:\n%s", sid[:8], want, out)
+		}
+	}
+}

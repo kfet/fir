@@ -1613,6 +1613,72 @@ class TestRemoteDriving(unittest.TestCase):
         self.assertEqual(observe._resolve_sidecar("worker", "")["session_id"], self.session_id)
         self.assertEqual(observe._resolve_sidecar("", self.tmpdir)["session_id"], self.session_id)
 
+    # -- host vs extension liveness ---------------------------------------
+
+    def test_host_alive_ext_dead_is_observe_lost(self) -> None:
+        """Regression (2026-10-21): the observe extension died while the fir
+        host kept working; observe said `crashed` and a supervisor killed a
+        healthy session."""
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        # host_pid (this process) alive and started before the session.
+        self._sidecar(status="running", pid=2**22 + 12345, started_at=now)
+        rows = observe._read_sidecars(include_all=False)  # listed by default
+        self.assertEqual([r["status"] for r in rows], ["observe-lost"])
+
+        h = _FakeHost()
+        self.assertEqual(observe.cli_observe([self.session_id[:8], "--status", "--json"], h), 0)
+        st = json.loads(h.stdout)
+        self.assertEqual(st["status"], "observe-lost")
+        self.assertTrue(st["live"])
+        self.assertEqual(st["host_pid"], os.getpid())
+
+        h = _FakeHost()
+        self.assertEqual(observe.cli_observe([self.session_id[:8], "--status"], h), 0)
+        self.assertIn("status: observe-lost", h.stdout)
+        self.assertIn("fir host is alive", h.stdout)
+
+        h = _FakeHost()
+        self.assertEqual(observe.cli_send([self.session_id[:8], "hi"], h), 1)
+        self.assertIn("observe-lost", h.stderr)
+        self.assertNotIn("nothing to send to", h.stderr)
+        with self.assertRaisesRegex(ValueError, "NOT crashed"):
+            observe._send_one(self.session_id[:8], "", "hi", "")
+
+    def test_host_alive_socket_dead_is_observe_lost(self) -> None:
+        self.sock_path = os.path.join(self.tmpdir, "gone.sock")  # never bound
+        self._sidecar(status="idle")
+        # The host pid is genuinely the session's (not reused after reboot).
+        with mock.patch.object(observe, "_pid_reused", return_value=False):
+            self.assertEqual(observe._read_sidecars()[0]["status"], "observe-lost")
+
+    def test_host_dead_ext_alive_is_crashed(self) -> None:
+        self._sidecar(status="running", host_pid=2**22 + 12346)  # pid alive
+        self.assertEqual(observe._read_sidecars()[0]["status"], "crashed")
+
+    def test_old_sidecar_without_host_pid_uses_pid(self) -> None:
+        self._sidecar(status="running", pid=2**22 + 12345, host_pid=None)
+        self.assertEqual(observe._read_sidecars()[0]["status"], "crashed")
+        self._sidecar(status="idle", host_pid=None)  # pid alive, socket ok
+        self.assertEqual(observe._read_sidecars()[0]["status"], "idle")
+
+    def test_stop_signals_host_pid_when_observe_lost(self) -> None:
+        self._sidecar(status="running", pid=2**22 + 12345, host_pid=4242)
+        with (
+            mock.patch.object(observe, "_pid_alive", lambda p: p == 4242),
+            mock.patch.object(observe.os, "kill") as kill,
+        ):
+            r = observe._stop_one(self.session_id[:8], "")
+        self.assertEqual(r["host_pid"], 4242)
+        kill.assert_called_once()
+        self.assertEqual(kill.call_args[0][0], 4242)
+
+    def test_pid_reused_detects_newer_process(self) -> None:
+        mine = observe._pid_start_time(os.getpid())
+        assert mine is not None
+        self.assertTrue(observe._pid_reused(os.getpid(), mine - 3600))
+        self.assertFalse(observe._pid_reused(os.getpid(), mine + 60))
+        self.assertFalse(observe._pid_reused(os.getpid(), 0))
+
     def test_pick_match_rules(self) -> None:
         live1 = {"session_id": "a1", "status": "idle"}
         live2 = {"session_id": "a2", "status": "running"}
@@ -1623,7 +1689,7 @@ class TestRemoteDriving(unittest.TestCase):
         self.assertIs(observe._pick_match([dead_new, dead_old]), dead_new)
 
     def test_dead_pid_still_crashed_despite_card(self) -> None:
-        self._sidecar(status="running", pid=2**22 + 12345)
+        self._sidecar(status="running", pid=2**22 + 12345, host_pid=2**22 + 12346)
         self._cards(_status_card("running"))
         rows = observe._read_sidecars(include_all=True)
         self.assertEqual(rows[0]["status"], "crashed")
@@ -1735,6 +1801,22 @@ class TestRemoteDriving(unittest.TestCase):
         h = _FakeHost(tty=True)
         self.assertEqual(observe.cli_observe([self.session_id[:8]], h), 0)
         self.assertIn("status:", h.stdout)
+
+    def test_observe_follow_stops_when_host_dead(self) -> None:
+        """A crashed host never writes `ended`; follow must not hang."""
+        self._sidecar(status="running", host_pid=2**22 + 12346)
+        h = _FakeHost(tty=True)
+        rc: list[int] = []
+        t = threading.Thread(
+            target=lambda: rc.append(observe.cli_observe([self.session_id[:8], "-f"], h))
+        )
+        t.start()
+        t.join(20)
+        stuck = t.is_alive()
+        observe._verb_stop.set()
+        t.join(5)
+        self.assertFalse(stuck, "follow kept tailing a crashed session")
+        self.assertEqual(rc, [0])
 
     def test_observe_wait_times_out_with_124(self) -> None:
         self._sidecar(status="running")

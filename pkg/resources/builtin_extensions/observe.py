@@ -44,6 +44,7 @@ import json
 import os
 import re
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -462,7 +463,7 @@ def on_session_shutdown(params: dict[str, Any], ctx: fir_ext.Context) -> None:
 # ---------------------------------------------------------------------------
 
 
-# Statuses that mean "process alive, socket bound, observable in real time".
+# Statuses that mean "fir host alive, socket bound, observable in real time".
 # `ended` (clean shutdown) and `crashed` (pid gone with sidecar still saying
 # running/idle) are both unobservable — the socket is closed and no further
 # transcript bytes will appear. We keep their sidecars for post-mortem tail
@@ -473,9 +474,21 @@ def on_session_shutdown(params: dict[str, Any], ctx: fir_ext.Context) -> None:
 # run failed / it has no usable model.
 _LIVE_STATUSES = ("running", "idle", "error", "no-model")
 
+# The fir host is alive but its observe extension died or its input socket
+# does not answer: the session still works, it just cannot be observed or
+# sent to in real time. Never report this as `crashed` — a supervisor that
+# kills "crashed" sessions would kill a healthy agent.
+OBSERVE_LOST = "observe-lost"
+_ALIVE_STATUSES = (*_LIVE_STATUSES, OBSERVE_LOST)
+_OBSERVE_LOST_HINT = (
+    "fir host is alive but its observe extension is gone — "
+    "not observable in real time; the transcript may still grow"
+)
+
 
 def _is_live(s: dict[str, Any]) -> bool:
-    return s.get("status", "") in _LIVE_STATUSES
+    """Host process alive (includes observe-lost)."""
+    return s.get("status", "") in _ALIVE_STATUSES
 
 
 def _read_sidecars(include_all: bool = True) -> list[dict[str, Any]]:
@@ -519,19 +532,92 @@ def _load_sidecar(full: Path, probe_socket: bool = True) -> dict[str, Any] | Non
         return None
     s["_sidecar_path"] = str(full)
     if s.get("status", "") in _LIVE_STATUSES:
-        try:
-            os.kill(int(s.get("pid") or 0), 0)
-        except (ProcessLookupError, ValueError, OverflowError):
+        # Liveness is the fir HOST's liveness. `pid` is the observe extension
+        # process; it can die (or stop answering) while fir keeps working —
+        # that is `observe-lost`, never `crashed`. Old sidecars without
+        # host_pid fall back to `pid`.
+        ext_pid = _as_pid(s.get("pid"))
+        host_pid = _as_pid(s.get("host_pid")) or ext_pid
+        if not _pid_alive(host_pid):
             s["status"] = "crashed"
-        except PermissionError:
-            pass  # process exists, just not ours; treat as alive
-        except OSError:
-            s["status"] = "crashed"
-    if probe_socket and s.get("status", "") in _LIVE_STATUSES and not _socket_alive(s):
-        s["status"] = "crashed"
+        elif (ext_pid and ext_pid != host_pid and not _pid_alive(ext_pid)) or (
+            probe_socket and not _socket_alive(s)
+        ):
+            # Unobservable. Before calling the host alive, make sure its pid
+            # was not reused by an unrelated process (e.g. after a reboot,
+            # when every old sidecar's pids belong to someone else).
+            started = _parse_card_ts(s.get("started_at", "") or "")
+            s["status"] = "crashed" if _pid_reused(host_pid, started) else OBSERVE_LOST
     if s.get("status", "") in _LIVE_STATUSES:
         _apply_status_card(s)
     return s
+
+
+def _as_pid(v: Any) -> int:
+    try:
+        n = int(v or 0)
+    except (TypeError, ValueError):
+        return 0
+    return n if n > 0 else 0
+
+
+def _pid_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except PermissionError:
+        return True  # exists, just not ours
+    except (OSError, OverflowError):
+        return False
+    return True
+
+
+def _pid_start_time(pid: int) -> float | None:
+    """Process start time (epoch seconds), or None when unknown. Linux reads
+    /proc; elsewhere `ps -o etime=` (macOS)."""
+    try:
+        with open(f"/proc/{pid}/stat", encoding="utf-8") as f:
+            stat = f.read()
+        ticks = int(stat.rsplit(")", 1)[1].split()[19])
+        with open("/proc/stat", encoding="utf-8") as f:
+            btime = next(int(ln.split()[1]) for ln in f if ln.startswith("btime "))
+        return btime + ticks / os.sysconf("SC_CLK_TCK")
+    except (OSError, ValueError, IndexError, StopIteration):
+        pass
+    if sys.platform.startswith("linux"):
+        return None
+    try:
+        out = subprocess.run(
+            ["ps", "-o", "etime=", "-p", str(pid)],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=False,
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if not out:
+        return None
+    days, _, rest = out.rpartition("-")
+    try:
+        secs = 0
+        for part in rest.split(":"):
+            secs = secs * 60 + int(part)
+        secs += int(days or 0) * 86400
+    except ValueError:
+        return None
+    return time.time() - secs
+
+
+def _pid_reused(pid: int, sidecar_started: float) -> bool:
+    """True when ``pid`` now belongs to a process that started after the
+    session did (e.g. after a reboot) — so it is not our fir host. A small
+    slack absorbs clock/tick rounding; unknown start times count as ours."""
+    if not sidecar_started:
+        return False
+    st = _pid_start_time(pid)
+    return st is not None and st > sidecar_started + 5
 
 
 # A freshly started session writes its sidecar a moment before binding its
@@ -687,6 +773,8 @@ def _render_status(st: dict[str, Any]) -> str:
         lines.append(f"error: {st['error']}")
     if st.get("notice"):
         lines.append(f"notice: {st['notice']}")
+    if st.get("status") == OBSERVE_LOST:
+        lines.append(f"note: {_OBSERVE_LOST_HINT}")
     return "\n".join(lines)
 
 
@@ -1301,9 +1389,11 @@ def _send_one(id_prefix: str, cwd_flag: str, content: str, deliver_as: str) -> N
     if deliver_as != "abort" and (not content or not content.strip()):
         raise ValueError("content is empty")
     s = _resolve_sidecar(id_prefix, cwd_flag)
+    sid8 = (s.get("session_id", "") or "")[:8]
+    if s.get("status") == OBSERVE_LOST:
+        raise ValueError(_observe_lost_send_msg(s))
     sock_path = s.get("socket_path", "") or ""
     if not sock_path:
-        sid8 = (s.get("session_id", "") or "")[:8]
         raise ValueError(f"session {sid8} has no input socket (ended or not started)")
     payload = (json.dumps({"deliver_as": deliver_as, "content": content}) + "\n").encode()
     conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -1313,6 +1403,18 @@ def _send_one(id_prefix: str, cwd_flag: str, content: str, deliver_as: str) -> N
     finally:
         with contextlib.suppress(Exception):
             conn.close()
+
+
+def _observe_lost_send_msg(s: dict[str, Any]) -> str:
+    sid8 = (s.get("session_id", "") or "")[:8]
+    hp = s.get("host_pid") or s.get("pid") or "?"
+    return (
+        f"session {sid8} is observe-lost: the fir host (pid {hp}) is alive but its "
+        "observe extension / input socket is gone, so messages cannot be delivered. "
+        "The session is NOT crashed — do not kill it on that basis. Talk to it "
+        "through its terminal, or stop it with stop_session / `fir observe` tools "
+        "(which signal the host pid)."
+    )
 
 
 def _stop_one(id_prefix: str, cwd_flag: str, force: bool = False) -> dict[str, Any]:
@@ -1487,9 +1589,12 @@ def cmd_send(args: list[str], ctx: fir_ext.Context) -> dict[str, Any]:
         "sibling agent is doing or auditing a long-running session. "
         "id_prefix matches the session id, session name, or basename(cwd). "
         "Every snapshot starts with a status line — status idle | running | "
-        "error | no-model | ended | crashed, model, current tool, last error "
+        "error | no-model | observe-lost | ended | crashed, model, current "
+        "tool, last error "
         "and startup notice (e.g. 'No models available') — so you can tell "
-        "a busy agent from a broken one. "
+        "a busy agent from a broken one. `crashed` means the fir host process "
+        "is dead; `observe-lost` means the host is alive but cannot be observed "
+        "or sent to in real time — do not kill it for that. "
         "LOCAL ONLY: sees sessions on this machine. For a fir session on "
         "another host, run the CLI over ssh (rexec): `fir observe` (list), "
         "`fir observe <id> --status --json`, `fir observe <id> -n 40` "
@@ -1682,7 +1787,8 @@ _OBSERVE_USAGE = """usage: fir observe [<id-prefix>] [--cwd <path>] [--all] [--j
                    [-n N | --lines N] [-f | --follow] [--status] [--wait] [--timeout S]
                    [--interact]
 
-  fir observe                  list LIVE sessions (status: idle/running/error/no-model)
+  fir observe                  list LIVE sessions (status: idle/running/error/
+                               no-model/observe-lost)
   fir observe --all            include ended and crashed sessions in the list
   fir observe --json           the session list as JSON (one status object per session)
   fir observe <id-prefix>      status + last 50 transcript entries, then exit
@@ -1690,8 +1796,11 @@ _OBSERVE_USAGE = """usage: fir observe [<id-prefix>] [--cwd <path>] [--all] [--j
   fir observe <id> -n 200      status + last 200 entries, then exit (snapshot)
   fir observe <id> -f          follow the transcript live until the session ends
   fir observe <id> --status    status only: idle | running | error | no-model |
-                               ended | crashed, plus model, current tool, last
-                               error and startup notice (add --json for scripts)
+                               observe-lost | ended | crashed, plus model,
+                               current tool, last error and startup notice
+                               (add --json for scripts). crashed = fir host
+                               dead; observe-lost = host alive, but its observe
+                               extension/socket is gone (not observable live)
   fir observe <id> --wait      block until the current run finishes, then print
                                status + snapshot (--timeout S: give up, exit 124)
   fir observe --cwd <path>     resolve session by working directory ('.' = here)
@@ -1937,15 +2046,12 @@ def _verb_observe_tail(
                 return 0
             if cur_size > f.tell():
                 continue
-            # Idle. Stop tailing if the session has ended.
+            # Idle. Stop tailing once the session ended or its host died. An
+            # observe-lost session keeps writing its transcript: keep tailing.
             if sidecar_path:
-                try:
-                    with open(sidecar_path, encoding="utf-8") as sf:
-                        fresh = json.load(sf)
-                    if fresh.get("status") == "ended":
-                        return 0
-                except (OSError, ValueError):
-                    pass
+                fresh = _load_sidecar(Path(sidecar_path), probe_socket=False)
+                if fresh is not None and fresh.get("status") in _TERMINAL_STATUSES:
+                    return 0
         return 0
     finally:
         interact_stop.set()
@@ -2277,6 +2383,12 @@ def _wait_for_reply(
         if status in ("ended", "crashed"):
             host.eprintln(f"session {status} before the turn finished")
             return 1
+        if status == OBSERVE_LOST:
+            host.eprintln(
+                "lost the session's observe extension before the turn finished — "
+                "the fir host is still alive; check its transcript"
+            )
+            return 1
         done = False
         if abort or saw_user:
             done = status != "running"
@@ -2320,6 +2432,9 @@ def cli_send(argv: list[str], host: fir_ext.Host) -> int:
         return 1
     sid8 = (s.get("session_id", "") or "")[:8]
     sock_path = s.get("socket_path", "") or ""
+    if s.get("status") == OBSERVE_LOST:
+        host.eprintln(_observe_lost_send_msg(s))
+        return 1
     if not _is_live(s):
         host.eprintln(f"session {sid8} is {s.get('status') or 'not running'} — nothing to send to")
         return 1
@@ -2586,7 +2701,15 @@ def _htop_render(sidecars: list[dict[str, Any]], color: bool) -> str:
     """Build a full-screen frame: cursor-home + clear + table. Single string
     so the whole frame ships in one cli_stdout notification."""
     now = time.time()
-    counts = {"running": 0, "idle": 0, "error": 0, "no-model": 0, "ended": 0, "crashed": 0}
+    counts = {
+        "running": 0,
+        "idle": 0,
+        "error": 0,
+        "no-model": 0,
+        OBSERVE_LOST: 0,
+        "ended": 0,
+        "crashed": 0,
+    }
     for s in sidecars:
         st = s.get("status", "")
         if st in counts:
@@ -2604,6 +2727,8 @@ def _htop_render(sidecars: list[dict[str, Any]], color: bool) -> str:
             return f"\x1b[2m{line}\x1b[0m"
         if st in ("crashed", "error", "no-model"):
             return f"\x1b[31m{line}\x1b[0m"
+        if st == OBSERVE_LOST:
+            return f"\x1b[33m{line}\x1b[0m"
         return line
 
     out: list[str] = ["\x1b[H\x1b[2J"]  # home + clear
@@ -2612,6 +2737,7 @@ def _htop_render(sidecars: list[dict[str, Any]], color: bool) -> str:
         f"{'' if len(sidecars) == 1 else 's'}  "
         f"(live {counts['running']}  idle {counts['idle']}  "
         f"error {counts['error'] + counts['no-model']}  "
+        f"observe-lost {counts[OBSERVE_LOST]}  "
         f"ended {counts['ended']}  crashed {counts['crashed']})  "
         f"{time.strftime('%H:%M:%S')}"
     )

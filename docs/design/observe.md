@@ -135,7 +135,7 @@ Why each field:
 - `pid` — `kill -0` liveness check without touching the socket.
 - `mode` — `acp`/`interactive`/`print`; CLI warns before `send --interact`
   against an interactive session.
-- `status` — UX hint (`running`/`idle`/`ended`/`crashed`); not load-bearing
+- `status` — UX hint (`running`/`idle`/`observe-lost`/`ended`/`crashed`); not load-bearing
   for liveness. For live sessions readers overlay the core-owned
   `session/status` observable card (see *Session status* below), which is
   authoritative: the extension's own per-event threads can apply
@@ -153,10 +153,17 @@ Why each field:
 
 **Cleanup of stale sidecars:**
 
-- On read: if `status != ended` AND (`kill -0 pid` fails OR the input
-  socket is missing / refuses connections) → display as `crashed`. The
-  socket probe matters: after a reboot old pids belong to unrelated
-  processes. A 15 s grace covers the gap between sidecar write and bind.
+- On read: if `status != ended` AND the fir host (`host_pid`, falling back
+  to `pid` for old sidecars) is dead — `kill -0` fails, or the pid now
+  belongs to a process that started after the session (reused after a
+  reboot) → display as `crashed`.
+- If the host is alive but the observe extension (`pid`) is dead or the
+  input socket is missing / refuses connections → display as
+  `observe-lost`: the session still works but cannot be observed or sent
+  to in real time. It is listed by default; `fir send` refuses with an
+  explanation; stop_session still signals `host_pid`. Never `crashed` —
+  supervisors kill crashed sessions. A 15 s grace covers the gap between
+  sidecar write and bind.
 - Auto-prune `ended` sidecars older than 7 days on every `fir sessions`
   read. Users won't run a manual command.
 - A new fir-acp on startup reaps any sidecar whose `pid` is dead and whose

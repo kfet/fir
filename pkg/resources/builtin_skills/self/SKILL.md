@@ -151,14 +151,16 @@ Slash commands and tools take **snapshots** (last N transcript lines) and send s
 The `observe` extension is a builtin and loads automatically in every session — no special flags needed. Observation commands run from any other terminal:
 
 ```
-fir observe                        # list LIVE sessions (status idle/running/error/no-model)
+fir observe                        # list LIVE sessions (status idle/running/error/no-model/observe-lost)
 fir observe --all                  # include ended + crashed sessions
 fir observe --json                 # the list as JSON (one status object per session)
 fir observe <id-prefix>            # status + last 50 entries, then exit (on a TTY: follow live)
 fir observe <id> -n 200            # snapshot of the last 200 entries; always exits
 fir observe <id> -f                # follow live until the session ends (Ctrl-C / Ctrl-\ to stop)
-fir observe <id> --status [--json] # status only: idle|running|error|no-model|ended|crashed,
+fir observe <id> --status [--json] # status only: idle|running|error|no-model|observe-lost|ended|crashed,
                                    #   model, current tool, run count, last error, startup notice
+                                   #   crashed = fir host dead; observe-lost = host alive but
+                                   #   not observable/sendable in real time (do not kill for it)
 fir observe <id> --wait [--timeout S]  # block until the current run ends (124 on timeout)
 fir observe <id-prefix> --json     # raw JSONL (snapshot; with -f a raw tail)
 fir observe --cwd .                # resolve by directory (symlinks resolved)

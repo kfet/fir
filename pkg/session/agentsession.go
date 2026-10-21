@@ -266,7 +266,9 @@ type AgentSession struct {
 	autoCompactProgress   CompactionProgressFunc
 
 	// Extension hooks
-	hooks *AgentSessionHooks
+	// Atomic: extension.Setup installs hooks while MCP startup goroutines
+	// already read them.
+	hooks atomic.Pointer[AgentSessionHooks]
 
 	// Usage tracking (optional; nil disables tracking)
 	usageTracker UsageTracker
@@ -325,7 +327,6 @@ func NewAgentSession(opts AgentSessionOptions) *AgentSession {
 		compactionRunner: opts.CompactionRunner,
 		cwd:              opts.Cwd,
 		doctorLogPath:    opts.DoctorLogPath,
-		hooks:            opts.Hooks,
 		usageTracker:     opts.UsageTracker,
 		sessionDate:      time.Now().Format("2006-01-02"),
 		extReady:         opts.ExtReady,
@@ -334,6 +335,7 @@ func NewAgentSession(opts AgentSessionOptions) *AgentSession {
 		agentDir:         opts.AgentDir,
 	}
 	s.state.Runtime.Cwd = opts.Cwd
+	s.hooks.Store(opts.Hooks)
 	if s.sections == nil {
 		s.sections = newSectionTracker(sections.Default())
 	}
@@ -1163,8 +1165,8 @@ func (s *AgentSession) GetCompactionStats() *CompactionInfo {
 // veto it — returning an error that callers surface cleanly instead of the
 // selection failing mid-stream later.
 func (s *AgentSession) SetModel(model *ai.Model) error {
-	if s.hooks != nil && s.hooks.ResolveModelEndpoint != nil {
-		if corr := s.hooks.ResolveModelEndpoint(model); corr != nil {
+	if h := s.hooks.Load(); h != nil && h.ResolveModelEndpoint != nil {
+		if corr := h.ResolveModelEndpoint(model); corr != nil {
 			if corr.Callable != nil && !*corr.Callable {
 				return fmt.Errorf("model %s is not enabled on %s", model.ID, model.Provider)
 			}
@@ -1211,7 +1213,7 @@ func (s *AgentSession) GetAvailableThinkingLevels() []agent.ThinkingLevel {
 // Can be called after creation. When hooks include OnToolCall or OnToolResult,
 // the agent's current tools are automatically wrapped so the hooks fire during execution.
 func (s *AgentSession) SetHooks(hooks *AgentSessionHooks) {
-	s.hooks = hooks
+	s.hooks.Store(hooks)
 	if hooks != nil && (hooks.OnToolCall != nil || hooks.OnToolResult != nil) {
 		s.Agent.UpdateTools(func(ts *agent.ToolSet) {
 			for _, name := range ts.Names() {
@@ -1225,7 +1227,7 @@ func (s *AgentSession) SetHooks(hooks *AgentSessionHooks) {
 
 // Hooks returns the current hooks (may be nil).
 func (s *AgentSession) Hooks() *AgentSessionHooks {
-	return s.hooks
+	return s.hooks.Load()
 }
 
 // GetSystemPrompt returns the current base system prompt.
@@ -1275,7 +1277,7 @@ func (s *AgentSession) GetCwd() string {
 // WrapToolsWithHooks wraps the given tools with hook interception.
 // Tool calls go through OnToolCall (which can block) and OnToolResult (which can modify results).
 func (s *AgentSession) WrapToolsWithHooks(tools []agent.AgentTool) []agent.AgentTool {
-	if s.hooks == nil {
+	if s.hooks.Load() == nil {
 		return tools
 	}
 
@@ -1294,8 +1296,8 @@ func (s *AgentSession) wrapTool(t agent.AgentTool) agent.AgentTool {
 
 	t.Execute = func(ctx context.Context, toolCallID string, params map[string]any, onUpdate agent.AgentToolUpdateCallback) (agent.AgentToolResult, error) {
 		// Pre-execution hook: tool_call interception
-		if s.hooks != nil && s.hooks.OnToolCall != nil {
-			block := s.hooks.OnToolCall(toolCallID, t.Name, params)
+		if h := s.hooks.Load(); h != nil && h.OnToolCall != nil {
+			block := h.OnToolCall(toolCallID, t.Name, params)
 			if block != nil {
 				reason := block.Reason
 				if reason == "" {
@@ -1311,8 +1313,8 @@ func (s *AgentSession) wrapTool(t agent.AgentTool) agent.AgentTool {
 		result, err := origExecute(ctx, toolCallID, params, onUpdate)
 
 		// Post-execution hook: tool_result interception
-		if err == nil && s.hooks != nil && s.hooks.OnToolResult != nil {
-			mod := s.hooks.OnToolResult(toolCallID, t.Name, params, result.Content, result.Details, result.IsError)
+		if h := s.hooks.Load(); err == nil && h != nil && h.OnToolResult != nil {
+			mod := h.OnToolResult(toolCallID, t.Name, params, result.Content, result.Details, result.IsError)
 			if mod != nil {
 				if mod.Content != nil {
 					result.Content = mod.Content

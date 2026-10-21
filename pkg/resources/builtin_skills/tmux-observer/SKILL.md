@@ -16,7 +16,7 @@ For an agent (rather than a human) that is strictly better than reading a
 pane:
 
 ```bash
-fir observe <id> --status [--json]   # idle | running | error | no-model | ended | crashed,
+fir observe <id> --status [--json]   # idle | running | error | no-model | observe-lost | ended | crashed,
                                      # model, current tool, last error, startup notice
 fir observe <id> -n 40               # status + last 40 transcript entries; exits
 fir observe <id> --wait --timeout 10m  # block until the current run ends, then snapshot
