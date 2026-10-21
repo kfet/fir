@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [1.35.8] - 2026-10-21
+
+### Fixed
+- Restored the root `CHANGELOG.md` symlink that the v1.35.7 release commit replaced with a copy (v1.35.7's built-in `/changelog` lacked its own entry).
+
 ## [1.35.7] - 2026-10-21
 
 ### Added
