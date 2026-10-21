@@ -2,10 +2,16 @@
 
 ## [Unreleased]
 
+## [1.36.1] - 2026-10-21
+
 ### Fixed
 
 - Data race between extension hook installation and MCP server startup reading session hooks.
 - `fir observe` no longer reports a working session as `crashed` when only its observe extension died or its socket stopped answering. `crashed` now means the fir host (`host_pid`) is dead; the other case is the new `observe-lost` status (listed by default, explained by `--status`, `fir send` and `send_session`).
+
+### Changed
+
+- Model catalog: added `opencode/flint-40b-free`; pricing changed for opencode: gpt-6.1-sol; openrouter: deepseek/deepseek-v4-pro.
 
 ## [1.36.0] - 2026-10-21
 
