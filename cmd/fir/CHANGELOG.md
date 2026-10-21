@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.35.7] - 2026-10-21
+
 ### Added
 - `make lint-shell` (part of `make all`/CI): `bash -n` + shellcheck over every tracked shell script; fixed all findings.
 
