@@ -29,6 +29,7 @@ func TestLoadBuiltinSkills_ReturnsExpectedSkills(t *testing.T) {
 		"notify":              false,
 		"orient":              false,
 		"poe-models":          false,
+		"prompt-optimize":     false,
 		"poe-usage":           false,
 		"project-ops":         false,
 		"rebase-on-main":      false,

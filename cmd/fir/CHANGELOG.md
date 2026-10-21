@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Builtin `prompt-optimize` skill for writing and fixing model-facing instructions.
+
 ## [1.35.8] - 2026-10-21
 
 ### Fixed
