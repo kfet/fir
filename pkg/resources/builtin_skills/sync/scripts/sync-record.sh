@@ -26,13 +26,13 @@ for pattern in "${TRACKED_DIRS[@]}"; do
     target="$UPSTREAM/$pattern"
     if [ -f "$target" ]; then
         # Single file
-        rel="${target#$UPSTREAM/}"
+        rel="${target#"$UPSTREAM"/}"
         hash=$(shasum -a 256 "$target" | cut -d' ' -f1)
         echo "$hash  $rel" >> "$OUTPUT"
     elif [ -d "$target" ]; then
         # Directory — hash all .ts files
-        find "$target" -name "*.ts" -type f | sort | while read f; do
-            rel="${f#$UPSTREAM/}"
+        find "$target" -name "*.ts" -type f | sort | while IFS= read -r f; do
+            rel="${f#"$UPSTREAM"/}"
             hash=$(shasum -a 256 "$f" | cut -d' ' -f1)
             echo "$hash  $rel" >> "$OUTPUT"
         done

@@ -73,9 +73,12 @@ IDLE_SECS=$(( IDLE_DAYS * 86400 ))
 declare -A W_NAME W_ACT W_PATH W_LIVE W_GONE
 
 # One row per pane. The path is last: it is the only field that can hold tabs
-# or spaces safely at the end of the line.
+# or spaces safely at the end of the line. Tab is IFS whitespace, so read
+# collapses an empty field (an unnamed window) and shifts the rest left.
+# The name is prefixed with "=" so it is never empty; strip it after read.
 while IFS=$'\t' read -r win_id name pane_pid activity path; do
   [[ -n "$win_id" ]] || continue
+  name="${name#=}"
   [[ "$win_id" == "$SELF_WIN" ]] && continue
 
   # tmux appends " (deleted)" when the pane's cwd no longer exists.
@@ -99,7 +102,7 @@ while IFS=$'\t' read -r win_id name pane_pid activity path; do
   (( live )) && W_LIVE[$win_id]=1   # any live pane protects the window
   (( gone )) || W_GONE[$win_id]=0   # any surviving cwd keeps it
 done < <(tmux list-panes -a -F \
-  '#{window_id}	#{window_name}	#{pane_pid}	#{window_activity}	#{pane_current_path}' 2>/dev/null)
+  '#{window_id}	=#{window_name}	#{pane_pid}	#{window_activity}	#{pane_current_path}' 2>/dev/null)
 
 reaped=0
 kept=0

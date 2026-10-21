@@ -12,10 +12,10 @@ TITLE="${1:?usage: notify.sh TITLE [BODY]}"
 BODY="${2:-}"
 
 if [ -n "${KITTY_WINDOW_ID:-}" ]; then
-  printf '\e]99;i=1:d=0;%s\e\\' "$TITLE" > /dev/tty
-  [ -n "$BODY" ] && printf '\e]99;i=1:p=body;%s\e\\' "$BODY" > /dev/tty
+  printf '\e]99;i=1:d=0;%s\e\134' "$TITLE" > /dev/tty
+  [ -n "$BODY" ] && printf '\e]99;i=1:p=body;%s\e\134' "$BODY" > /dev/tty
 elif [ -n "${TMUX:-}" ]; then
-  printf '\ePtmux;\e\e]777;notify;%s;%s\e\e\\\e\\' "$TITLE" "$BODY" > /dev/tty
+  printf '\ePtmux;\e\e]777;notify;%s;%s\e\e\\\e\134' "$TITLE" "$BODY" > /dev/tty
 else
-  printf '\e]777;notify;%s;%s\e\\' "$TITLE" "$BODY" > /dev/tty
+  printf '\e]777;notify;%s;%s\e\134' "$TITLE" "$BODY" > /dev/tty
 fi

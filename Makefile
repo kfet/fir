@@ -1,4 +1,4 @@
-.PHONY: build build-all install install-completions test test-e2e test-cover coverage open_coverage test-race test-live vet fmt clean pgo generate-models check-uv lint-python test-python test-python-sdk test-python-ext test-python-schedule test-python-tmuxspinner test-go-sdk install-uv publish deploy tidy check-size notices check-licenses check-secrets _all_parallel $(CROSS_TARGETS)
+.PHONY: build build-all install install-completions test test-e2e test-cover coverage open_coverage test-race test-live vet fmt clean pgo generate-models check-uv lint-python test-python test-python-sdk test-python-ext test-python-schedule test-python-tmuxspinner test-go-sdk install-uv publish deploy tidy check-size notices check-licenses check-secrets lint-shell _all_parallel $(CROSS_TARGETS)
 
 # Output directory for all build artifacts
 BINDIR    := bin
@@ -56,7 +56,7 @@ build: tidy
 all: fmt tidy
 	@$(MAKE) -j --no-print-directory _all_parallel TIDY_DONE=1
 
-_all_parallel: vet test-race coverage build-all lint-python test-python-sdk test-python-ext test-python-schedule test-python-tmuxspinner test-node-sdk test-go-sdk check-licenses
+_all_parallel: vet test-race coverage build-all lint-python test-python-sdk test-python-ext test-python-schedule test-python-tmuxspinner test-node-sdk test-go-sdk check-licenses lint-shell
 
 fmt:
 	@gofmt -s -w .
@@ -358,6 +358,13 @@ lint-python: check-uv
 	$(call RUN,lint python (ruff),uvx ruff@latest check $(PYTHON_DIRS))
 	$(call RUN,format python (ruff),uvx ruff@latest format --check $(PYTHON_DIRS))
 	$(call RUN,lint python (ty),uvx ty@latest check $(PYTHON_DIRS))
+
+# Static checks for every tracked shell script: bash -n + shellcheck.
+SHELLCHECK ?= $(shell command -v shellcheck 2>/dev/null || echo uvx --from shellcheck-py shellcheck)
+lint-shell:
+	@files=$$(scripts/list-shell-scripts.sh); \
+	for f in $$files; do bash -n "$$f" || exit 1; done; \
+	$(SHELLCHECK) -x $$files && echo "  ✓ lint shell ($$(echo $$files | wc -w) files)"
 
 test-python: test-python-sdk test-python-ext test-python-schedule test-python-tmuxspinner
 
