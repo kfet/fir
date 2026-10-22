@@ -665,8 +665,23 @@ func (c *Context) GetSessionID() (string, error) {
 		return s, nil
 	}
 	var obj struct {
-		SessionID string `json:"session_id"`
+		ID string `json:"id"`
 	}
 	_ = json.Unmarshal(raw, &obj)
-	return obj.SessionID, nil
+	return obj.ID, nil
+}
+
+// PendingSteers returns how many steering messages are queued but not yet
+// delivered to the model. A long-running tool should return early when it
+// is non-zero so the agent sees the steer at the next turn boundary.
+func (c *Context) PendingSteers() (int, error) {
+	raw, err := c.app.call("pending_steers", nil)
+	if err != nil {
+		return 0, err
+	}
+	var obj struct {
+		Count int `json:"count"`
+	}
+	_ = json.Unmarshal(raw, &obj)
+	return obj.Count, nil
 }

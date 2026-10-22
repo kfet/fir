@@ -546,6 +546,12 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 		// at any point during the session lifetime.
 		result = GetSessionIDResult{ID: api.GetSessionID()}
 
+	case "pending_steers":
+		// Number of steering messages queued but not yet delivered. A
+		// long-running tool polls this and returns early so the agent loop
+		// reaches the turn boundary where steers are injected.
+		result = PendingSteersResult{Count: api.PendingSteers()}
+
 	case "get_session_name":
 		// Returns the session's display name, or "" if unset.
 		result = GetSessionNameResult{Name: api.GetSessionName()}

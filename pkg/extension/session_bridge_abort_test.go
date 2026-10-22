@@ -168,3 +168,31 @@ func TestSessionBridge_RestartSession_TakesQueues(t *testing.T) {
 		t.Fatalf("carried = %s, want s1,f1,f2", got)
 	}
 }
+
+// TestSessionBridge_PendingSteers counts only steering messages, not
+// follow-ups, so wait/pipe yield to a steer but not to a queued follow-up.
+func TestSessionBridge_PendingSteers(t *testing.T) {
+	a := agent.NewAgent(agent.AgentOptions{})
+	sess := session.NewAgentSession(session.AgentSessionOptions{
+		Agent:          a,
+		SessionStore:   store.InMemorySessionStore(),
+		ResourceLoader: &stubResourceLoader{},
+		Cwd:            t.TempDir(),
+	})
+	t.Cleanup(sess.Close)
+	sb := NewSessionBridge(sess)
+	if n := sb.PendingSteers(); n != 0 {
+		t.Fatalf("PendingSteers = %d, want 0", n)
+	}
+	a.FollowUp(agent.NewAgentMessage(ai.NewUserMsg("f", 0)))
+	if n := sb.PendingSteers(); n != 0 {
+		t.Fatalf("follow-up counted as steer: %d", n)
+	}
+	a.Steer(agent.NewAgentMessage(ai.NewUserMsg("s", 0)))
+	if n := sb.PendingSteers(); n != 1 {
+		t.Fatalf("PendingSteers = %d, want 1", n)
+	}
+	if n := (&SessionBridge{}).PendingSteers(); n != 0 {
+		t.Fatalf("nil session PendingSteers = %d", n)
+	}
+}

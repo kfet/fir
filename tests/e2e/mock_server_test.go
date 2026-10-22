@@ -87,6 +87,15 @@ func handleCompletions(w http.ResponseWriter, r *http.Request) {
 			cmd = strings.TrimSpace(userText[idx+1:])
 		}
 		writeSSEToolCall(w, "call_bash_1", "bash", map[string]any{"command": cmd})
+	case strings.HasPrefix(upper, "WAIT_FOREVER") && availableTools["wait"]:
+		// A wait whose probe never settles: only a steer (or abort) ends it
+		// before its long cap.
+		writeSSEToolCall(w, "call_wait_1", "wait", map[string]any{
+			"steps":     []map[string]any{{"tool": "bash", "params": map[string]any{"command": "echo WAIT:continue"}}},
+			"interval":  1,
+			"timeout":   600,
+			"max_polls": 600,
+		})
 	case strings.HasPrefix(upper, "LIST_TOOLS"):
 		// Return the names of all tools the LLM can see.
 		names := make([]string, 0, len(availableTools))

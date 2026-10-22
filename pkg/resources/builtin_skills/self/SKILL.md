@@ -176,6 +176,7 @@ fir send <id> --abort              # cancel the current turn
 ```
 
 `<id-prefix>` prefix-matches against session id, session name, or basename(cwd). First-line sigils in `fir send`: `!message` → steer, `+message` → followUp, `~` → abort, `\!`/`\+`/`\~` to escape. `Ctrl-\` detaches.
+A steer lands at the next turn boundary: most tools (bash) finish first, but `wait` yields within ~1s (`outcome=interrupted` + resume handle) and `pipe` stops between steps.
 
 Status comes from the core-owned **`session/status` observable card** (`<transcript>.cards`), which `AgentSession` writes in agent-loop order on every lifecycle transition (`pkg/session/statuscard.go`): `idle`, `running` (from prompt acceptance to `agent_end`; detail names the running tool), `error` (last run ended with a provider/auth error — the message is in `error:`), `no-model` (prompts are refused; the startup "No models available…" notice is in `notice:`). Detail is `key: value` lines (`status`, `model`, `tool`, `runs`, `error`, `notice`). Liveness additionally probes the session's input socket, so a reused pid does not resurrect a dead session.
 

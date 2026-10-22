@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- `wait` and `pipe` now yield to a steer (`fir send <id> '!msg'`, deliver_as=steer): wait returns `outcome=interrupted` with a resume handle within ~1s, pipe stops between steps, and the agent sees the steer. Previously both ran to their own cap.
+- Go extension SDK `GetSessionID` read the wrong result key and always returned "".
+
+### Added
+
+- Extension bridge method `pending_steers` (Python `ctx.pending_steers()`, Go `ctx.PendingSteers()`) so long-running tools can yield to queued steers.
+
 ## [1.37.1] - 2026-10-22
 
 ### Changed

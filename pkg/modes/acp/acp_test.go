@@ -1336,6 +1336,7 @@ func (n *noopBridgeAPI) Exec(_ string, _ []string) (extension.ExecResult, error)
 func (n *noopBridgeAPI) SendMessage(_ extension.CustomMessageSpec, _ *extension.SendMessageOptions) {}
 func (n *noopBridgeAPI) SendUserMessage(_ string, _ *extension.SendUserMessageOptions)              {}
 func (n *noopBridgeAPI) SetSessionName(_ string)                                                    {}
+func (n *noopBridgeAPI) PendingSteers() int                                                         { return 0 }
 func (n *noopBridgeAPI) GetSessionName() string                                                     { return "" }
 func (n *noopBridgeAPI) GetSessionFile() string                                                     { return "" }
 func (n *noopBridgeAPI) GetSessionID() string                                                       { return "" }

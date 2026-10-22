@@ -27,7 +27,7 @@ import secrets
 import shlex
 import tempfile
 import time
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 import fir_ext
 
@@ -253,6 +253,8 @@ def _run_pipe(steps: list[dict], label: str, ctx: fir_ext.Context) -> dict:
 
     for i, step in enumerate(steps):
         name = step["tool"]
+        if i > 0 and _steered(ctx):
+            return _format_interrupted(i, steps, results)
         raw_params = step.get("params") or {}
         params = _substitute(raw_params, prior_text)
         cont = bool(step.get("continue_on_error", False))
@@ -282,6 +284,24 @@ def _run_pipe(steps: list[dict], label: str, ctx: fir_ext.Context) -> dict:
                 return _format_error(i, name, results)
 
     return _format_success(results, any_error)
+
+
+def _format_interrupted(idx: int, steps: list[dict], results: list[dict]) -> dict:
+    """Partial result when a steer arrives between steps.
+
+    Not an error: the completed steps ran fine; the rest were skipped so the
+    agent can read the steering message now."""
+    skipped = ", ".join(f"{j + 1} ({s['tool']})" for j, s in enumerate(steps) if j >= idx)
+    # Every completed step is shown: the chain was cut short, so outputs a
+    # later step would have consumed are the only result there is.
+    shown = [dict(r, leaf=True) for r in results]
+    msg = (
+        f"pipe: interrupted — a steering message arrived after step {idx}/"
+        f"{len(steps)}; it follows this result. Not run: {skipped}. Re-run "
+        "them if they are still wanted after reading the steer.\n\n"
+        + _format_results_markdown(shown)
+    )
+    return {"content": [{"type": "text", "text": msg}], "is_error": False}
 
 
 def _format_error(idx: int, name: str, results: list[dict]) -> dict:
@@ -337,18 +357,41 @@ def _now() -> float:
     return time.monotonic()
 
 
-def _sleep_sliced(seconds: float) -> None:
+# How often a sleeping wait asks the host whether a steer is queued.
+_STEER_CHECK_EVERY = 1.0
+
+
+def _steered(ctx: fir_ext.Context) -> bool:
+    """True when a steering message is queued for the agent.
+
+    Steers are injected only at a turn boundary, which a running tool holds
+    back. wait and pipe check this and return early so the agent sees the
+    steer promptly instead of after the loop's own cap."""
+    return ctx.pending_steers() > 0
+
+
+def _sleep_sliced(seconds: float, stop: Callable[[], bool] | None = None) -> bool:
     """Sleep *seconds* in small slices so cancellation aborts promptly.
 
     The ``wait`` tool declares its host-side timeout disabled (``timeout=-1``),
     so a long interval is never mistaken for a hung tool — no keep-alive
-    heartbeat is needed. Slicing exists only so a cancelled/timed-out call
-    returns near the slice boundary instead of blocking the whole interval."""
+    heartbeat is needed. Slicing exists so a cancelled/timed-out call
+    returns near the slice boundary instead of blocking the whole interval.
+
+    *stop* is polled about every ``_STEER_CHECK_EVERY`` seconds; when it
+    returns True the sleep ends early and this returns True."""
     remaining = seconds
+    since_check = 0.0
     while remaining > 0:
         chunk = _WAIT_SLEEP_SLICE if remaining > _WAIT_SLEEP_SLICE else remaining
         time.sleep(chunk)
         remaining -= chunk
+        since_check += chunk
+        if stop is not None and since_check >= _STEER_CHECK_EVERY:
+            since_check = 0.0
+            if stop():
+                return True
+    return False
 
 
 def _coerce_num(params: Mapping[str, Any], key: str, default: float, minimum: float) -> float:
@@ -549,7 +592,7 @@ def _stash_resume(
     timeout: float,
     max_polls: int,
 ) -> str:
-    """Record a timed-out loop's state and return its resume handle."""
+    """Record a timed-out or interrupted loop's state; return its handle."""
     _expire_resumes()
     handle = "w_" + secrets.token_hex(3)
     while handle in _wait_resumes:
@@ -655,8 +698,39 @@ def _run_wait(
     # model sees, continuing across resumes.
     polls = 0
     total = prior_polls
+    vtext = ""
+
+    def interrupted() -> dict:
+        elapsed = prior_elapsed + (_now() - start)
+        handle = _stash_resume(
+            steps,
+            state_path,
+            total,
+            elapsed,
+            strikes,
+            last_verdict,
+            label,
+            interval,
+            timeout,
+            max_polls,
+        )
+        return _wait_terminal(
+            "interrupted",
+            total,
+            elapsed,
+            "wait: interrupted by a steering message, which follows this "
+            "result — read it first. NOT a failure and the job may still be "
+            f"running: to keep waiting, call wait with resume={handle} — the "
+            "probe steps, poll counter and $WAIT_STATE contents are all "
+            "preserved.",
+            vtext,
+            resume=handle,
+        )
+
     try:
         while True:
+            if _steered(ctx):
+                return interrupted()
             polls += 1
             total += 1
             prefix = _wait_prefix(label, polls, max_polls)
@@ -666,6 +740,8 @@ def _run_wait(
 
             if not reached or vis_error:
                 # Verdict step (or the step that aborted before it) errored.
+                if _steered(ctx):
+                    return interrupted()
                 strikes += 1
                 last_verdict = "error"
                 if strikes >= 3:
@@ -680,6 +756,9 @@ def _run_wait(
             else:
                 verdict, message = _parse_verdict(vtext)
                 if verdict is None:
+                    # A nested pipe cut short by the steer has no sentinel.
+                    if _steered(ctx):
+                        return interrupted()
                     tail = next(
                         (ln for ln in reversed(vtext.splitlines()) if ln.strip()),
                         "<empty>",
@@ -744,7 +823,8 @@ def _run_wait(
                 )
 
             ctx.report_progress(f"{prefix} {int(elapsed)}s last={last_verdict}")
-            _sleep_sliced(interval)
+            if _sleep_sliced(interval, lambda: _steered(ctx)):
+                return interrupted()
     finally:
         # A timeout hands ownership of the scratch file to its checkpoint;
         # every other exit path (settled, cancelled, exception) drops it.
@@ -823,7 +903,9 @@ _PIPE_DESCRIPTION = (
     "outputs are still fed (in full, post-truncation) into later steps' "
     "substitutions, but are omitted from the final result and replaced by a "
     "one-line size marker. The last step is always a leaf; errored steps "
-    "are always shown regardless of leaf status. This lets you build large "
+    "are always shown regardless of leaf status. A steering message from "
+    "the user stops the pipe between steps: completed outputs are returned, "
+    "the steps not run are named, and the steer follows. This lets you build large "
     "data pipelines without polluting LLM context with intermediate blobs. "
     "Each step emits a progress update as it starts, so a long pipe stays "
     "visibly alive rather than looking stalled.\n\n"
@@ -937,7 +1019,10 @@ _WAIT_DESCRIPTION = (
     "where it stopped — with a fresh budget. `interval`/`timeout`/`max_polls` "
     "passed alongside `resume` override the originals; omitted ones are "
     "reused. Handles are session-scoped, expire after 2h, and are dropped "
-    "once the loop finishes. The terminal "
+    "once the loop finishes. A steering message from the user interrupts "
+    "the loop within about a second of the current probe step finishing: it returns outcome=interrupted with a "
+    "`resume: <handle>`, and the steer follows — act on the steer, then "
+    "resume only if it still makes sense. The terminal "
     "payload reports outcome/polls/elapsed/message plus the last probe output "
     "(the bare WAIT: line is stripped). Returns to the model exactly ONCE — "
     "but the loop is NOT silent on the wire: every poll emits a tool_call "

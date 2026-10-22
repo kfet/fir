@@ -156,6 +156,14 @@ func (b *SessionBridge) SetSessionName(name string) {
 	b.session.SetSessionName(name)
 }
 
+// PendingSteers returns the number of queued, undelivered steering messages.
+func (b *SessionBridge) PendingSteers() int {
+	if b.session == nil || b.session.Agent == nil {
+		return 0
+	}
+	return b.session.Agent.SteeringQueueLen()
+}
+
 func (b *SessionBridge) GetSessionName() string {
 	return b.session.GetSessionName()
 }

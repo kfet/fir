@@ -415,6 +415,27 @@ class TestAvailableModels(unittest.TestCase):
             self.assertEqual(ctx.available_models(), [])
 
 
+class TestPendingSteers(unittest.TestCase):
+    """Context.pending_steers() — count, old-host and malformed fallbacks."""
+
+    def test_returns_count(self):
+        ctx = fir_ext.Context()
+        with mock.patch.object(ctx, "_call", return_value={"count": 2}) as m:
+            self.assertEqual(ctx.pending_steers(), 2)
+        m.assert_called_once_with("pending_steers", {})
+
+    def test_old_host_rpc_error_returns_zero(self):
+        ctx = fir_ext.Context()
+        with mock.patch.object(ctx, "_call", side_effect=RuntimeError("method not found")):
+            self.assertEqual(ctx.pending_steers(), 0)
+
+    def test_malformed_results_return_zero(self):
+        ctx = fir_ext.Context()
+        for bad in (None, {}, {"count": "1"}):
+            with mock.patch.object(ctx, "_call", return_value=bad):
+                self.assertEqual(ctx.pending_steers(), 0, bad)
+
+
 class TestDecorators(unittest.TestCase):
     def setUp(self):
         fir_ext._tools.clear()

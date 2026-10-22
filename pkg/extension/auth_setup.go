@@ -174,6 +174,7 @@ func (n *nopBridgeAPI) Exec(_ string, _ []string) (ExecResult, error) {
 func (n *nopBridgeAPI) SendMessage(_ CustomMessageSpec, _ *SendMessageOptions) {}
 func (n *nopBridgeAPI) SendUserMessage(_ string, _ *SendUserMessageOptions)    {}
 func (n *nopBridgeAPI) SetSessionName(_ string)                                {}
+func (n *nopBridgeAPI) PendingSteers() int                                     { return 0 }
 func (n *nopBridgeAPI) GetSessionName() string                                 { return "" }
 func (n *nopBridgeAPI) GetSessionFile() string                                 { return "" }
 func (n *nopBridgeAPI) GetSessionID() string                                   { return "" }

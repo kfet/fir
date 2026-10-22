@@ -21,6 +21,7 @@ type mockBridgeAPI struct {
 	execCalled      bool
 	execCmd         string
 	sessionName     string
+	pendingSteers   int
 	sessionFile     string
 	sentMessages    []CustomMessageSpec
 	sentMsgOpts     []*SendMessageOptions
@@ -129,6 +130,7 @@ func (m *mockBridgeAPI) SendUserMessage(content string, opts *SendUserMessageOpt
 	m.mu.Unlock()
 }
 func (m *mockBridgeAPI) SetSessionName(name string)    { m.sessionName = name }
+func (m *mockBridgeAPI) PendingSteers() int            { return m.pendingSteers }
 func (m *mockBridgeAPI) GetSessionName() string        { return m.sessionName }
 func (m *mockBridgeAPI) GetSessionFile() string        { return m.sessionFile }
 func (m *mockBridgeAPI) GetSessionID() string          { return "" }
@@ -1520,5 +1522,32 @@ func TestBridge_AvailableModels_CarriesThinkingFlags(t *testing.T) {
 	}
 	if got.Models[1].AdaptiveThinking {
 		t.Errorf("plain model must not be adaptive: %+v", got.Models[1])
+	}
+}
+
+func TestBridge_PendingSteers_RPC(t *testing.T) {
+	b, extCodec := pipePair(&InitResult{})
+	api := newMockAPI()
+	api.pendingSteers = 2
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = b.Run(ctx, api) }()
+
+	_ = extCodec.WriteRequest(4, "pending_steers", nil)
+	msg, err := extCodec.ReadMessage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp := msg.(*Response)
+	if resp.Error != nil {
+		t.Fatalf("unexpected RPC error: %v", resp.Error)
+	}
+	var result PendingSteersResult
+	if err := json.Unmarshal(*resp.Result, &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Count != 2 {
+		t.Fatalf("count = %d, want 2", result.Count)
 	}
 }

@@ -950,6 +950,22 @@ Response: `{"id": "abc12345-6789-..."}`
 
 ---
 
+#### `pending_steers`
+
+Return how many steering messages (`send_user_message` with
+`deliver_as: "steer"`, `fir send <id> '!msg'`) are queued but not yet
+delivered to the model. Steers are injected only at a turn boundary, so a
+long-running tool (e.g. the builtin `wait` and `pipe`) polls this and returns
+early when it is non-zero. Follow-ups are not counted.
+
+```json
+{"jsonrpc":"2.0","id":1019,"method":"pending_steers","params":{}}
+```
+
+Response: `{"count": 1}`
+
+---
+
 #### `call_tool`
 
 Execute any registered tool by name.  The call bypasses conversation history;

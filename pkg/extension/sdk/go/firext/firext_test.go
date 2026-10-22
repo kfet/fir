@@ -407,3 +407,48 @@ func TestEventWithIDAckedWhenUnhandled(t *testing.T) {
 type testErr struct{ msg string }
 
 func (e *testErr) Error() string { return e.msg }
+
+// TestSessionIDAndPendingSteers checks the result shapes the host sends for
+// get_session_id ({"id"}) and pending_steers ({"count"}).
+func TestSessionIDAndPendingSteers(t *testing.T) {
+	type out struct {
+		id    string
+		count int
+	}
+	got := make(chan out, 1)
+	h := newHarness(t, func(a *App) {
+		a.Tool(ToolSpec{Name: "probe"}, func(p json.RawMessage, ctx *Context) (*ToolResult, error) {
+			id, err := ctx.GetSessionID()
+			if err != nil {
+				t.Errorf("GetSessionID: %v", err)
+			}
+			n, err := ctx.PendingSteers()
+			if err != nil {
+				t.Errorf("PendingSteers: %v", err)
+			}
+			got <- out{id, n}
+			return Text("ok"), nil
+		})
+	})
+	defer h.close()
+	h.send(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "init"})
+	h.readMsg()
+	h.send(map[string]any{"jsonrpc": "2.0", "id": 2, "method": "tool_call",
+		"params": map[string]any{"name": "probe", "params": map[string]any{}}})
+	for {
+		msg := h.readMsg()
+		switch msg.Method {
+		case "get_session_id":
+			h.send(map[string]any{"jsonrpc": "2.0", "id": *msg.ID, "result": map[string]any{"id": "sid-1"}})
+			continue
+		case "pending_steers":
+			h.send(map[string]any{"jsonrpc": "2.0", "id": *msg.ID, "result": map[string]any{"count": 3}})
+			continue
+		}
+		break
+	}
+	r := <-got
+	if r.id != "sid-1" || r.count != 3 {
+		t.Fatalf("got %+v", r)
+	}
+}

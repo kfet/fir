@@ -4,6 +4,7 @@ package e2e
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -942,5 +943,54 @@ func TestObserve_OldSidecarWithoutHostPid(t *testing.T) {
 		if !strings.Contains(out, `"status": "`+want+`"`) {
 			t.Errorf("%s: want %s:\n%s", sid[:8], want, out)
 		}
+	}
+}
+
+// TestSend_SteerInterruptsWait: a steer sent while the agent sits in the
+// `wait` tool must end the wait (outcome=interrupted) and reach the model
+// promptly — not after the wait's own 600s cap.
+func TestSend_SteerInterruptsWait(t *testing.T) {
+	stateHome := t.TempDir()
+	sid := startACPSession(t, stateHome, mockAgentDir, "-e", "pipe", "--provider", "mock", "--model", "mock-model")
+	env := map[string]string{"XDG_STATE_HOME": stateHome}
+	observeStatus(t, stateHome, sid)
+
+	type reply struct {
+		out  string
+		code int
+	}
+	done := make(chan reply, 1)
+	go func() {
+		out, code := runFir(t, "", 90*time.Second, env, "send", sid[:8], "--wait", "--timeout", "80", "WAIT_FOREVER")
+		done <- reply{out, code}
+	}()
+
+	// Steer only once the wait tool is actually running.
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		st := observeStatus(t, stateHome, sid)
+		if st["status"] == "running" && strings.Contains(fmt.Sprint(st["tool"]), "wait") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("wait tool never started: %v", st)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if out, code := runFir(t, "", 15*time.Second, env, "send", sid[:8], "!STEER_E2E"); code != 0 {
+		t.Fatalf("steer send exit %d: %s", code, out)
+	}
+
+	select {
+	case r := <-done:
+		if r.code != 0 || strings.TrimSpace(r.out) != "MOCK_RESPONSE: STEER_E2E" {
+			t.Fatalf("send --wait exit %d, reply %q; want the steer answered", r.code, r.out)
+		}
+	case <-time.After(60 * time.Second):
+		t.Fatal("steer did not interrupt the wait tool")
+	}
+	out, _ := runFir(t, "", 15*time.Second, env, "observe", sid[:8], "-n", "40")
+	if !strings.Contains(out, "wait: interrupted") {
+		t.Errorf("transcript lacks the interrupted wait result:\n%s", out)
 	}
 }

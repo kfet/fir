@@ -15,7 +15,7 @@ Outbound calls demonstrated (extension → fir):
   notify · exec · set_status · set_session_name ·
   set_label · clear_label ·
   set_model · send_message · send_user_message ·
-  set_session_data · get_session_data · get_session_file · get_session_name · get_session_id · continue_session · side_query · call_tool ·
+  set_session_data · get_session_data · get_session_file · get_session_name · get_session_id · pending_steers · continue_session · side_query · call_tool ·
   list_tools · list_extensions · available_models ·
   report_progress · restart_session · reload_extension · reload_mcp ·
   prepend · set_section · clear_section
@@ -414,6 +414,7 @@ def on_session_start(params: fir_ext.SessionStartParams, ctx: fir_ext.Context) -
     ctx.get_session_file()  # get_session_file
     ctx.get_session_name()  # get_session_name
     ctx.get_session_id()  # get_session_id
+    ctx.pending_steers()  # pending_steers
     ctx.put_observable("hello", "ready", "demo extension up")  # put_observable
     ctx.clear_observable("hello")  # clear_observable
 

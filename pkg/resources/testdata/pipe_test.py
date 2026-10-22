@@ -58,6 +58,7 @@ def _make_ctx(call_results, available=None):
         return spec
 
     ctx.call_tool.side_effect = call_tool
+    ctx.pending_steers.return_value = 0
     return ctx
 
 
@@ -1039,6 +1040,123 @@ class TestWaitSleepSlicing(unittest.TestCase):
         # Sliced into <=_WAIT_SLEEP_SLICE chunks that sum to the full duration.
         self.assertTrue(all(s <= self.mod._WAIT_SLEEP_SLICE for s in slept))
         self.assertAlmostEqual(sum(slept), 1.0, places=6)
+
+    def test_sleep_sliced_stops_on_steer(self):
+        slept = []
+        checks = iter([False, True])
+        with mock.patch.object(self.mod.time, "sleep", lambda s: slept.append(s)):
+            stopped = self.mod._sleep_sliced(30.0, lambda: next(checks))
+        self.assertTrue(stopped)
+        # Checked once per _STEER_CHECK_EVERY; the second check stops it.
+        self.assertAlmostEqual(sum(slept), 2 * self.mod._STEER_CHECK_EVERY, places=6)
+
+    def test_sleep_sliced_without_stop_returns_false(self):
+        with mock.patch.object(self.mod.time, "sleep", lambda s: None):
+            self.assertFalse(self.mod._sleep_sliced(2.0, lambda: False))
+
+
+class TestSteerInterrupt(unittest.TestCase):
+    """A queued steer must cut wait and pipe short so the agent sees it."""
+
+    def setUp(self):
+        self.mod = _load_pipe()
+        self.addCleanup(self.mod._cleanup_resumes)
+        self.steps = [{"tool": "Bash", "params": {"command": "probe"}}]
+
+    def test_wait_interrupted_between_polls(self):
+        ctx = _wait_ctx(self, self.mod, [_text_result("WAIT:continue")] * 10)
+        # No steer for the first two polls, then one arrives.
+        ctx.pending_steers.side_effect = [0, 0, 1]
+        out = self.mod._run_wait(self.steps, 5, 300, 60, "", ctx)
+        text = out["content"][0]["text"]
+        self.assertFalse(out["is_error"])
+        self.assertIn("wait: interrupted", text)
+        self.assertIn("polls: 2", text)
+        self.assertEqual(ctx.call_tool.call_count, 2)
+        handle = TestWaitResume._handle(text)
+        self.assertIn(f"resume={handle}", text)
+        rec = self.mod._wait_resumes[handle]
+        self.assertTrue(os.path.exists(rec["state_path"]))
+        self.assertEqual(rec["polls"], 2)
+
+    def test_wait_interrupted_during_sleep(self):
+        ctx = _wait_ctx(self, self.mod, [_text_result("WAIT:continue")] * 10)
+        sleeps = []
+
+        def fake_sleep(seconds, stop=None):
+            sleeps.append(seconds)
+            # The steer lands mid-interval.
+            ctx.pending_steers.return_value = 1
+            assert stop is not None
+            return stop()
+
+        with mock.patch.object(self.mod, "_sleep_sliced", fake_sleep):
+            out = self.mod._run_wait(self.steps, 30, 3600, 60, "", ctx)
+        text = out["content"][0]["text"]
+        self.assertIn("wait: interrupted", text)
+        self.assertIn("polls: 1", text)
+        self.assertEqual(sleeps, [30])
+        self.assertEqual(ctx.call_tool.call_count, 1)
+
+    def test_wait_resume_after_interrupt(self):
+        ctx = _wait_ctx(self, self.mod, [_text_result("WAIT:continue"), _text_result("WAIT:done")])
+        ctx.pending_steers.side_effect = [0, 1]
+        out = self.mod._run_wait(self.steps, 5, 300, 60, "", ctx)
+        handle = TestWaitResume._handle(out["content"][0]["text"])
+        ctx.pending_steers.side_effect = None
+        ctx.pending_steers.return_value = 0
+        out = self.mod._run_wait_resume(handle, [], None, None, None, "", ctx)
+        text = out["content"][0]["text"]
+        self.assertIn("wait: success", text)
+        self.assertIn("polls: 2", text)
+        self.assertNotIn(handle, self.mod._wait_resumes)
+
+    def test_wait_steer_already_queued_returns_before_probe(self):
+        ctx = _wait_ctx(self, self.mod, [])
+        ctx.pending_steers.return_value = 1
+        out = self.mod._run_wait(self.steps, 5, 300, 60, "", ctx)
+        self.assertIn("wait: interrupted", out["content"][0]["text"])
+        self.assertEqual(ctx.call_tool.call_count, 0)
+
+    def test_wait_probe_cut_short_by_steer_is_interrupted_not_error(self):
+        # A nested pipe interrupted by the steer returns no WAIT: sentinel.
+        ctx = _wait_ctx(self, self.mod, [_text_result("pipe: interrupted")])
+        ctx.pending_steers.side_effect = [0, 1]
+        out = self.mod._run_wait(self.steps, 5, 300, 60, "", ctx)
+        self.assertIn("wait: interrupted", out["content"][0]["text"])
+        self.assertFalse(out["is_error"])
+
+    def test_wait_errored_probe_with_steer_is_interrupted(self):
+        ctx = _wait_ctx(self, self.mod, [_text_result("boom", is_error=True)])
+        ctx.pending_steers.side_effect = [0, 1]
+        out = self.mod._run_wait(self.steps, 5, 300, 60, "", ctx)
+        self.assertIn("wait: interrupted", out["content"][0]["text"])
+
+    def test_pipe_stops_between_steps(self):
+        ctx = _make_ctx([_text_result("one"), _text_result("two"), _text_result("three")])
+        ctx.pending_steers.side_effect = [0, 1]
+        steps = [
+            {"tool": "Bash", "params": {"command": "a"}},
+            {"tool": "Bash", "params": {"command": "b"}},
+            {"tool": "Read", "params": {"path": "{{prev}}"}},
+        ]
+        out = self.mod._run_pipe(steps, "", ctx)
+        text = out["content"][0]["text"]
+        self.assertFalse(out["is_error"])
+        self.assertIn("pipe: interrupted", text)
+        self.assertIn("after step 2/3", text)
+        self.assertIn("Not run: 3 (Read)", text)
+        # Step 2 fed step 3 (not a leaf) but is shown since 3 never ran.
+        self.assertIn("one", text)
+        self.assertIn("two", text)
+        self.assertEqual(ctx.call_tool.call_count, 2)
+
+    def test_single_step_pipe_never_checks(self):
+        ctx = _make_ctx([_text_result("only")])
+        ctx.pending_steers.return_value = 1
+        out = self.mod._run_pipe([{"tool": "Bash", "params": {"command": "x"}}], "", ctx)
+        self.assertNotIn("interrupted", out["content"][0]["text"])
+        ctx.pending_steers.assert_not_called()
 
 
 class TestWaitValidationAndDescription(unittest.TestCase):

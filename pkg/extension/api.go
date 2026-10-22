@@ -17,6 +17,10 @@ type BridgeAPI interface {
 	SendUserMessage(content string, opts *SendUserMessageOptions)
 	SetSessionName(name string)
 	GetSessionName() string
+	// PendingSteers returns how many steering messages are queued but not
+	// yet delivered to the model. Long-running tools (wait, pipe) poll it and
+	// yield so the steer is seen promptly.
+	PendingSteers() int
 	// GetSessionFile returns the absolute path to the session's JSONL
 	// transcript on disk, or "" for in-memory (non-persisted) sessions.
 	// The file is created at session start and appended to as events occur,

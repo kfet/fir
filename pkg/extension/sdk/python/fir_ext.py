@@ -458,6 +458,10 @@ otherwise noted.
 | id``             | Unique session id. Also in            |                           |
 |                  | ``session_start`` event params.       |                           |
 +------------------+---------------------------------------+---------------------------+
+| ``pending_       | ``{}``                                | ``{count: N}``            |
+| steers``         | Queued, undelivered steering msgs.    |                           |
+|                  | Long-running tools return early.      |                           |
++------------------+---------------------------------------+---------------------------+
 | ``call_tool``    | ``{name, params}``                    | ``{content: [...],        |
 |                  | Calls any registered tool directly,   | is_error: bool,           |
 |                  | bypassing conversation history.       | details?: {...},          |
@@ -2845,6 +2849,24 @@ class Context:
             if isinstance(value, str):
                 return value
         return ""
+
+    def pending_steers(self) -> int:
+        """Return how many steering messages are queued but not yet delivered.
+
+        A long-running tool (a poll loop, a multi-step chain) should check
+        this and return early when it is non-zero: steers are injected only
+        at a turn boundary, so a tool that keeps running hides them. Returns
+        0 on an older host that lacks the method.
+        """
+        try:
+            result = self._call("pending_steers", {})
+        except (RuntimeError, TimeoutError):
+            return 0
+        if isinstance(result, dict):
+            value = result.get("count", 0)
+            if isinstance(value, int):
+                return value
+        return 0
 
     def set_label(self, entry_id: str, label: str) -> None:
         """Set a label on a session entry."""

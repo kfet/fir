@@ -64,7 +64,7 @@ Handlers receive a `*firext.Context` for callbacks into fir:
 
 `Notify`, `Exec`, `SetStatus`, `SetSessionName`, `SendUserMessage`,
 `SendMessage`, `PutObservable`, `SideQuery`, `SetSessionData`,
-`GetSessionData`, `GetSessionID`, and `Call` (escape hatch for any other
+`GetSessionData`, `GetSessionID`, `PendingSteers`, and `Call` (escape hatch for any other
 method in the protocol).
 
 Schema helpers — `Str`, `Int`, `Bool`, `Object(props, required...)`, `Props` —

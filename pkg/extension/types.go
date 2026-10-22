@@ -252,6 +252,11 @@ type GetSessionIDResult struct {
 	ID string `json:"id"`
 }
 
+// PendingSteersResult is the result of "pending_steers".
+type PendingSteersResult struct {
+	Count int `json:"count"`
+}
+
 // GetSessionNameResult is the result of "get_session_name".
 type GetSessionNameResult struct {
 	Name string `json:"name"`
