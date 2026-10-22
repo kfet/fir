@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [1.37.1] - 2026-10-22
+
+### Changed
+
+- **Tighter bash tool prompt text** (agent v0.5.1). In `-p`/json print mode, the background-job note now says that the session ends after this turn, so the job will die, and suggests running in the foreground with a larger timeout. In an A/B test, opus now waits out "in 2 minutes create x" instead of leaving a job that gets killed.
+
 ## [1.37.0] - 2026-10-22
 
 ### Fixed

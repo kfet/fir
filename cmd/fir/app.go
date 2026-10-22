@@ -619,6 +619,8 @@ func run() error {
 
 	// Determine mode
 	isPrintMode := args.Print || args.OutputMode == ModeJSON
+	// One-shot sessions end after this turn: bash warns that background jobs die.
+	tools.PrintMode = isPrintMode
 	isACPMode := args.OutputMode == ModeACP
 
 	// Handle --login: run interactive OAuth login and exit.
