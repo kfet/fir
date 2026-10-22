@@ -40,8 +40,8 @@ github.com/hashicorp/go-retryablehttp v0.7.8 h1:ylXZWnqa7Lhqpk0L1P1LzDtGcCR0rPVU
 github.com/hashicorp/go-retryablehttp v0.7.8/go.mod h1:rjiScheydd+CxvumBsIrFKlx3iS0jrZ7LvzFGFmuKbw=
 github.com/hashicorp/go-version v1.8.0 h1:KAkNb1HAiZd1ukkxDFGmokVZe1Xy9HG6NUp+bPle2i4=
 github.com/hashicorp/go-version v1.8.0/go.mod h1:fltr4n8CU8Ke44wwGCBoEymUuxUHl09ZGVZPK5anwXA=
-github.com/kfet/agent v0.5.1 h1:YjPmXZSjDoubPBrlZDoqddcFy1KKPjTZTRUdDIJ4iKE=
-github.com/kfet/agent v0.5.1/go.mod h1:Ai37OVLymNd9hNeGx+vjfQFu33BNnzYx3cpNdsIPYrg=
+github.com/kfet/agent v0.5.2 h1:cWEiLUHlDl8sF1DokqNehGXQecZjWwsZSPSTzePyjmo=
+github.com/kfet/agent v0.5.2/go.mod h1:Ai37OVLymNd9hNeGx+vjfQFu33BNnzYx3cpNdsIPYrg=
 github.com/kfet/ai v0.1.2 h1:LtiMkQA/GWNPQVywH2GUPvKGNCRgVcW4eVmWgY0jP7s=
 github.com/kfet/ai v0.1.2/go.mod h1:ori1yLW6C08jojmvil0re/K8by2LMslDPoZZZgrcpwk=
 github.com/kfet/covgate v0.1.2 h1:29q7vN+GJ8cJeXdDwohaqAT02cCZA4HlEkzjVq0MuAA=

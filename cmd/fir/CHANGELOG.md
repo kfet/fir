@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [1.38.1] - 2026-10-22
+
+### Changed
+
+- **The print-mode background-job note forbids detaching** (agent v0.5.2): "Do not detach it (no setsid, nohup, tmux, at)." In an A/B test, gpt-5.5 no longer escapes the session with `setsid` on delayed tasks.
+
 ## [1.38.0] - 2026-10-22
 
 ### Fixed
