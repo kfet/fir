@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/kfet/agent/tools"
 	printmode "github.com/kfet/fir/pkg/modes/print"
 )
 
@@ -151,7 +152,11 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
-	if err := run(); err != nil {
+	err := run()
+	// Background jobs started by the bash tool (`cmd &`) end with the fir
+	// process — the session — however run() returned.
+	tools.KillBackgroundJobs()
+	if err != nil {
 		var code errExitCode
 		if errors.As(err, &code) {
 			// Deliberate status, nothing left to say.

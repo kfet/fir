@@ -634,6 +634,10 @@ This lets you establish a convention (e.g. "every project keeps skills in `./ski
 
 For project-specific settings (`.fir/settings.json`), relative paths also resolve against cwd (the project root), which is the natural expectation.
 
+## Background jobs in the `bash` tool
+
+Background jobs started by the `bash` tool (`cmd &`, `nohup cmd &`, `(sleep N; cmd) &`) keep running after the call returns. The result lists the process group, its pids and the log file that keeps receiving their output — poll it with the `wait` tool. Timeout or abort still kills the whole group. Each job's log is capped at 50MB (emptied, with a notice line, when exceeded). At most 10 background jobs run at once; a call that would start an 11th fails with an error listing the running process groups (`kill -- -<pgid>` frees a slot). Logs live in one per-process dir, `$TMPDIR/agent-bash-<pid>-*`; dirs of dead fir processes are removed on the next first bash call. Surviving jobs are killed (SIGTERM, then SIGKILL) when the fir process exits or before `/reexec`.
+
 ## Remote hosts (`remote` extension)
 
 The builtin `remote` extension gives the agent six tools for working over ssh, so remote work never needs hand-written ssh one-liners inside `Bash`:

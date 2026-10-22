@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- `bash` tool (agent v0.3.0): background jobs (`cmd &`, `nohup cmd &`) now survive the call instead of being killed with the process group; the result reports their pids and log file. fir kills them when it exits or before `/reexec`. Logs are capped at 50MB, at most 10 jobs run at once, and logs live in a per-process dir whose stale siblings are cleaned up.
+
 ## [1.36.1] - 2026-10-21
 
 ### Fixed

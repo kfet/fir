@@ -1323,6 +1323,9 @@ func (m *InteractiveMode) ReexecIfRequested() {
 		os.Exit(1)
 	}
 
+	// Exec drops the bash tool's background-job registry; kill the jobs
+	// now so they cannot outlive any session that could still reap them.
+	tools.KillBackgroundJobs()
 	reexec.Exec(m.reexecBinary, m.reexecArgs)
 	// Exec never returns on success. If we get here, it failed.
 	fmt.Fprintf(os.Stderr, "reexec failed: exec %s\n", m.reexecBinary)
