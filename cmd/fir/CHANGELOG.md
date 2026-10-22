@@ -9,6 +9,9 @@
 ### Added
 - **Thinking-off advisor fallback:** the default advisor chain appends one non-adaptive reasoning model (Opus 4.x / Sonnet, effort `off`) when every flagship reasons adaptively, so a redacted-reasoning failure has a candidate that can really run with thinking off. Explicit chains can add one as the last entry.
 - **Every advisor/delegate attempt failure is logged to the doctor log** as an `advisor_failure` record with a `kind` (redacted, empty, overloaded, tool_calls_only, …), including failures a later candidate recovered from; `doctor_summary` counts them by kind.
+### Changed
+
+- **bash background jobs use an in-memory pipe and a job id** (agent v0.4.0). Temp log files are gone. A call that leaves processes running returns `[background job <id>: …]`. `bash job=<id>` reads the job's status and new output (1MB ring), `job=<id>, kill=true` stops it, and `jobs=true` lists jobs. Jobs are still killed when the session ends. A/B-tested against a separate `jobs` tool, which got less use.
 
 ## [1.36.2] - 2026-10-22
 
