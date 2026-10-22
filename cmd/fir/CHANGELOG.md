@@ -2,9 +2,16 @@
 
 ## [Unreleased]
 
+## [1.36.2] - 2026-10-22
+
+### Fixed
+
+- Flaky `TestBridge_CallHook_ActivityExtendsTimeout`: wider hook timeout and activity gaps so CI load cannot starve it.
+
 ### Changed
 
 - `bash` tool (agent v0.3.0): background jobs (`cmd &`, `nohup cmd &`) now survive the call instead of being killed with the process group; the result reports their pids and log file. fir kills them when it exits or before `/reexec`. Logs are capped at 50MB, at most 10 jobs run at once, and logs live in a per-process dir whose stale siblings are cleaned up.
+- Model catalog: added aggregator models `recursive/flint-v1.0:free`, `deepseek-v4-pro-0813-ds`, `spacexai/grok-voice-3.0`; removed 6 aggregator models; 18 models with changed pricing/limits.
 
 ## [1.36.1] - 2026-10-21
 

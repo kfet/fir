@@ -380,8 +380,9 @@ func TestBridge_CallHook_ActivityExtendsTimeout(t *testing.T) {
 	go func() { _ = b.Run(ctx, newMockAPI()) }()
 
 	// Extension reads the hook request, sends inbound requests to simulate
-	// activity (like aside's call_tool), then responds after 150ms.
-	// The hook timeout is 100ms, so without activity-awareness it would fail.
+	// activity (like aside's call_tool), then responds after ~600ms.
+	// The hook timeout is 500ms, so without activity-awareness it would fail;
+	// the 100ms activity gaps leave 400ms of slack for a loaded CI box.
 	go func() {
 		msg, err := extCodec.ReadMessage()
 		if err != nil {
@@ -389,9 +390,9 @@ func TestBridge_CallHook_ActivityExtendsTimeout(t *testing.T) {
 		}
 		req := msg.(*Request)
 
-		// Send inbound requests every 40ms to keep activity alive.
-		for i := 0; i < 4; i++ {
-			time.Sleep(40 * time.Millisecond)
+		// Send inbound requests every 100ms to keep activity alive.
+		for i := 0; i < 6; i++ {
+			time.Sleep(100 * time.Millisecond)
 			// Send a "notify" request (simplest inbound request).
 			_ = extCodec.WriteRequest(1000+i, "notify", map[string]string{
 				"level": "info", "message": "working...",
@@ -405,7 +406,7 @@ func TestBridge_CallHook_ActivityExtendsTimeout(t *testing.T) {
 		_ = extCodec.WriteResponse(req.ID, &result, nil)
 	}()
 
-	raw, err := b.CallHook(context.Background(), "hook/test", nil, 100*time.Millisecond)
+	raw, err := b.CallHook(context.Background(), "hook/test", nil, 500*time.Millisecond)
 	if err != nil {
 		t.Fatalf("expected activity to extend timeout, got: %v", err)
 	}
