@@ -248,6 +248,25 @@ class TestDoctor(unittest.TestCase):
         self.assertEqual(found[0]["pinSource"], "overlay")
         self.assertIn("No failures", doctor._failure_summary())
 
+    def test_summary_counts_advisor_failures_by_kind(self):
+        for kind in ("redacted_reasoning_only", "redacted_reasoning_only", "tool_calls_only"):
+            doctor._append_record(
+                {
+                    "type": "advisor_failure",
+                    "kind": kind,
+                    "end_time": time.time(),
+                    "tool_errors": [{"tool": "aside", "error_text": kind}],
+                }
+            )
+        result = doctor._failure_summary()
+        self.assertIn("Advisor failures: 3", result)
+        self.assertIn("redacted_reasoning_only: 2", result)
+        self.assertIn("tool_calls_only: 1", result)
+        # Attempt records are not failed sessions.
+        self.assertNotIn("Total failed sessions", result)
+        found = json.loads(doctor.doctor_query({"tool_name": "aside"}, self.ctx))
+        self.assertEqual(len(found), 3)
+
 
 if __name__ == "__main__":
     unittest.main()

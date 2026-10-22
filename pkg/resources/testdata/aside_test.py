@@ -12,6 +12,7 @@ Exercises:
 import json
 import os
 import sys
+import tempfile
 import unittest
 from unittest import mock
 
@@ -226,7 +227,10 @@ class TestRunAside(unittest.TestCase):
         self.assertEqual(result["content"][0]["text"], "the answer is 42")
         ctx.call_tool.assert_not_called()
         ctx.side_query.assert_called_once_with(
-            "what is the meaning of life?", model=None, provider=None, effort=None
+            "what is the meaning of life?" + self.mod._NO_TOOLS_INSTRUCTION,
+            model=None,
+            provider=None,
+            effort=None,
         )
 
     def test_empty_instructions_returns_error(self):
@@ -3123,11 +3127,10 @@ class TestRedactedThinkingRouting(unittest.TestCase):
         self.assertIn("2 attempt(s)", text)
         self.assertIn("REDACTED REASONING ONLY", text)
         self.assertIn("really did run with reasoning disabled", text)
-        # Why another model is unlikely to help.
-        self.assertIn("content policy", text)
-        self.assertIn("advancing is unlikely to help", text)
-        # What the CALLING agent should do about it.
-        self.assertIn("rephrase the question", text)
+        # States the failure mode, claims no unproven cause.
+        self.assertIn("cause is not established", text)
+        self.assertNotIn("content policy", text)
+        self.assertNotIn("rephrase", text)
         # The per-candidate block summaries are kept as evidence.
         self.assertIn("thinking(th=0,sig=940)", text)
         self.assertIn("anthropic/claude-fable-5", text)
@@ -3185,7 +3188,8 @@ class TestRedactedThinkingRouting(unittest.TestCase):
         ctx = self._ctx(sq)
         result = mod._run_aside([], "q", ctx)
         self.assertTrue(result["is_error"])
-        self.assertIn("rephrase the question", result["content"][0]["text"])
+        self.assertIn("cause is not established", result["content"][0]["text"])
+        self.assertNotIn("rephrase", result["content"][0]["text"])
         self.assertEqual(calls, [(None, None), (None, "off")])
 
     def test_executor_reasoning_off_answer_is_labelled(self):
@@ -4255,10 +4259,6 @@ class TestAgenticToolDescriptions(unittest.TestCase):
         self.assertIn("present in this session", mod._aside_tool_description())
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 # ---------------------------------------------------------------------------
 # Advisor modes: self vs strong
 # ---------------------------------------------------------------------------
@@ -4577,3 +4577,184 @@ class TestStrongFallback(_ModeBase):
             self.assertEqual(props["mode"]["enum"], ["auto", "self", "strong"])
             self.assertIn("refs", props)
             self.assertIn("high_stakes", props)
+
+
+# ---------------------------------------------------------------------------
+# Advisor failure modes (2026-10 fixes)
+# ---------------------------------------------------------------------------
+
+_INVOKE_ONLY = (
+    'Let me check.\n<function_calls>\n<invoke name="read">\n'
+    '<parameter name="path">a.go</parameter>\n</invoke>\n'
+    '<invoke name="rename_topic"><parameter name="t">x</parameter></invoke>\n'
+    "</function_calls>"
+)
+
+
+class TestAdvisorFailureModes(unittest.TestCase):
+    def setUp(self):
+        self.mod = _load_aside()
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        prev = list(fir_ext.config_dirs)
+        fir_ext.config_dirs = [self._tmp.name]
+        self.addCleanup(lambda: setattr(fir_ext, "config_dirs", prev))
+        self.mod._read_existing_config = lambda: None
+        self.mod._ADVISOR = list(_RETRY_CHAIN)
+
+    def _records(self):
+        path = os.path.join(self._tmp.name, "doctor.jsonl")
+        if not os.path.exists(path):
+            return []
+        with open(path) as f:
+            return [json.loads(ln) for ln in f if ln.strip()]
+
+    def _ctx(self, sq):
+        ctx = _blocking_ctx()
+        ctx.side_query = mock.MagicMock(side_effect=sq)
+        ctx.available_models = mock.MagicMock(return_value=_RETRY_AVAILABLE)
+        return ctx
+
+    def test_escalation_question_says_no_tools(self):
+        seen = []
+
+        def sq(question, model=None, provider=None, effort=None):
+            seen.append(question)
+            return "fine"
+
+        res = self.mod._run_aside([], "q", self._ctx(sq), escalate=True, mode="self")
+        self.assertFalse(res["is_error"])
+        self.assertTrue(seen[0].endswith("Answer in text. You cannot call tools."))
+
+    def test_text_invoke_markup_is_tool_only(self):
+        f = self.mod._is_tool_call_only
+        self.assertTrue(f(_INVOKE_ONLY, [{"type": "text", "len": len(_INVOKE_ONLY)}]))
+        self.assertTrue(f('<invoke name="read"></invoke>', None))
+        self.assertTrue(f('<invoke name="read"><parameter name="p">x', None))  # unterminated
+        prose = "A real answer. " * 20
+        self.assertFalse(f(prose + _INVOKE_ONLY, None))
+        # Quoted markup in a real answer is kept verbatim.
+        self.assertEqual(self.mod._strip_tool_markers(prose + _INVOKE_ONLY), prose + _INVOKE_ONLY)
+
+    def test_invoke_text_never_returned_and_recorded(self):
+        calls = []
+
+        def sq(question, model=None, provider=None, effort=None):
+            calls.append(model)
+            return _INVOKE_ONLY if model == "claude-fable-5" else "opus answer"
+
+        res = self.mod._run_aside([], "q", self._ctx(sq), escalate=True, mode="self")
+        self.assertFalse(res["is_error"], res)
+        text = res["content"][0]["text"]
+        self.assertIn("opus answer", text)
+        self.assertNotIn("<invoke", text)
+        # Probe + one retry on fable, then the chain advances.
+        self.assertEqual(calls, ["claude-fable-5", "claude-fable-5", "claude-opus-4-8"])
+        kinds = [r["kind"] for r in self._records()]
+        self.assertEqual(kinds, ["tool_calls_only", "tool_calls_only"])
+        self.assertTrue(all(r["tool_errors"][0]["tool"] == "aside" for r in self._records()))
+
+    def test_tool_only_everywhere_is_an_error(self):
+        res = self.mod._run_aside(
+            [], "q", self._ctx(lambda *a, **k: _INVOKE_ONLY), escalate=True, mode="self"
+        )
+        self.assertTrue(res["is_error"])
+        self.assertNotIn("rename_topic", res["content"][0]["text"])
+        self.assertIn("tool calls only", res["content"][0]["text"])
+
+    def test_recovered_failures_are_recorded(self):
+        def sq(question, model=None, provider=None, effort=None):
+            if model == "claude-fable-5":
+                raise RuntimeError("side-query: overloaded_error: Overloaded")
+            return "answer"
+
+        res = self.mod._run_aside([], "q", self._ctx(sq), escalate=True, mode="self")
+        self.assertFalse(res["is_error"])
+        recs = self._records()
+        self.assertEqual([r["kind"] for r in recs], ["overloaded"])
+        self.assertEqual(recs[0]["model"], "anthropic/claude-fable-5")
+
+    def test_redacted_attempts_recorded(self):
+        def sq(question, model=None, provider=None, effort=None):
+            raise RuntimeError(_REDACTED_ERR)
+
+        res = self.mod._run_aside([], "q", self._ctx(sq), escalate=True, mode="self")
+        self.assertTrue(res["is_error"])
+        kinds = {r["kind"] for r in self._records()}
+        self.assertEqual(kinds, {"redacted_reasoning_only"})
+
+    def test_no_recording_without_role_or_config_dirs(self):
+        fir_ext.config_dirs = []
+        self.mod._record_advisor_failure("advisor", "m", "error", "x")
+        self.mod._run_aside([], "q", self._ctx(lambda *a, **k: "ok"))
+        self.assertEqual(self._records(), [])
+
+    def test_no_off_diagnosis_claims_no_cause(self):
+        text = self.mod._redacted_no_off_diagnosis("advisor", 2, ["e"])
+        self.assertIn("not established", text)
+        self.assertIn("non-adaptive", text)
+        self.assertNotIn("content policy", text)
+        self.assertNotIn("rephrase", text)
+
+
+class TestThinkingOffFallback(unittest.TestCase):
+    def setUp(self):
+        self.mod = _load_aside()
+
+    def _chain(self, available):
+        ctx = _blocking_ctx()
+        ctx.available_models = mock.MagicMock(return_value=available)
+        return self.mod._dynamic_default_chain(ctx, "advisor")
+
+    def test_appends_non_adaptive_candidate(self):
+        chain = self._chain(
+            [
+                {
+                    "provider": "anthropic",
+                    "id": "claude-fable-5",
+                    "reasoning": True,
+                    "adaptive_thinking": True,
+                },
+                {
+                    "provider": "anthropic",
+                    "id": "claude-opus-5",
+                    "reasoning": True,
+                    "adaptive_thinking": True,
+                },
+                {"provider": "anthropic", "id": "claude-sonnet-4-5", "reasoning": True},
+                {"provider": "anthropic", "id": "claude-sonnet-4-6", "reasoning": True},
+                {"provider": "anthropic", "id": "claude-haiku-4-5", "reasoning": True},
+            ]
+        )
+        self.assertEqual(
+            chain[-1], {"provider": "anthropic", "model": "claude-sonnet-4-6", "effort": "off"}
+        )
+        self.assertEqual([c["model"] for c in chain[:2]], ["claude-fable-5", "claude-opus-5"])
+
+    def test_prefers_non_adaptive_flagship_beyond_chain_len(self):
+        avail = [
+            {
+                "provider": "anthropic",
+                "id": f"claude-opus-5-{i}",
+                "reasoning": True,
+                "adaptive_thinking": True,
+            }
+            for i in range(3)
+        ] + [
+            {"provider": "anthropic", "id": "claude-opus-4-1", "reasoning": True},
+            {"provider": "anthropic", "id": "claude-sonnet-4-6", "reasoning": True},
+        ]
+        self.assertEqual(self._chain(avail)[-1]["model"], "claude-opus-4-1")
+
+    def test_no_append_without_flags_or_when_already_disablable(self):
+        bare = [
+            {"provider": "anthropic", "id": "claude-opus-5"},
+            {"provider": "anthropic", "id": "claude-sonnet-4-6"},
+        ]
+        self.assertEqual([c["model"] for c in self._chain(bare)], ["claude-opus-5"])
+        ok = [{"provider": "anthropic", "id": "claude-opus-4-8", "reasoning": True}]
+        self.assertEqual(self._chain(ok), [{"provider": "anthropic", "model": "claude-opus-4-8"}])
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -77,6 +77,29 @@ do anything with the same oversized prompt or the same cancelled context.
 ``/aside-advisor`` and ``/aside-delegate`` set a single pinned model; edit
 ``aside.json`` directly to configure a chain array.
 
+Thinking-off fallback: Fable/Opus 5 reason ADAPTIVELY — their thinking is
+always on and ``effort="off"`` is downgraded to minimal effort — so a
+redacted-reasoning-only reply (a thinking block with an empty trace, no text)
+cannot be retried with thinking really off on them.  The dynamic default chain
+therefore appends one non-adaptive reasoning model (strongest Opus/Fable,
+else Sonnet) at effort ``off`` when the live registry has one.  In an explicit
+chain, add it yourself as the last entry:
+
+    {"advisor": ["anthropic/claude-fable-5:high", "anthropic/claude-opus-5",
+                 "anthropic/claude-sonnet-4-5:off"]}
+
+No-tool contract: escalation and delegation requests carry NO tool schemas,
+and the question is suffixed "Answer in text. You cannot call tools."  A reply
+that is only tool calls — native tool_use blocks, or tool-call markup written
+as text (``<invoke …>``, ``<function_calls>``) with under 120 chars of prose —
+is rejected and retried once; a repeat advances the chain and is never
+returned as an answer.
+
+Every failed advisor/delegate attempt (redacted, empty, overloaded,
+unavailable, tool-calls-only, …) is appended to the doctor log as an
+``advisor_failure`` record with a ``kind`` — including attempts a later
+candidate recovered from — so ``doctor_summary`` counts them.
+
 Advisor modes: self vs strong
 -----------------------------
 
@@ -682,9 +705,58 @@ def _dynamic_default_chain(ctx: fir_ext.Context, role: str) -> list[dict[str, st
             out.append({"provider": "anthropic", "model": mid})
             if len(out) == _DYNAMIC_ADVISOR_CHAIN_LEN:
                 break
+        tail = _thinking_off_fallback(available, out)
+        if tail is not None:
+            out.append(tail)
         return out
     except Exception:
         return None
+
+
+_SONNET_RE = re.compile(r"^claude-sonnet-(\d+)(?:-(\d{1,2}))?(?:-(\d{8}))?$")
+
+
+def _thinking_off_fallback(
+    available: list[dict], chain: list[dict[str, str]]
+) -> dict[str, str] | None:
+    """A last advisor candidate whose thinking can REALLY be turned off.
+
+    Every flagship in the default chain reasons adaptively, so a
+    redacted-reasoning-only failure there can never be retried with thinking
+    genuinely off — ``off`` is downgraded to minimal effort and the retry is
+    the same call again. Appending one non-adaptive reasoning model (strongest
+    Opus/Fable first, then Sonnet) gives the walk a real fallback for that
+    probe. Returns ``None`` when the chain already has such a candidate, or
+    the host reports no model flags (an older fir: nothing can be judged).
+    """
+    flagged = [
+        m
+        for m in available
+        if m.get("provider") == "anthropic" and m.get("id") and "reasoning" in m
+    ]
+    if not flagged:
+        return None
+    flags = {m["id"]: _can_disable_thinking(m) for m in flagged}
+    if any(flags.get(c["model"], False) for c in chain):
+        return None
+    best: tuple[tuple, str] | None = None
+    for m in flagged:
+        mid = m["id"]
+        if not m.get("reasoning") or not flags[mid] or _model_unavailable("anthropic", mid):
+            continue
+        r = _rank_flagship(mid)
+        if r is not None:
+            key: tuple = (1, *r)
+        else:
+            sm = _SONNET_RE.match(mid)
+            if sm is None:
+                continue
+            key = (0, 0, int(sm.group(1)), int(sm.group(2) or 0), 0 if sm.group(3) else 1)
+        if best is None or key > best[0]:
+            best = (key, mid)
+    if best is None:
+        return None
+    return {"provider": "anthropic", "model": best[1], "effort": _REASONING_OFF_EFFORT}
 
 
 def _resolve_role_chain_dynamic(
@@ -1036,9 +1108,11 @@ def _is_redacted_thinking_error(msg: str) -> bool:
     immediately — it retries ONCE with reasoning off, because with nothing
     left to scrub the model must emit text or a legible refusal. But the walk
     now checks whether the host HONOURED that request. If it did and the
-    response is still redacted, the input really is the remaining explanation
-    and the caller gets a diagnosis telling it to reword (which is what worked
-    in the incident). If the request was downgraded, nothing was tested: the
+    response is still redacted, the walk stops (every candidate would get the
+    same input) and reports exactly that — without naming a cause it cannot
+    see. Later telemetry (2026-10) showed the class on plain bash/fir design
+    questions, so "content policy, reword it" is not a diagnosis fir can make.
+    If the request was downgraded, nothing was tested: the
     walk advances, preferring a candidate that can genuinely disable thinking.
     """
     if not msg or not _is_empty_content_error(msg):
@@ -1058,24 +1132,20 @@ def _redacted_diagnosis(role_label: str | None, attempts: int, errs: list[str]) 
     ``advisor chain exhausted: <block summaries>`` told the calling agent
     nothing it could act on — it looked like flaky infrastructure, so the
     agent's only sane move was to give up or retry the identical call. The
-    diagnosis has to name the actual cause (the INPUT, not the route) and the
-    only available remedy (the caller rewording the question), while keeping
-    the per-candidate block summaries as evidence.
+    diagnosis states the failure mode and what was tried, claims no cause
+    it cannot observe, and keeps the per-candidate block summaries as
+    evidence.
     """
     role = role_label or "side query"
     joined = "; ".join(errs)
     return (
         f"{role} stopped after {attempts} attempt(s): every attempt returned "
-        "REDACTED REASONING ONLY — a scrubbed thinking block with no text — "
-        "including a retry that really did run with reasoning disabled, where "
-        "there was nothing to scrub. That points at the INPUT: the question "
-        "combined with the current session context is very likely tripping the "
-        "provider's content policy, which scrubs the reasoning trace and leaves "
-        "nothing to return. Another model would receive the byte-identical "
-        "transcript, so advancing is unlikely to help. "
-        "FIX (only the calling agent can do this): rephrase the question — make it "
-        "narrower and less charged, and avoid asking about sensitive material "
-        f"quoted earlier in the session — then call again. Evidence: {joined}"
+        "REDACTED REASONING ONLY — a thinking block with an empty trace and no "
+        "text — including a retry that really did run with reasoning disabled. "
+        "fir cannot see why the provider returned nothing, so the cause is not "
+        "established; the next candidate would receive the identical transcript "
+        "and question, so the walk stopped. Options: answer without the advisor, "
+        f"or retry later. Evidence: {joined}"
     )
 
 
@@ -1093,16 +1163,14 @@ def _redacted_no_off_diagnosis(role_label: str | None, attempts: int, errs: list
     joined = "; ".join(errs)
     return (
         f"{role} failed after {attempts} attempt(s): every attempt returned "
-        "REDACTED REASONING ONLY — a scrubbed thinking block with no text — and "
-        "NONE of them could be retried with reasoning genuinely disabled: every "
-        "candidate has always-on adaptive thinking, so the request to turn "
-        "reasoning off was downgraded to minimal effort and the retry re-ran the "
-        "identical call. The cause is therefore not established: it may be the "
-        "input (question plus session context tripping a content policy) or the "
-        "scrub itself. FIX: rephrase the question — narrower, less charged, "
-        "avoiding sensitive material quoted earlier — and/or configure an advisor "
-        "candidate whose thinking can be switched off (a non-adaptive model), "
-        f"which is the probe that would settle it. Evidence: {joined}"
+        "REDACTED REASONING ONLY — a thinking block with an empty trace and no "
+        "text — and NONE could be retried with reasoning genuinely disabled: every "
+        "candidate has always-on adaptive thinking, so 'off' was downgraded to "
+        "minimal effort and the retry re-ran the identical call. The cause is not "
+        "established. FIX: add an advisor candidate whose thinking can really be "
+        "turned off (a non-adaptive model, e.g. a Sonnet or Opus 4.x entry at the "
+        "end of the aside.json advisor chain), or answer without the advisor. "
+        f"Evidence: {joined}"
     )
 
 
@@ -1296,9 +1364,95 @@ _TOOL_ONLY_RETRY_SUFFIX = (
     "any tool; answer from what you already have.]"
 )
 _TOOL_ONLY_ERROR = (
-    "side query replied with tool calls only (no text) twice, even after being "
-    "told no tools are available — no answer was produced"
+    "side query replied with tool calls only, twice (tool_use blocks or tool-call "
+    "markup written as text, no answer), even after being told it cannot call "
+    "tools — reply rejected, no answer produced"
 )
+
+# Appended to every no-tool side query (escalation, delegation, plain asides).
+# The request carries NO tool schemas (agent.SimplePromptStream sends an empty
+# ToolSet), but the transcript it replays is full of tool_use blocks and the
+# system prompt describes tools — so a model can still "call" one, natively or
+# by writing the call out as text. Saying so up front is cheaper than the retry.
+_NO_TOOLS_INSTRUCTION = "\n\nAnswer in text. You cannot call tools."
+
+# Tool-call markup a model writes as TEXT when it imitates a call it cannot
+# make (observed 2026-10-22: an advisor reply that was only
+# ``<invoke name="read">`` blocks, returned to the caller as advice). The
+# optional ``prefix:`` covers namespaced variants. An unterminated block runs
+# to end of text.
+_XML_TOOL_BLOCK_RE = re.compile(
+    r"<(?:[\w-]+:)?(function_calls|invoke)\b.*?(?:</(?:[\w-]+:)?\1>|\Z)",
+    re.S,
+)
+# A reply that wrote tool-call markup and less than this much other prose
+# ("Let me read the file first.") is not an answer.
+_MIN_ANSWER_CHARS = 120
+
+
+def _is_tool_only_error(msg: str | None) -> bool:
+    """True for the terminal tool-call-only rejection (see _TOOL_ONLY_ERROR)."""
+    return bool(msg) and _TOOL_ONLY_ERROR in str(msg)
+
+
+# ---------------------------------------------------------------------------
+# Advisor failure log — every failed advisor/delegate attempt lands in the
+# doctor log, including the ones the walk recovers from (a fallback that
+# answered must not hide that the advisor failed) and tool-call-only replies
+# (which used to be returned as answers and so were never counted at all).
+# ---------------------------------------------------------------------------
+
+_DOCTOR_LOG = "doctor.jsonl"
+_ADVISOR_FAILURE_RECORD = "advisor_failure"
+
+
+def _failure_kind(err: str) -> str:
+    """Short, countable class of a side-query failure."""
+    if _is_tool_only_error(err):
+        return "tool_calls_only"
+    if _is_request_shaped_error(err):
+        return "request"
+    if _is_redacted_thinking_error(err):
+        return "redacted_reasoning_only"
+    if _is_empty_content_error(err):
+        return "empty_content"
+    low = (err or "").lower()
+    if "overloaded" in low:
+        return "overloaded"
+    if _is_model_unavailable_error(err) or _is_provider_error_without_message(err):
+        return "model_unavailable"
+    return "error"
+
+
+def _record_advisor_failure(role: str | None, label: str, kind: str, err: str) -> None:
+    """Append one ``advisor_failure`` record to the doctor log.
+
+    Shares the doctor's file and record conventions (``tool_errors`` with
+    ``tool: aside``) so ``doctor_query tool_name=aside`` and
+    ``doctor_summary`` count it. Silent outside fir (no config dirs) and
+    never raises: failure accounting must not break the call it observes.
+    """
+    if not role or not fir_ext.config_dirs:
+        return
+    try:
+        now = time.time()
+        text = f"{role} {kind} on {label}: {err}"[:1000]
+        record = {
+            "type": _ADVISOR_FAILURE_RECORD,
+            "role": role,
+            "model": label,
+            "kind": kind,
+            "error": str(err)[:1000],
+            "end_time": now,
+            "tool_errors": [{"tool": "aside", "error_text": text, "ts": now}],
+            "tool_error_count": 1,
+        }
+        log = Path(fir_ext.config_dirs[-1]) / _DOCTOR_LOG
+        log.parent.mkdir(parents=True, exist_ok=True)
+        with open(log, "a") as f:
+            f.write(json.dumps(record, separators=(",", ":")) + "\n")
+    except Exception:
+        return
 
 
 def _parse_tool_markers(text: str) -> tuple[list[dict[str, Any]], str]:
@@ -1334,8 +1488,16 @@ def _parse_tool_markers(text: str) -> tuple[list[dict[str, Any]], str]:
     return calls, "".join(residual)
 
 
+def _strip_xml_tool_markup(text: str) -> tuple[bool, str]:
+    """Remove text-imitated tool calls; returns ``(found, residual)``."""
+    residual, n = _XML_TOOL_BLOCK_RE.subn("", text or "")
+    return n > 0, residual
+
+
 def _strip_tool_markers(text: str | None) -> str | None:
-    """Drop ``[tool …]`` markers from a prose reply; unchanged when none."""
+    """Drop host-rendered ``[tool …]`` markers from a prose reply; unchanged
+    when there are none. Tool-call markup written as TEXT is left alone: a
+    real answer may quote it (e.g. a reply about fir's own tool calls)."""
     calls, residual = _parse_tool_markers(text or "")
     return residual.strip() if calls else text
 
@@ -1354,7 +1516,16 @@ def _is_tool_call_only(text: str | None, blocks: list | None) -> bool:
     ``text`` block). Without blocks (blocking flavor, older hosts) it falls
     back to the rendered text: markers present and nothing left once markers
     and ``[think]`` lines are removed.
+
+    Tool-call markup written as text (``<invoke …>`` / ``<function_calls>``)
+    is checked first and independently of blocks — to the host it is an
+    ordinary text block. It counts as tool-call-only unless at least
+    ``_MIN_ANSWER_CHARS`` of real prose surrounds it.
     """
+    found, stripped = _strip_xml_tool_markup(text or "")
+    if found:
+        residual = _strip_think_lines(_parse_tool_markers(stripped)[1])
+        return len(residual) < _MIN_ANSWER_CHARS
     if blocks:
         kinds = [(b.get("type"), b.get("len", 0)) for b in blocks if isinstance(b, dict)]
         has_tool = any(t == "toolCall" for t, _ in kinds)
@@ -1377,6 +1548,8 @@ def _run_side_query_with_card(
     effort: str | None,
     messages: list[dict[str, str]] | None = None,
     allow_tool_calls: bool = False,
+    role: str | None = None,
+    label: str = "",
 ) -> tuple[str | None, str | None, dict[str, int], str | None]:
     """Run one side query, rejecting tool-call-only replies.
 
@@ -1384,7 +1557,8 @@ def _run_side_query_with_card(
     retried ONCE with an explicit "answer in prose; no tools" instruction; a
     repeat is an error, never the marker string as an answer.
     ``allow_tool_calls=True`` (the agentic loop, which executes markers)
-    returns the raw reply untouched.
+    returns the raw reply untouched. With a ``role`` (escalation/delegation)
+    each rejected reply is recorded as an advisor failure under ``label``.
     """
     text, err, usage, resolved, blocks = _run_side_query_once(
         ctx, question, model=model, provider=provider, effort=effort, messages=messages
@@ -1393,6 +1567,9 @@ def _run_side_query_with_card(
         return text, err, usage, resolved
     if not _is_tool_call_only(text, blocks):
         return _strip_tool_markers(text), err, usage, resolved
+    _record_advisor_failure(
+        role, label, "tool_calls_only", "reply was tool calls only — retrying once"
+    )
     text, err, usage2, resolved, blocks = _run_side_query_once(
         ctx,
         question + _TOOL_ONLY_RETRY_SUFFIX,
@@ -1403,6 +1580,7 @@ def _run_side_query_with_card(
     )
     usage = _merge_usage(usage, usage2)
     if err is None and _is_tool_call_only(text, blocks):
+        _record_advisor_failure(role, label, "tool_calls_only", _TOOL_ONLY_ERROR)
         return None, _TOOL_ONLY_ERROR, usage, resolved
     return (_strip_tool_markers(text) if err is None else text), err, usage, resolved
 
@@ -1585,10 +1763,8 @@ def _run_side_query_chain(
         same-candidate retry runs with reasoning OFF. What happens next
         depends on whether the host HONOURED that:
           - honoured and still redacted → the walk STOPS with a diagnosis.
-            With nothing left to scrub, the remaining explanation is the
-            input, and every other candidate receives the byte-identical
-            transcript + question. Only the calling agent can fix it, by
-            rewording.
+            Every other candidate receives the byte-identical transcript +
+            question; the diagnosis states the failure mode, not a cause.
           - DOWNGRADED (always-on adaptive model: ``off`` becomes minimal
             effort) → the retry was the identical call twice and proved
             nothing, so the walk ADVANCES, reordering what is left to prefer a
@@ -1620,6 +1796,12 @@ def _run_side_query_chain(
       * Both the chain AND the executor fallback fail → the errors are chained
         into one message so neither is lost.
     """
+    # The request carries no tool schemas; say so, so the model answers in
+    # text instead of imitating a call (see _NO_TOOLS_INSTRUCTION). A
+    # caller-supplied thread (strong mode) carries it in its role preamble
+    # instead: the stored thread must stay byte-identical to what was sent.
+    if messages is None:
+        question = question + _NO_TOOLS_INSTRUCTION
     advisor_errs: list[str] = []
     failed_models: list[str] = []
     # True while every candidate failure so far was the transient
@@ -1718,8 +1900,13 @@ def _run_side_query_chain(
                 provider=provider,
                 effort=use_effort,
                 messages=messages,
+                role=role_label,
+                label=label,
             )
             usage = _merge_usage(usage, attempt_usage)
+            if err is not None and not _is_tool_only_error(err):
+                # Tool-call-only rejections are recorded where they are seen.
+                _record_advisor_failure(role_label, label, _failure_kind(err), err)
             if asked_off:
                 # Did the transport honour "off", or downgrade it? An
                 # always-on adaptive model gets minimal effort instead, so
@@ -1783,6 +1970,17 @@ def _run_side_query_chain(
             # Deliberately ahead of the empty-content check so a cancellation
             # can never earn a retry.
             return None, err, None, "", spent
+        if _is_tool_only_error(err):
+            # The model is alive and answered — just not in text. Another
+            # candidate may well answer; do not cool this one off.
+            ctx.put_observable(
+                walk_key,
+                slug="advance:toolonly",
+                detail=f"{label} replied with tool calls only twice — advancing\n\n{err}",
+            )
+            advisor_errs.append(f"{label}: {err}")
+            failed_models.append(cfg["model"])
+            continue
         if _is_redacted_thinking_error(err):
             advisor_errs.append(f"{label}: {err}")
             if off_downgraded:
@@ -1807,11 +2005,9 @@ def _run_side_query_chain(
                 continue
             # Redacted reasoning survived a retry that REALLY ran with
             # thinking disabled. Nothing was left to scrub and the response
-            # was still empty, so the trigger is the input, not the reasoning
-            # trace — and every remaining candidate receives the
-            # byte-identical transcript and question. Stop and hand the caller
-            # a diagnosis it can act on: rewording is the only fix, and only
-            # the calling agent can do it.
+            # was still empty. Every remaining candidate receives the
+            # byte-identical transcript and question, so stop and report the
+            # failure mode (not a guessed cause).
             ctx.put_observable(
                 walk_key,
                 slug="stop:redacted",
@@ -1887,8 +2083,8 @@ def _run_side_query_chain(
         return text, None, None, degraded_note, spent
 
     # The executor's own reasoning got scrubbed too (it can be reached with an
-    # empty/exhausted-by-other-means chain). Same verdict as in the walk: the
-    # input is the problem, so say so instead of reporting a route failure.
+    # empty/exhausted-by-other-means chain). Report the redacted failure mode
+    # rather than a generic route failure.
     if _is_redacted_thinking_error(err):
         return (
             None,
@@ -2521,7 +2717,7 @@ _STRONG_ROLE = (
     "what happened since. Your earlier advice stays in this thread. Answer the "
     "executor's question directly and decisively. Where the brief lacks "
     "something decisive, name exactly what the executor should check rather "
-    "than guessing. Be concise."
+    "than guessing. Be concise. Answer in text. You cannot call tools."
 )
 
 # The user asking for the strong advisor in their latest message. Kept narrow

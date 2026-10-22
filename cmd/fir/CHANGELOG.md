@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Fixed
+- **`aside` escalation no longer returns tool-call text as advice.** A reply that is only tool calls — native tool_use blocks or `<invoke>`/`<function_calls>` markup written as text — is rejected, retried once, then advances the chain; it is never returned as an answer. No-tool side queries now end with "Answer in text. You cannot call tools." (requests already carried no tool schemas).
+- **Redacted-reasoning advisor errors no longer blame a "content policy" or tell the caller to rephrase.** They state the failure mode and what was tried; the cause is reported as not established.
+
+### Added
+- **Thinking-off advisor fallback:** the default advisor chain appends one non-adaptive reasoning model (Opus 4.x / Sonnet, effort `off`) when every flagship reasons adaptively, so a redacted-reasoning failure has a candidate that can really run with thinking off. Explicit chains can add one as the last entry.
+- **Every advisor/delegate attempt failure is logged to the doctor log** as an `advisor_failure` record with a `kind` (redacted, empty, overloaded, tool_calls_only, …), including failures a later candidate recovered from; `doctor_summary` counts them by kind.
+
 ## [1.36.2] - 2026-10-22
 
 ### Fixed

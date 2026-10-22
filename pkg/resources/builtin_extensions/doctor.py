@@ -274,9 +274,14 @@ def doctor_summary(params: dict, ctx: fir_ext.Context) -> str:
 def _failure_summary() -> str:
     # Gate records are configuration drift, not session failures; they are
     # reported (and self-cleared) through the diagnostics section.
-    records = [r for r in _read_records(200) if r.get("type") != _GATE_RECORD]
+    all_records = [r for r in _read_records(200) if r.get("type") != _GATE_RECORD]
+    # Per-attempt advisor failures (written by the aside extension) are not
+    # failed sessions; they get their own count by kind.
+    advisor = [r for r in all_records if r.get("type") == _ADVISOR_RECORD]
+    records = [r for r in all_records if r.get("type") != _ADVISOR_RECORD]
+    advisor_text = _advisor_summary(advisor)
     if not records:
-        return "No failures recorded."
+        return advisor_text or "No failures recorded."
 
     total = len(records)
     tool_counts: dict[str, int] = {}
@@ -320,6 +325,25 @@ def _failure_summary() -> str:
         for err, count in top_errors:
             lines.append(f"  ({count}x) {err}")
 
+    if advisor_text:
+        lines.extend(["", advisor_text])
+    return "\n".join(lines)
+
+
+_ADVISOR_RECORD = "advisor_failure"
+
+
+def _advisor_summary(records: list[dict[str, Any]]) -> str:
+    """Count advisor/delegate attempt failures by kind."""
+    if not records:
+        return ""
+    kinds: dict[str, int] = {}
+    for r in records:
+        k = str(r.get("kind") or "error")
+        kinds[k] = kinds.get(k, 0) + 1
+    lines = [f"Advisor failures: {len(records)}"]
+    for k, n in sorted(kinds.items(), key=lambda x: (-x[1], x[0])):
+        lines.append(f"  {k}: {n}")
     return "\n".join(lines)
 
 
