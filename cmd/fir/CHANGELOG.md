@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.38.0] - 2026-10-22
+
 ### Fixed
 
 - `wait` and `pipe` now yield to a steer (`fir send <id> '!msg'`, deliver_as=steer): wait returns `outcome=interrupted` with a resume handle within ~1s, pipe stops between steps, and the agent sees the steer. Previously both ran to their own cap.
@@ -10,6 +12,10 @@
 ### Added
 
 - Extension bridge method `pending_steers` (Python `ctx.pending_steers()`, Go `ctx.PendingSteers()`) so long-running tools can yield to queued steers.
+
+### Changed
+
+- **Model catalog regenerated**: removed `opencode-go/longcat-2.5-preview-free`, `opencode/longcat-2.5-preview-free`; changed pricing — openrouter: z-ai/glm-5.3-flash, ~z-ai/glm-flash-latest.
 
 ## [1.37.1] - 2026-10-22
 
