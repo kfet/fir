@@ -2,8 +2,13 @@
 
 ## [Unreleased]
 
+## [1.39.0] - 2026-10-23
+
 ### Added
 - MCP server health: per-server state (ok/connecting/needs_auth/token_expired/error/disabled) with config source, last error, tool count and fix command; a core `[section=mcp]` lists only unhealthy servers so the agent never mistakes a configured-but-unauthenticated server for a missing one; `agent_introspect` gains `mcp.servers`; extensions get an `mcp_state` event; `/mcp reload <server>`; `"disabled": true` server config key
+
+### Changed
+- **Model catalog regenerated**: added `mistral/zai-glm-5-3-flash`, `opencode-go/minimax-m3.1-flash` (+5 on aggregators); removed 11 first-party models incl. older `mistral/devstral-*` and `mistral/mistral-large-2411` (+35 on aggregators); 29 models with changed pricing/limits.
 
 ## [1.38.1] - 2026-10-22
 
