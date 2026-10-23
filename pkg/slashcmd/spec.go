@@ -119,7 +119,7 @@ var Specs = []Spec{
 	{Name: "plan", Description: "Show/hide the current session plan", Modes: TUI},
 	{Name: "sections", Description: "Show the persistent extension sections fir injects"},
 	{Name: "mcp", Description: "Show MCP servers; /mcp <name> for details", Usage: "[<name>]", Subs: []Sub{
-		{Name: "reload", Description: "Reload MCP server configs"},
+		{Name: "reload", Description: "Reload MCP configs and credentials, reconnecting servers that are down: reload [<server>]"},
 		{Name: "login", Description: "Authenticate a remote MCP server: login <server>"},
 		{Name: "logout", Description: "Remove stored MCP credentials: logout <server>"},
 	}},

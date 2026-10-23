@@ -2,6 +2,7 @@ package session
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -24,6 +25,7 @@ type sectionTracker struct {
 
 	mu      sync.Mutex
 	allowed func(name string) bool
+	dynamic func() []sections.Section // core-owned sections, computed live
 	started bool
 	block   string
 	base    int // history length when the block was snapshotted
@@ -46,13 +48,30 @@ func (t *sectionTracker) setAllowed(fn func(string) bool) {
 	t.mu.Unlock()
 }
 
-// current reads the eligible sections from disk. Caller holds t.mu.
+// setDynamic installs the provider of core-owned sections. They are
+// per-session (never written to the shared sections dir) and bypass the
+// owner filter.
+func (t *sectionTracker) setDynamic(fn func() []sections.Section) {
+	t.mu.Lock()
+	t.dynamic = fn
+	t.mu.Unlock()
+}
+
+// current reads the eligible sections from disk plus the core-owned dynamic
+// sections. Caller holds t.mu.
 func (t *sectionTracker) current() []sections.Section {
-	if t.allowed == nil {
-		return nil
+	var out []sections.Section
+	if t.allowed != nil {
+		all, _ := t.store.ReadAll()
+		out = sections.Filter(all, t.allowed)
 	}
-	all, _ := t.store.ReadAll()
-	return sections.Filter(all, t.allowed)
+	if t.dynamic != nil {
+		dyn := t.dynamic()
+		// A core section name always wins over an on-disk file of that name.
+		out = slices.DeleteFunc(out, func(s sections.Section) bool { return containsSection(dyn, s.Name) })
+		out = append(out, dyn...)
+	}
+	return out
 }
 
 // ensureStarted snapshots the startup block. Caller holds t.mu.

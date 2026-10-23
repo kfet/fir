@@ -218,6 +218,19 @@ func TestMCPReload(t *testing.T) {
 	run(t, h, o, "mcp", "reload")
 	expect(t, o, "status:MCP servers reloaded.")
 
+	// Named reload reports that server's resulting state.
+	details := []mcp.ServerDetail{{Name: "ok", Status: "connected", Tools: []mcp.ToolInfo{{Name: "a"}}}, {Name: "down", Status: "error", Error: "needs login"}}
+	hn := &fakeHost{cwd: cwd, sess: &fakeSession{}, mcp: FuncMCP{
+		ReloadFn:  func(context.Context) error { return nil },
+		DetailsFn: func() []mcp.ServerDetail { return details },
+	}}
+	run(t, hn, o, "mcp", "reload ok")
+	expect(t, o, `status:MCP server "ok" reloaded: connected, 1 tools.`)
+	run(t, hn, o, "mcp", "reload down")
+	expect(t, o, `warn:MCP server "down" reloaded: error, 0 tools.`)
+	run(t, hn, o, "mcp", "reload ghost")
+	expect(t, o, `warn:MCP server "ghost" not found.`)
+
 	// A malformed project config is reported as a warning but still reloads.
 	if err := os.MkdirAll(filepath.Join(cwd, ".fir"), 0o755); err != nil {
 		t.Fatal(err)

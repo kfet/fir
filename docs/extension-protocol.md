@@ -407,6 +407,7 @@ timeout and proceeds, which is no worse than the fixed sleep this replaced.
 | `tool_execution_start` | `{"tool_call_id": "...", "tool_name": "..."}` |
 | `tool_execution_end` | `{"tool_call_id": "...", "tool_name": "...", "is_error": false}` |
 | `provider_error` | `{error_text, kind, retryable, provider?, model?, retry_after_ms?}` — emitted on `turn_end` when the turn ended with a provider/LLM error (assistant `stop_reason == error`). `kind` is one of `"rate_limit"`, `"overloaded"`, `"server"`, `"transport"`, `"terminal"`. `retryable` is true for transient classes (overloaded/rate-limit/5xx/transport) and false for terminal errors (auth/400/context-length). `retry_after_ms` is the provider-indicated delay in milliseconds when parseable, else absent. Use it to drive auto-resume/backoff. |
+| `mcp_state` | `{"servers": [{name, state, source?, error?, tools, fix?}]}` — emitted whenever any configured MCP server's health record changes (initial connect result, login required, token expired mid-session, error, recovery, reload). `state` is one of `"ok"`, `"connecting"`, `"needs_auth"`, `"token_expired"`, `"error"`, `"disabled"`; `fix` is the fir command that resolves an unhealthy state (e.g. `/mcp login slack`). The same list is in `agent.info` under `mcp.servers`. |
 
 ---
 
@@ -1152,9 +1153,18 @@ after compaction):
   "diagnostics": [
     {"code": "stale_default_model", "severity": "warning",
      "summary": "...", "remediation": "...", "file": "/abs/settings.json"}
-  ]
+  ],
+  "mcp": {"servers": [
+    {"name": "slack", "state": "needs_auth", "source": "/abs/mcp.d/slack.json",
+     "error": "...", "tools": 0, "fix": "/mcp login slack"}
+  ]}
 }
 ```
+
+`mcp.servers` lists every configured MCP server (always present, `[]` with
+none). `state` is `ok | connecting | needs_auth | token_expired | error |
+disabled`; `fix` names the fir command that resolves an unhealthy state.
+Changes are pushed as the `mcp_state` event.
 
 `diagnostics` is omitted when the configuration is healthy. It carries
 actionable configuration problems found by core — currently a settings

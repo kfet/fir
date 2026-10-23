@@ -1140,7 +1140,7 @@ func mcpArgSpec(serverNames []string) *CommandArgSpec {
 		Type:   ArgCompleteStatic,
 		Values: values,
 		SubCommands: map[string]*CommandArgSpec{
-			"reload": {Type: ArgCompleteNone},
+			"reload": serverSpec,
 			"login":  serverSpec,
 			"logout": serverSpec,
 		},

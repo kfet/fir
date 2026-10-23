@@ -419,6 +419,7 @@ class TestDemoInit(DemoTestCase):
                 "tool_execution_start",
                 "tool_execution_end",
                 "provider_error",
+                "mcp_state",
                 "hook/tool_call",
             },
         )
@@ -994,6 +995,9 @@ class TestDemoEvents(DemoTestCase):
 
     def test_provider_error_no_crash(self) -> None:
         self._assert_no_crash("provider_error")
+
+    def test_mcp_state_no_crash(self) -> None:
+        self._assert_no_crash("mcp_state")
 
 
 # ---------------------------------------------------------------------------

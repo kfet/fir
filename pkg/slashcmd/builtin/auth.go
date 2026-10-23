@@ -135,7 +135,8 @@ func Capabilities(d mcp.ServerDetail) []string {
 }
 
 // cmdMCPReload performs an MCP-only reload and reports config collisions.
-func cmdMCPReload(c *slashcmd.Ctx, _ string) {
+func cmdMCPReload(c *slashcmd.Ctx, server string) {
+	server = strings.TrimSpace(server)
 	h := host(c)
 	s := sess(c)
 	if s == nil {
@@ -156,11 +157,27 @@ func cmdMCPReload(c *slashcmd.Ctx, _ string) {
 		c.Out.Warn(fmt.Sprintf("MCP reload failed: %v", err))
 		return
 	}
+	// Reload re-reads config and credentials for every server and reconnects
+	// any that are down, so a named reload is the same operation reported
+	// for one server.
+	done := "MCP servers reloaded."
+	if server != "" {
+		d, ok := findDetail(m.Details(), server)
+		if !ok {
+			c.Out.Warn(fmt.Sprintf("MCP server %q not found.", server))
+			return
+		}
+		done = fmt.Sprintf("MCP server %q reloaded: %s, %d tools.", server, d.Status, len(d.Tools))
+		if d.Error != "" {
+			c.Out.Warn(done + "\n" + d.Error)
+			return
+		}
+	}
 	var sb strings.Builder
 	if loadErr != nil {
-		fmt.Fprintf(&sb, "MCP config warning: %v\nMCP servers reloaded.", loadErr)
+		fmt.Fprintf(&sb, "MCP config warning: %v\n%s", loadErr, done)
 	} else {
-		sb.WriteString("MCP servers reloaded.")
+		sb.WriteString(done)
 	}
 	if len(collisions) > 0 {
 		sb.WriteString("\n\nCollisions detected:")
@@ -407,4 +424,13 @@ func listChoices(title string, choices []Choice, hint string) string {
 		lines = append(lines, line)
 	}
 	return strings.Join(lines, "\n") + "\n\n" + hint
+}
+
+func findDetail(details []mcp.ServerDetail, name string) (mcp.ServerDetail, bool) {
+	for _, d := range details {
+		if d.Name == name {
+			return d, true
+		}
+	}
+	return mcp.ServerDetail{}, false
 }

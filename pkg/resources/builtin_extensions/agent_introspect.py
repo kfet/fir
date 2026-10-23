@@ -17,7 +17,10 @@ import fir_ext
     description=(
         "Return a JSON snapshot of the current agent runtime: version, mode, "
         "session, model, context usage, tools (via counts), thinking level, "
-        "message counts, token totals, and cost."
+        "message counts, token totals, cost, and mcp.servers[] — every "
+        "configured MCP server with state (ok/connecting/needs_auth/"
+        "token_expired/error/disabled), config source, error, tool count "
+        "and the fir command that fixes it."
     ),
     parameters={"type": "object", "properties": {}},
 )

@@ -159,6 +159,24 @@ type serverAuth struct {
 	gen       uint64
 	challenge challengeInfo
 	pending   *AuthRequiredError
+	// lastRequired is the most recent unresolved login requirement. Unlike
+	// pending (consumed by the dial path) it persists until a successful dial
+	// or login, so health reporting sees mid-session refresh failures too.
+	lastRequired atomic.Pointer[AuthRequiredError]
+	// notify, when set, is called (in its own goroutine) whenever
+	// lastRequired changes. Set once by Manager.serverAuthFor before use.
+	notify func()
+}
+
+// reasonNoCredential is the AuthRequiredError reason for a server that has
+// never been logged in to (as opposed to an expired or revoked credential).
+const reasonNoCredential = "no stored credential"
+
+// setLastRequired updates lastRequired and fires notify on change.
+func (sa *serverAuth) setLastRequired(err *AuthRequiredError) {
+	if old := sa.lastRequired.Swap(err); old != err && sa.notify != nil {
+		go sa.notify()
+	}
 }
 
 // newServerAuth builds the auth state for a server. It returns nil when the
@@ -364,7 +382,7 @@ func (sa *serverAuth) accessToken(ctx context.Context) (string, uint64, error) {
 	if sa.cred == nil || sa.cred.Token == nil {
 		if sa.mode() == AuthModeOAuth {
 			// Forced OAuth: do not leak an unauthenticated request.
-			return "", sa.gen, sa.requireLoginLocked("no stored credential", nil)
+			return "", sa.gen, sa.requireLoginLocked(reasonNoCredential, nil)
 		}
 		return "", sa.gen, nil
 	}
@@ -433,7 +451,7 @@ func (sa *serverAuth) handleUnauthorized(ctx context.Context, headers []string, 
 		return "", sa.requireLoginLocked("stored credentials are no longer valid", err)
 	}
 
-	reason := "no stored credential"
+	reason := reasonNoCredential
 	if sa.cred != nil {
 		reason = "stored access token was rejected and no refresh token is available"
 		sa.dropCredentialLocked()
@@ -455,6 +473,7 @@ func (sa *serverAuth) dropCredentialLocked() {
 func (sa *serverAuth) requireLoginLocked(reason string, cause error) *AuthRequiredError {
 	err := &AuthRequiredError{Server: sa.name, Resource: sa.resource, Reason: reason, Cause: cause}
 	sa.pending = err
+	sa.setLastRequired(err)
 	return err
 }
 
@@ -485,6 +504,7 @@ func (sa *serverAuth) clearPending() {
 	sa.mu.lock()
 	defer sa.mu.unlock()
 	sa.pending = nil
+	sa.setLastRequired(nil)
 }
 
 // invalidate drops the lazily-loaded credential so the next use re-reads it
@@ -662,6 +682,7 @@ func (sa *serverAuth) Login(ctx context.Context, ui pinoauth.LoginCallbacks) err
 	if err != nil {
 		return fmt.Errorf("MCP server %q login: %w", sa.name, err)
 	}
+	sa.setLastRequired(nil)
 	return nil
 }
 

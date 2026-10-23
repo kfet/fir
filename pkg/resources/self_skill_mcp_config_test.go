@@ -67,6 +67,8 @@ const (
 // the MCP region without being fir config keys.
 var nonConfigKeys = map[string]bool{
 	"scopes_supported": true, // RFC 8414 authorization-server metadata field
+	"agent_introspect": true, // tool name (exposes mcp.servers health)
+	"mcp_state":        true, // extension event name (MCP health changes)
 }
 
 // jsonKeyLike matches backtick-quoted lower_snake_case identifiers. The

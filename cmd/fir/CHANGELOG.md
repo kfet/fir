@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Added
+- MCP server health: per-server state (ok/connecting/needs_auth/token_expired/error/disabled) with config source, last error, tool count and fix command; a core `[section=mcp]` lists only unhealthy servers so the agent never mistakes a configured-but-unauthenticated server for a missing one; `agent_introspect` gains `mcp.servers`; extensions get an `mcp_state` event; `/mcp reload <server>`; `"disabled": true` server config key
+
 ## [1.38.1] - 2026-10-22
 
 ### Changed

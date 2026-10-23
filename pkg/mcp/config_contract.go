@@ -40,6 +40,9 @@ type ServerConfig struct {
 	// entry already performs the full MCP OAuth discovery + login dance when the
 	// server answers 401. See AuthConfig.
 	Auth *AuthConfig `json:"auth,omitempty"`
+	// Disabled keeps the server configured but never connects to it. fir
+	// still reports it (state "disabled") so the agent knows it exists.
+	Disabled bool `json:"disabled,omitempty"`
 }
 
 // AuthMode selects the authentication strategy for an HTTP MCP server.

@@ -26,9 +26,9 @@ Inbound surface demonstrated (fir → extension):
   • hook/tool_call: blocks tools whose name starts with "blocked:"
   • Auth provider "demo-oauth": the {clientVersion.<key>} header-template
     placeholder and ctx.client_version()
-  • All eleven events: session_start, session_shutdown, agent_start, agent_end,
+  • All twelve events: session_start, session_shutdown, agent_start, agent_end,
     turn_start, turn_end, message_start, message_end,
-    tool_execution_start, tool_execution_end, provider_error
+    tool_execution_start, tool_execution_end, provider_error, mcp_state
 
 Type annotations:
   Handlers in this file use the TypedDicts re-exported from fir_ext
@@ -503,6 +503,19 @@ def on_provider_error(params: fir_ext.ProviderErrorParams, ctx: fir_ext.Context)
         f"model={params.get('provider', '')}/{params.get('model', '')}",
         file=sys.stderr,
     )
+
+
+@fir_ext.on("mcp_state")
+def on_mcp_state(params: fir_ext.MCPStateParams, ctx: fir_ext.Context) -> None:
+    # Emitted whenever a configured MCP server's health changes (login
+    # needed, token expired mid-session, error, recovery). Each server
+    # carries the fir command that fixes an unhealthy state.
+    for srv in (params or {}).get("servers", []):
+        if srv.get("state") not in ("ok", "connecting"):
+            print(
+                f"demo: mcp {srv.get('name', '')} {srv.get('state', '')} -> {srv.get('fix', '')}",
+                file=sys.stderr,
+            )
 
 
 # ---------------------------------------------------------------------------

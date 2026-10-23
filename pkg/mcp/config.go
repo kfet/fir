@@ -333,6 +333,18 @@ func LoadDefaultConfigs(projectDir string) (*ConfigFile, error) {
 // the rest still load. The returned config is never nil; err (if non-nil)
 // joins one error per skipped file and callers should surface it as a warning.
 func LoadDefaultConfigsReport(projectDir string) (*ConfigFile, []Collision, error) {
+	cfg, collisions, _, err := loadDefaultConfigs(projectDir)
+	return cfg, collisions, err
+}
+
+// ConfigSources maps each server name from the default config files to the
+// file that defined its winning entry (see LoadDefaultConfigsReport).
+func ConfigSources(projectDir string) map[string]string {
+	_, _, src, _ := loadDefaultConfigs(projectDir)
+	return src
+}
+
+func loadDefaultConfigs(projectDir string) (*ConfigFile, []Collision, map[string]string, error) {
 	configDir := defaultConfigDir()
 	var errs []error
 	userPath, projectPath := DefaultConfigPaths(projectDir)
@@ -414,6 +426,7 @@ func LoadDefaultConfigsReport(projectDir string) (*ConfigFile, []Collision, erro
 		}
 		for name, cfg := range projCfg.MCPServers {
 			merged.MCPServers[name] = cfg
+			serverSource[name] = projectPath
 		}
 	}
 
@@ -423,5 +436,5 @@ func LoadDefaultConfigsReport(projectDir string) (*ConfigFile, []Collision, erro
 		collisions = append(collisions, *c)
 	}
 
-	return merged, collisions, errors.Join(errs...)
+	return merged, collisions, serverSource, errors.Join(errs...)
 }

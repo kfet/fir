@@ -2,6 +2,7 @@ package extension
 
 import (
 	"github.com/kfet/agent"
+	"github.com/kfet/fir/pkg/mcp"
 	"github.com/kfet/fir/pkg/session"
 )
 
@@ -403,4 +404,10 @@ type ToolCallHookPayload struct {
 type CommandHookPayload struct {
 	Name string   `json:"name"`
 	Args []string `json:"args"`
+}
+
+// MCPStatePayload is the params shape of the "mcp_state" event, emitted
+// whenever any configured MCP server's health record changes.
+type MCPStatePayload struct {
+	Servers []mcp.ServerHealth `json:"servers"`
 }

@@ -770,9 +770,9 @@ func TestGetSuggestions_MCPServerNameArgs(t *testing.T) {
 		t.Fatalf("expected 2 filtered server suggestions, got %v", s)
 	}
 
-	// `/mcp reload ` takes no arguments.
-	if s := p.GetSuggestions([]string{"/mcp reload "}, 0, 12); s != nil {
-		t.Fatalf("expected no suggestions after /mcp reload, got %v", s)
+	// `/mcp reload ` optionally takes a server name.
+	if s := p.GetSuggestions([]string{"/mcp reload "}, 0, 12); s == nil || len(s.Items) != 3 {
+		t.Fatalf("expected 3 server suggestions after /mcp reload, got %v", s)
 	}
 }
 

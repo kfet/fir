@@ -10,6 +10,7 @@ import (
 	"github.com/kfet/ai/ratelimit"
 	"github.com/kfet/fir/pkg/ai"
 	firlog "github.com/kfet/fir/pkg/log"
+	"github.com/kfet/fir/pkg/mcp"
 	"github.com/kfet/fir/pkg/session"
 )
 
@@ -283,6 +284,12 @@ func Setup(asession *session.AgentSession, opts SetupOptions) (*SetupResult, err
 		},
 	}
 	asession.SetHooks(hooks)
+
+	// Forward MCP server health changes (auth lost/regained, errors,
+	// recovery) to extensions.
+	asession.SubscribeMCPHealth(func(h []mcp.ServerHealth) {
+		mgr.EmitEvent("mcp_state", MCPStatePayload{Servers: h})
+	})
 
 	// Forward agent session events to extensions.
 	asession.Subscribe(func(event session.AgentSessionEvent) {

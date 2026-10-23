@@ -229,9 +229,11 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 func StartMCPManager(ctx context.Context, sess *AgentSession, configs map[string]mcp.ServerConfig) *mcp.Manager {
 	if len(configs) == 0 {
 		sess.mcpAdvertised(nil) // forget the saved tools of every server
+		sess.attachMCP(nil)
 		return nil
 	}
 	mgr := mcp.NewManager(configs, false)
+	sess.attachMCP(mgr)
 
 	// OAuth credentials for HTTP MCP servers live in the same auth.json as
 	// provider credentials. The Manager has no login-UI hook by construction:
@@ -384,6 +386,7 @@ func ReloadMCP(ctx context.Context, mgrPtr **mcp.Manager, sess *AgentSession, cw
 	}
 	if *mgrPtr != nil {
 		_, err := (*mgrPtr).Reload(ctx, servers)
+		sess.attachMCP(*mgrPtr) // refresh config sources
 		return err
 	}
 	// No manager yet — create one (nil if still no servers). Re-read

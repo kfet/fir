@@ -19,6 +19,7 @@ import (
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/config"
 	firlog "github.com/kfet/fir/pkg/log"
+	"github.com/kfet/fir/pkg/mcp"
 	"github.com/kfet/fir/pkg/models"
 	"github.com/kfet/fir/pkg/resources"
 	"github.com/kfet/fir/pkg/sections"
@@ -286,6 +287,7 @@ type AgentSession struct {
 
 	// sections tracks persistent extension sections (never nil).
 	sections *sectionTracker
+	mcp      mcpHealthState
 
 	// mcpConfigured records whether MCP servers are configured for this
 	// session (see AgentSessionOptions.MCPConfigured).
@@ -339,6 +341,7 @@ func NewAgentSession(opts AgentSessionOptions) *AgentSession {
 	if s.sections == nil {
 		s.sections = newSectionTracker(sections.Default())
 	}
+	s.sections.setDynamic(s.mcpSections)
 
 	// Subscribe to agent events for internal handling
 	s.unsubAgent = s.Agent.Subscribe(s.handleAgentEvent)
@@ -2264,6 +2267,13 @@ type Introspection struct {
 	// doctor extension renders; adding a check here is additive and needs no
 	// new bridge method.
 	Diagnostics []Diagnostic `json:"diagnostics,omitempty"`
+	// MCP lists every configured MCP server with its health state
+	// (ok | connecting | needs_auth | token_expired | error | disabled),
+	// config source, last error, tool count and the fir command that fixes
+	// an unhealthy state.
+	MCP struct {
+		Servers []mcp.ServerHealth `json:"servers"`
+	} `json:"mcp"`
 }
 
 // Diagnostic is one actionable configuration problem. Every field except File
@@ -2290,6 +2300,10 @@ func (s *AgentSession) Introspect(opts IntrospectOptions) Introspection {
 	out.Version = opts.Version
 	out.Mode = opts.Mode
 	out.Cwd = s.cwd
+	out.MCP.Servers = s.MCPHealth()
+	if out.MCP.Servers == nil {
+		out.MCP.Servers = []mcp.ServerHealth{}
+	}
 
 	stats := s.GetSessionStats()
 	out.Session.ID = stats.SessionID

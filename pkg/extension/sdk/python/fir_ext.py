@@ -326,6 +326,11 @@ stops the process.  Write an ordinary event handler and ignore the distinction.
 |                         |   provider error. kind: rate_limit/overloaded/ |
 |                         |   server/transport/terminal. See docs.         |
 +-------------------------+------------------------------------------------+
+| ``mcp_state``           | ``{"servers": [{name, state, source?, error?,  |
+|                         |   tools, fix?}, ...]}`` — any MCP server's     |
+|                         |   health changed. state: ok/connecting/        |
+|                         |   needs_auth/token_expired/error/disabled.     |
++-------------------------+------------------------------------------------+
 
 -------------------------------------------------------------------------------
 CLIENT VERSION PLACEHOLDERS  (auth providers)
@@ -1115,6 +1120,23 @@ class ProviderErrorParams(TypedDict, total=False):
     retry_after_ms: int
 
 
+class MCPServerHealth(TypedDict, total=False):
+    """One entry of ``mcp_state.servers`` (and ``agent.info`` ``mcp.servers``)."""
+
+    name: str
+    state: str  # ok | connecting | needs_auth | token_expired | error | disabled
+    source: str  # config file that defined the server
+    error: str
+    tools: int
+    fix: str  # fir command that resolves an unhealthy state
+
+
+class MCPStateParams(TypedDict, total=False):
+    """Params for ``mcp_state``."""
+
+    servers: list[MCPServerHealth]
+
+
 # -- bridge method (extension → fir) params/results -------------------------
 #
 # Param shapes — used as the body of ctx._call() — and result shapes — what
@@ -1462,6 +1484,8 @@ __all__ = [
     "InitParams",
     "InitResult",
     "ListToolsItem",
+    "MCPServerHealth",
+    "MCPStateParams",
     "MessageEndCost",
     "MessageEndParams",
     "MessageEndUsage",

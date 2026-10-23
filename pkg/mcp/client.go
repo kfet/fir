@@ -220,6 +220,9 @@ type Manager struct {
 	// on this WG so callers know all loops have observed cancellation
 	// before Close returns.
 	reconnectWG sync.WaitGroup
+
+	// health tracks per-server health for Health / SetOnHealthChanged.
+	health healthWatch
 }
 
 // NewManager creates a new Manager for the given server configs.
@@ -318,6 +321,8 @@ func (m *Manager) LoginServer(ctx context.Context, name string, ui pinoauth.Logi
 		connecting = e.connecting
 	})
 	switch {
+	case cfg.Disabled:
+		// Credential stored; a disabled server is never dialled.
 	case connected || connecting:
 		// Nothing to do; the next request picks up the new token.
 	case hasLoop:
@@ -443,6 +448,7 @@ func (m *Manager) serverAuthFor(name string, cfg ServerConfig) (*serverAuth, err
 	if err != nil || sa == nil {
 		return nil, err
 	}
+	sa.notify = m.checkHealth
 	m.auths.Store(name, sa)
 	return sa, nil
 }
@@ -523,6 +529,7 @@ func (m *Manager) emitServerEvent(ev ServerEvent) {
 		firlog.Warn("mcp server-event buffer full; dropping event",
 			"kind", ev.Kind, "server", ev.Name)
 	}
+	m.checkHealth()
 }
 
 // loadOnResourceUpdated returns the current onResourceUpdated callback, or nil.
@@ -580,10 +587,14 @@ func (m *Manager) allTools() []agent.AgentTool {
 
 // ToolsByServer returns every configured server keyed by name. A connected
 // server maps to its tools (a non-nil slice, empty if it has none); one that
-// is connecting, failed or disconnected maps to nil.
+// is connecting, failed or disconnected maps to nil. A disabled server is
+// omitted, so its saved tools are not advertised either.
 func (m *Manager) ToolsByServer() map[string][]agent.AgentTool {
 	out := make(map[string][]agent.AgentTool)
 	m.forEachServer(func(name string, e *serverEntry) bool {
+		if e.config.Disabled {
+			return true
+		}
 		out[name] = nil
 		if e.session != nil {
 			out[name] = append(make([]agent.AgentTool, 0, len(e.tools)), e.tools...)
@@ -671,6 +682,9 @@ func (m *Manager) Start(ctx context.Context) {
 	m.started.Store(true)
 	firlog.Info("mcp starting", "servers", m.configsLen())
 	m.forEachServer(func(name string, e *serverEntry) bool {
+		if e.config.Disabled {
+			return true
+		}
 		e.connecting = true
 		cfg := e.config
 		m.startWG.Add(1)
@@ -1034,15 +1048,20 @@ func (m *Manager) tryReconnect(ctx context.Context, name string) bool {
 			return false
 		}
 		var surface bool
+		var authErr *AuthRequiredError
+		needsLogin := errors.As(err, &authErr)
 		m.withEntry(name, func(e *serverEntry) {
 			e.attempt++
-			if e.attempt >= reconnectErrSurfaceThreshold {
+			// A login requirement will not fix itself by retrying: surface
+			// it at once so health reporting names the fix.
+			if needsLogin || e.attempt >= reconnectErrSurfaceThreshold {
 				e.err = fmt.Errorf("reconnect: %w", err)
 				surface = true
 			}
 		})
 		if surface {
 			firlog.Warn("MCP reconnect failing", "server", name, "attempt", attempt+1, "err", err)
+			m.checkHealth()
 		} else {
 			firlog.Debug("MCP reconnect failed", "server", name, "attempt", attempt+1, "err", err)
 		}
@@ -1420,6 +1439,9 @@ func (m *Manager) Reload(ctx context.Context, newConfigs map[string]ServerConfig
 
 	// Start new/changed servers.
 	for name, cfg := range toStart {
+		if cfg.Disabled {
+			continue
+		}
 		_, err := m.startServer(ctx, name, cfg)
 		if err != nil {
 			m.withEntry(name, func(e *serverEntry) {
@@ -1438,6 +1460,7 @@ func (m *Manager) Reload(ctx context.Context, newConfigs map[string]ServerConfig
 	if notify := m.loadOnToolsChanged(); notify != nil {
 		notify(m.allTools())
 	}
+	m.checkHealth()
 
 	return m.allTools(), nil
 }
@@ -1743,7 +1766,9 @@ func (m *Manager) Details() []ServerDetail {
 			Name:   name,
 			Config: e.config,
 		}
-		if e.err != nil {
+		if e.config.Disabled {
+			d.Status = "disabled"
+		} else if e.err != nil {
 			d.Status = "error"
 			d.Error = e.err.Error()
 		} else if e.session != nil {
