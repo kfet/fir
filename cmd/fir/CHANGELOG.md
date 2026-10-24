@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Changed
+- `provider-usage` extension is enabled by default again (TUI + ACP). The April concern (always-on API polling) is fixed: one fetch per 5 min shared across all sessions, and every failure (not just 429) now backs off exponentially. It also re-reads the OAuth token each cycle, so it no longer goes 401 after fir refreshes the token. Disable with `{"enabled": false}` in `provider-usage.json`
+
+### Added
+- `provider-usage` health alerts, announced exactly once: usage data stale beyond `stale_after_seconds` (default 600) or token rejected (401/403); Anthropic OAuth token left unrefreshed past `refresh_grace_minutes` (refresh token failing); optional `login_max_age_days` login-age warning. Warning levels configurable via `warn_levels` (default `[80, 95]`)
+
 ## [1.39.0] - 2026-10-23
 
 ### Added

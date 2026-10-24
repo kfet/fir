@@ -384,5 +384,156 @@ class EarlyWarningTest(unittest.TestCase):
         ctx.send_message.assert_not_called()
 
 
+class HealthTest(unittest.TestCase):
+    def setUp(self):
+        self.mod, _ = _load()
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = pathlib.Path(self.tmp.name)
+        mock.patch.object(self.mod, "_cache_dir", return_value=self.dir).start()
+        self.addCleanup(mock.patch.stopall)
+        mock.patch.object(self.mod.time, "time", return_value=NOW).start()
+
+    def _fail(self, exc):
+        def boom():
+            raise exc
+
+        return self.mod._cached_fetch("anthropic-usage", boom)
+
+    def _cache(self):
+        return json.loads((self.dir / "anthropic-usage-cache.json").read_text())
+
+    def test_generic_failure_backs_off_instead_of_refetching(self):
+        calls = []
+
+        def boom():
+            calls.append(1)
+            raise OSError("down")
+
+        self.mod._cached_fetch("anthropic-usage", boom)
+        self.mod._cached_fetch("anthropic-usage", boom)
+        self.assertEqual(len(calls), 1)
+        self.assertGreater(self._cache()["backoff_until"], NOW)
+
+    def test_fresh_failure_is_not_stale_yet(self):
+        self._fail(OSError("down"))
+        self.assertEqual(self.mod._usage_health(self._cache(), NOW + 60), [])
+
+    def test_long_failure_is_stale_and_announced_once(self):
+        self._fail(OSError("down"))
+        alerts = self.mod._usage_health(self._cache(), NOW + 3600)
+        self.assertEqual(len(alerts), 1)
+        self.assertIn("stale", alerts[0][2])
+        a, b = mock.Mock(), mock.Mock()
+        self.mod._publish_warnings(a, None, "acp", alerts)
+        self.mod._publish_warnings(b, None, "acp", alerts)
+        a.send_message.assert_called_once()
+        b.send_message.assert_not_called()
+        self.assertIn("stale", b.set_section.call_args[0][0])
+
+    def test_alert_text_stable_over_time(self):
+        self._fail(OSError("down"))
+        c = self._cache()
+
+        def strip(alerts):
+            return [(a[0], a[2]) for a in alerts]
+
+        h = self.mod._usage_health
+        self.assertEqual(strip(h(c, NOW + 3600)), strip(h(c, NOW + 7200)))
+        cred = {"access": "x", "refresh": "y", "expires": (NOW - 3600) * 1000}
+        ch = self.mod._credential_health
+        self.assertEqual(strip(ch(cred, NOW)), strip(ch(cred, NOW + 600)))
+
+    def test_new_token_bypasses_auth_backoff(self):
+        calls = []
+
+        def boom():
+            calls.append(1)
+            raise self.mod.AuthError("401")
+
+        self.mod._cached_fetch("anthropic-usage", boom, key="old")
+        self.mod._cached_fetch("anthropic-usage", boom, key="old")
+        self.assertEqual(len(calls), 1)
+        r = self.mod._cached_fetch("anthropic-usage", lambda: {"ok": 1}, key="new")
+        self.assertEqual(r.data, {"ok": 1})
+
+    def test_generic_failure_status_is_not_rate_limited(self):
+        self.mod._cached_fetch("anthropic-usage", lambda: {"five_hour": {"utilization": 1}})
+        with mock.patch.object(self.mod.time, "time", return_value=NOW + 400):
+            r = self._fail(OSError("down"))
+            self.assertNotIn("rate-limited", r.status_suffix())
+            r = self.mod._cached_fetch("anthropic-usage", dict)
+            self.assertNotIn("rate-limited", r.status_suffix())
+        with mock.patch.object(self.mod.time, "time", return_value=NOW + 10000):
+            r = self._fail(self.mod.AuthError("401"))
+        self.assertIn("auth", r.status_suffix())
+
+    def test_transient_error_does_not_mask_auth_error(self):
+        self._fail(self.mod.AuthError("401"))
+        with mock.patch.object(self.mod.time, "time", return_value=NOW + 10000):
+            self._fail(OSError("down"))
+        alerts = self.mod._usage_health(self._cache(), NOW + 10001)
+        self.assertIn("401", alerts[0][2])
+
+    def test_auth_error_alerts_immediately(self):
+        self._fail(self.mod.AuthError("401"))
+        alerts = self.mod._usage_health(self._cache(), NOW + 1)
+        self.assertEqual(len(alerts), 1)
+        self.assertIn("401", alerts[0][2])
+
+    def test_success_clears_episode(self):
+        self._fail(OSError("down"))
+        with mock.patch.object(self.mod.time, "time", return_value=NOW + 4000):
+            self.mod._cached_fetch("anthropic-usage", lambda: {"five_hour": {}})
+        self.assertEqual(self.mod._usage_health(self._cache(), NOW + 4001), [])
+
+    def test_http_401_raises_auth_error(self):
+        import email.message
+        import urllib.error
+
+        err = urllib.error.HTTPError("u", 401, "no", email.message.Message(), None)
+        with mock.patch.object(self.mod.urllib.request, "urlopen", side_effect=err):
+            with self.assertRaises(self.mod.AuthError):
+                self.mod._http_get_json("https://example.com", {})
+
+    def test_unrefreshed_token_warns(self):
+        cred = {"access": "x", "refresh": "y", "expires": (NOW - 3600) * 1000}
+        alerts = self.mod._credential_health(cred, NOW)
+        self.assertEqual(len(alerts), 1)
+        self.assertIn("refresh token", alerts[0][2])
+
+    def test_recently_expired_token_within_grace_is_quiet(self):
+        cred = {"access": "x", "refresh": "y", "expires": (NOW - 60) * 1000}
+        self.assertEqual(self.mod._credential_health(cred, NOW), [])
+
+    def test_login_age_off_by_default_and_configurable(self):
+        cred = {
+            "access": "x",
+            "refresh": "y",
+            "expires": (NOW + 40 * 86400) * 1000,
+            "extra": {"accountId": "acct"},
+        }
+        self.assertEqual(self.mod._credential_health(cred, NOW), [])
+        self.mod._apply_config({"login_max_age_days": 30})
+        self.assertEqual(self.mod._credential_health(cred, NOW), [])
+        alerts = self.mod._credential_health(cred, NOW + 31 * 86400)
+        self.assertEqual(len(alerts), 1)
+        self.assertIn("30 days", alerts[0][2])
+
+    def test_config_thresholds_and_disable(self):
+        self.assertTrue(self.mod._apply_config({"warn_levels": [50, 90]}))
+        self.assertEqual(self.mod.WARN_LEVELS, (50.0, 90.0))
+        ctx = mock.Mock()
+        data = {"five_hour": {"utilization": 55.0, "resets_at": _iso(3600)}}
+        self.mod._publish_warnings(ctx, data, "acp")
+        ctx.send_message.assert_called_once()
+        self.assertFalse(self.mod._apply_config({"enabled": False}))
+        self.assertTrue(self.mod._apply_config(None))
+
+    def test_frontmatter_is_builtin(self):
+        src = pathlib.Path(self.mod.__file__).read_text()
+        self.assertIn("# builtin: true", src)
+
+
 if __name__ == "__main__":
     unittest.main()

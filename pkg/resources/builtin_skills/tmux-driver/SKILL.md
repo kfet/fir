@@ -136,7 +136,7 @@ Why each one:
 |---|---|
 | `auto-namer` | Renames the session with an LLM-generated title. tmux-driver routes by the window name you chose (`tm-send proj:worker-1 ...`); a rename breaks that routing. |
 | `notify` | Desktop notifications for every agent_end — background tmux agents generate them constantly and they're just noise. |
-| `provider-usage` | TUI-only status-bar widget. In a tmux pane driven by `tm-send`/`tm-capture` there's no status bar to render into and its 5-minute API polls add pure overhead. |
+| `provider-usage` | Status-bar widget plus usage/auth warnings. The parent agent already gets the warnings; workers reading the shared cache only duplicate them. |
 | `tmuxspinner` | Mutates the tmux window title to show a spinner — directly fights the fixed `NAME:WINDOW` naming convention tmux-driver relies on for routing. |
 
 See the `self` skill's "Extensions" section for the full `-d` /

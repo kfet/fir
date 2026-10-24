@@ -69,7 +69,14 @@ cat >/dev/null
 	deadline := time.Now().Add(20 * time.Second)
 	var got []store.Card
 	for time.Now().Before(deadline) {
-		got = st.List()
+		// Other builtins started by the manager may publish cards of
+		// their own; only this extension's card is under test.
+		got = got[:0]
+		for _, c := range st.List() {
+			if c.Source == "synth-card" {
+				got = append(got, c)
+			}
+		}
 		if len(got) > 0 {
 			break
 		}
@@ -101,7 +108,11 @@ cat >/dev/null
 			if uerr := json.Unmarshal(data, &disk); uerr != nil {
 				t.Fatalf("decode cards file: %v\nraw:\n%s", uerr, data)
 			}
-			if len(disk) == 1 && disk[0].Source == "synth-card" {
+			found := false
+			for _, c := range disk {
+				found = found || c.Source == "synth-card"
+			}
+			if found {
 				break
 			}
 		} else if !os.IsNotExist(err) {

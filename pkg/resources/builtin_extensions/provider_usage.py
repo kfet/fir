@@ -2,7 +2,7 @@
 # ---
 # name: provider-usage
 # description: Show LLM provider usage/limits in the status bar (Anthropic, Poe)
-# builtin: false
+# builtin: true
 # modes: tui, acp
 # ---
 """Periodically fetch Anthropic and/or Poe usage stats and display in the status bar.
@@ -20,12 +20,30 @@ shared cache dir makes "exactly once" hold across every concurrent session.
 Also listens for ``provider_error`` and, when a Claude subscription (OAuth)
 account hits a usage limit, notifies the user when that limit resets — reusing
 the cache this extension already maintains, so the error path stays local.
+
+Health alerts (same section + exactly-once announce): fresh usage could not
+be fetched for longer than ``stale_after_seconds`` (default 2x the cache TTL)
+or the endpoint rejected the token (401/403); the stored Anthropic OAuth
+access token is past expiry by more than ``refresh_grace_minutes`` (fir's
+refresh is failing — log in again); the login is older than
+``login_max_age_days`` (off by default; the clock starts when a login is first
+observed — delete ``anthropic-login-seen.json`` after re-login to reset it).
+
+Load is bounded: one HTTP fetch per TTL across *all* sessions (flock'd shared
+cache), and every failure — 429, auth, network — backs off exponentially, so
+a broken endpoint is never re-polled by each session every cycle.
+
+Config: ``provider-usage.json`` in any fir config dir, e.g.
+``{"enabled": true, "warn_levels": [80, 95], "stale_after_seconds": 600,
+"refresh_grace_minutes": 15, "login_max_age_days": 0}``. ``"enabled": false``
+turns the extension off entirely.
 """
 
 from __future__ import annotations
 
 import contextlib
 import fcntl
+import hashlib
 import json
 import os
 import random
@@ -71,12 +89,20 @@ _RESET_ISO_RE = re.compile(r'"resets?_?[aA]t"\s*:\s*"(\d{4}-\d{2}-\d{2}[Tt][^"]+
 # -- early warning ------------------------------------------------------------
 # Utilization levels (percent) that each announce once per window reset.
 WARN_LEVELS = (80.0, 95.0)
+STALE_AFTER_SECONDS = 2 * CACHE_SECONDS_TTL
+REFRESH_GRACE_MINUTES = 15.0
+LOGIN_MAX_AGE_DAYS = 0.0  # 0 disables the login-age warning
+ALERT_MEMORY = 7 * 24 * 3600  # how long an announced health alert stays claimed
 
 # Cache dict keys
 _K_FETCHED_AT = "fetched_at"
 _K_BACKOFF_UNTIL = "backoff_until"
 _K_BACKOFF_DURATION = "backoff_duration"
 _K_DATA = "data"
+_K_FIRST_FAILURE = "first_failure_at"
+_K_AUTH_ERROR = "auth_error"
+_K_AUTH_KEY = "auth_key"
+_K_RATE_LIMITED = "rate_limited"
 
 _stop_event = threading.Event()
 _thread: threading.Thread | None = None
@@ -104,19 +130,33 @@ def _config_search_paths() -> list[str]:
 class CacheResult:
     """Wraps cached data with staleness / rate-limit metadata."""
 
-    __slots__ = ("data", "is_rate_limited", "is_stale")
+    __slots__ = ("data", "is_auth_error", "is_rate_limited", "is_stale")
 
-    def __init__(self, data: dict | None, *, is_stale: bool = False, is_rate_limited: bool = False):
+    def __init__(
+        self,
+        data: dict | None,
+        *,
+        is_stale: bool = False,
+        is_rate_limited: bool = False,
+        is_auth_error: bool = False,
+    ):
         self.data = data
         self.is_stale = is_stale
         self.is_rate_limited = is_rate_limited
+        self.is_auth_error = is_auth_error
 
     def status_suffix(self) -> str:
+        if self.is_auth_error:
+            return " ⚠ auth"
         if self.is_rate_limited:
             return " ⚠ rate-limited"
         if self.is_stale:
             return " ⚠ stale"
         return ""
+
+
+class AuthError(Exception):
+    """Raised when the API rejects the credential (HTTP 401/403)."""
 
 
 class RateLimitedError(Exception):
@@ -165,6 +205,8 @@ def _http_get_json(url: str, headers: dict) -> dict:
             with contextlib.suppress(Exception):
                 retry_after = float(e.headers.get("Retry-After", ""))
             raise RateLimitedError(retry_after) from e
+        if e.code in (401, 403):
+            raise AuthError(str(e.code)) from e
         raise
 
 
@@ -173,8 +215,12 @@ def _http_get_json(url: str, headers: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def _cached_fetch(cache_name: str, fetch_fn) -> CacheResult:
-    """Fetch data using a shared file cache with flock to prevent thundering herd."""
+def _cached_fetch(cache_name: str, fetch_fn, key: str = "") -> CacheResult:
+    """Fetch data using a shared file cache with flock to prevent thundering herd.
+
+    ``key`` fingerprints the credential: an auth-error backoff recorded for one
+    credential does not hold back a fetch with a new one (e.g. after re-login).
+    """
     cd = _cache_dir()
     cache_file = cd / f"{cache_name}-cache.json"
     lock_file = cd / f"{cache_name}-cache.lock"
@@ -184,6 +230,8 @@ def _cached_fetch(cache_name: str, fetch_fn) -> CacheResult:
         return (time.time() - cached.get(_K_FETCHED_AT, 0)) < CACHE_SECONDS_TTL
 
     def _is_backed_off(cached: dict) -> bool:
+        if cached.get(_K_AUTH_ERROR) and cached.get(_K_AUTH_KEY, "") != key:
+            return False
         return time.time() < cached.get(_K_BACKOFF_UNTIL, 0)
 
     def _effective_backoff_duration(cached: dict) -> float:
@@ -207,7 +255,12 @@ def _cached_fetch(cache_name: str, fetch_fn) -> CacheResult:
         if not cached:
             return None
         if _is_backed_off(cached):
-            return CacheResult(cached.get(_K_DATA), is_stale=True, is_rate_limited=True)
+            return CacheResult(
+                cached.get(_K_DATA),
+                is_stale=True,
+                is_rate_limited=bool(cached.get(_K_RATE_LIMITED)),
+                is_auth_error=bool(cached.get(_K_AUTH_ERROR)),
+            )
         if _is_fresh(cached) and cached.get(_K_DATA) is not None:
             return CacheResult(cached[_K_DATA])
         return None
@@ -232,19 +285,32 @@ def _cached_fetch(cache_name: str, fetch_fn) -> CacheResult:
 
                 try:
                     data = fetch_fn()
-                except RateLimitedError as e:
+                except Exception as e:
+                    # Every failure backs off, not just 429: otherwise a dead
+                    # token or endpoint is re-polled by every session each cycle.
                     prev = _effective_backoff_duration(cached or {})
                     base = min(max(prev * 2, BACKOFF_BASE), BACKOFF_MAX)
-                    if e.retry_after and e.retry_after > 0:
-                        base = max(base, e.retry_after)
+                    retry_after = getattr(e, "retry_after", None)
+                    if retry_after and retry_after > 0:
+                        base = max(base, retry_after)
                     jitter = random.uniform(0, base * 0.5)  # noqa: S311
+                    now = time.time()
                     obj = dict(cached or {})
-                    obj[_K_BACKOFF_UNTIL] = time.time() + base + jitter
+                    obj[_K_BACKOFF_UNTIL] = now + base + jitter
                     obj[_K_BACKOFF_DURATION] = base  # store base, not jittered
+                    obj.setdefault(_K_FIRST_FAILURE, now)
+                    obj[_K_RATE_LIMITED] = isinstance(e, RateLimitedError)
+                    # A later transient error must not mask a still-bad token.
+                    if isinstance(e, AuthError):
+                        obj[_K_AUTH_ERROR] = True
+                        obj[_K_AUTH_KEY] = key
                     _write_cache(obj)
-                    return CacheResult(obj.get(_K_DATA), is_stale=True, is_rate_limited=True)
-                except Exception:
-                    return _stale_result(cached)
+                    return CacheResult(
+                        obj.get(_K_DATA),
+                        is_stale=obj.get(_K_DATA) is not None,
+                        is_rate_limited=bool(obj[_K_RATE_LIMITED]),
+                        is_auth_error=bool(obj.get(_K_AUTH_ERROR)),
+                    )
 
                 _write_cache({_K_FETCHED_AT: time.time(), _K_DATA: data})
                 return CacheResult(data)
@@ -321,6 +387,7 @@ def _fetch_anthropic_usage(token: str) -> str | None:
 
 
 def _fetch_anthropic_result(token: str) -> CacheResult:
+    key = hashlib.sha256(token.encode()).hexdigest()[:16]
     return _cached_fetch(
         "anthropic-usage",
         lambda: _http_get_json(
@@ -331,11 +398,14 @@ def _fetch_anthropic_result(token: str) -> CacheResult:
                 "Accept": "application/json",
             },
         ),
+        key,
     )
 
 
 def _format_anthropic_status(result: CacheResult) -> str | None:
     if not result.data:
+        if result.is_auth_error:
+            return "☁ (auth error)"
         return "☁ (rate-limited)" if result.is_rate_limited else None
 
     local_tz = datetime.now().astimezone().tzinfo
@@ -554,10 +624,11 @@ def _warning_text(
 
 
 def _claim_crossings(
-    warnings: list[tuple[str, float, float, str]], now: float
-) -> list[tuple[str, float, float, str]]:
-    """Atomically record (window, level, reset) crossings not yet announced by
-    any session; return the warnings that this caller must announce."""
+    warnings: list[tuple[str, float, float, str]], now: float, alerts: list | None = None
+) -> list:
+    """Atomically record (window, level, reset) crossings and health-alert
+    tags not yet announced by any session; return the warnings and alerts
+    this caller must announce."""
     cd = _cache_dir()
     cd.mkdir(parents=True, exist_ok=True)
     state_file = cd / "anthropic-usage-warned.json"
@@ -575,6 +646,10 @@ def _claim_crossings(
                 if tag not in state:
                     state[tag] = reset
                     fresh.append(w)
+            for a in alerts or []:
+                if a[0] not in state:
+                    state[a[0]] = a[1]
+                    fresh.append(a)
             tmp_fd, tmp_path = tempfile.mkstemp(dir=str(cd), suffix=".tmp")
             try:
                 with os.fdopen(tmp_fd, "w") as f:
@@ -596,27 +671,39 @@ def _active_mode(ctx: fir_ext.Context) -> str:
         return ""
 
 
-def _publish_warnings(ctx: fir_ext.Context, data: dict | None, mode: str) -> None:
+def _publish_warnings(
+    ctx: fir_ext.Context, data: dict | None, mode: str, alerts: list | None = None
+) -> None:
     now = time.time()
     warnings = _usage_warnings(data, now)
-    if not warnings:
+    alerts = alerts or []
+    if not warnings and not alerts:
         with contextlib.suppress(Exception):
             ctx.clear_section()
         return
-    text = _warning_text(warnings, now)
     # No countdown in the section: a ticking string would re-inject it on
-    # every turn and bust the prompt cache.
+    # every turn and bust the prompt cache. Alert texts are keyed by episode
+    # tag, so their wording only changes when the episode does.
+    section = [a[2] for a in alerts]
+    if warnings:
+        section.insert(0, _warning_text(warnings, now, countdown=False))
     with contextlib.suppress(Exception):
         ctx.set_section(
-            _warning_text(warnings, now, countdown=False)
+            " ".join(section)
             + " Tell the user about this when relevant; do not start heavy work without saying so."
         )
     try:
-        fresh = _claim_crossings(warnings, now)
+        fresh = _claim_crossings(warnings, now, alerts)
     except Exception:
         return
     if not fresh:
         return
+    texts = []
+    fresh_w = [w for w in fresh if len(w) == 4]
+    if fresh_w:
+        texts.append(_warning_text(fresh_w, now))
+    texts += [a[2] for a in fresh if len(a) == 3]
+    text = " ".join(texts)
     with contextlib.suppress(Exception):
         if mode == "acp":
             ctx.send_message(
@@ -628,6 +715,138 @@ def _publish_warnings(ctx: fir_ext.Context, data: dict | None, mode: str) -> Non
             )
         else:
             ctx.notify(text, level="warning")
+
+
+# ---------------------------------------------------------------------------
+# Health alerts: stale data, rejected / unrefreshable credential, login age
+# ---------------------------------------------------------------------------
+
+
+def _usage_health(cached: dict | None, now: float) -> list:
+    """Alerts for usage data that is stale or whose token was rejected."""
+    cached = cached or {}
+    fetched = float(cached.get(_K_FETCHED_AT) or 0)
+    first_fail = float(cached.get(_K_FIRST_FAILURE) or 0)
+    if not first_fail:
+        return []  # last attempt succeeded (or never attempted)
+    episode = int(fetched or first_fail)
+    expiry = now + ALERT_MEMORY
+    if cached.get(_K_AUTH_ERROR):
+        return [
+            (
+                f"auth:{episode}",
+                expiry,
+                "Anthropic usage endpoint rejected the OAuth token (401/403) — "
+                "usage numbers are not live; log in again (/login anthropic).",
+            )
+        ]
+    since = fetched or first_fail
+    if now - since <= STALE_AFTER_SECONDS:
+        return []
+    stamp = _fmt_clock(since)
+    what = f"last good data from {stamp}" if fetched else f"no data since {stamp}"
+    return [
+        (
+            f"stale:{episode}",
+            expiry,
+            f"Anthropic usage data is stale ({what}) — usage warnings may be wrong.",
+        )
+    ]
+
+
+def _fmt_clock(epoch: float) -> str:
+    """Local wall-clock instant; stable over time, unlike a countdown."""
+    return datetime.fromtimestamp(epoch).astimezone().strftime("%a %b %d %H:%M %Z")
+
+
+def _login_state_file() -> Path:
+    return _cache_dir() / "anthropic-login-seen.json"
+
+
+def _credential_health(cred: dict | None, now: float) -> list:
+    """Alerts about the stored Anthropic OAuth credential itself."""
+    if not isinstance(cred, dict) or not cred.get("refresh"):
+        return []
+    out = []
+    expires = cred.get("expires")
+    if isinstance(expires, (int, float)) and expires > 0:
+        exp = expires / 1000 if expires > 1e11 else float(expires)
+        if now - exp > REFRESH_GRACE_MINUTES * 60:
+            out.append(
+                (
+                    f"refresh:{int(exp)}",
+                    now + ALERT_MEMORY,
+                    f"Anthropic OAuth token expired at {_fmt_clock(exp)} and was not refreshed — "
+                    "the refresh token is likely failing; log in again (/login anthropic).",
+                )
+            )
+    if LOGIN_MAX_AGE_DAYS > 0:
+        extra = cred.get("extra")
+        if not isinstance(extra, dict):
+            extra = {}
+        account = str(extra.get("accountId") or extra.get("email") or "default")
+        first = _login_first_seen(account, now)
+        if now - first > LOGIN_MAX_AGE_DAYS * 86400:
+            out.append(
+                (
+                    f"login-age:{account}:{int(first)}",
+                    now + ALERT_MEMORY,
+                    f"Anthropic OAuth login is over {LOGIN_MAX_AGE_DAYS:g} days old — "
+                    "consider logging in again (/login anthropic) before it lapses.",
+                )
+            )
+    return out
+
+
+def _login_first_seen(account: str, now: float) -> float:
+    """First time this account's login was observed (the login-age clock).
+
+    The refresh token rotates on every refresh, so it cannot mark a login;
+    delete ``anthropic-login-seen.json`` after logging in again to reset it.
+    """
+    seen_file = _login_state_file()
+    try:
+        seen_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(seen_file.with_suffix(".lock"), "w") as lf:
+            fcntl.flock(lf, fcntl.LOCK_EX)
+            seen = _read_json(seen_file) or {}
+            first = seen.get(account)
+            if not isinstance(first, (int, float)):
+                seen[account] = first = now
+                seen_file.write_text(json.dumps(seen))
+            return float(first)
+    except OSError:
+        return now
+
+
+def _anthropic_credential() -> dict | None:
+    for base in _config_search_paths():
+        auth = _read_json(Path(f"{base}/auth.json").expanduser())
+        cred = auth.get("anthropic") if isinstance(auth, dict) else None
+        if isinstance(cred, dict) and cred.get("access"):
+            return cred
+    return None
+
+
+def _apply_config(cfg: dict | None) -> bool:
+    """Apply ``provider-usage.json`` overrides; return False when disabled."""
+    global WARN_LEVELS, STALE_AFTER_SECONDS, REFRESH_GRACE_MINUTES, LOGIN_MAX_AGE_DAYS
+    if not isinstance(cfg, dict):
+        return True
+    levels = cfg.get("warn_levels")
+    if isinstance(levels, list):
+        vals = sorted(float(v) for v in levels if isinstance(v, (int, float)) and 0 < v <= 100)
+        if vals:
+            WARN_LEVELS = tuple(vals)
+    for key, name in (
+        ("stale_after_seconds", "STALE_AFTER_SECONDS"),
+        ("refresh_grace_minutes", "REFRESH_GRACE_MINUTES"),
+        ("login_max_age_days", "LOGIN_MAX_AGE_DAYS"),
+    ):
+        v = cfg.get(key)
+        if isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0:
+            globals()[name] = float(v)
+    return cfg.get("enabled", True) is not False
 
 
 # ---------------------------------------------------------------------------
@@ -645,12 +864,18 @@ def _refresh_loop(ctx: fir_ext.Context) -> None:
 
     mode = _active_mode(ctx)
     while not _stop_event.is_set():
+        # Re-read every cycle: fir refreshes the access token every few
+        # hours, and a token captured once at startup would go 401 forever.
+        anthropic_token = _find_anthropic_token() or anthropic_token
         parts = []
         if anthropic_token:
             result = _fetch_anthropic_result(anthropic_token)
             if s := _format_anthropic_status(result):
                 parts.append(s)
-            _publish_warnings(ctx, result.data, mode)
+            alerts = _usage_health(
+                _read_json(_cache_dir() / "anthropic-usage-cache.json"), time.time()
+            ) + _credential_health(_anthropic_credential(), time.time())
+            _publish_warnings(ctx, result.data, mode, alerts)
         if poe_key and (s := _fetch_poe_usage(poe_key)):
             parts.append(s)
         if parts:
@@ -663,6 +888,8 @@ def _refresh_loop(ctx: fir_ext.Context) -> None:
 def on_session_start(params: dict, ctx: fir_ext.Context) -> None:
     global _thread
     if _thread is not None and _thread.is_alive():
+        return
+    if not _apply_config(fir_ext.load_config("provider-usage.json")):
         return
     _stop_event.clear()
     _thread = threading.Thread(target=_refresh_loop, args=(ctx,), daemon=True)

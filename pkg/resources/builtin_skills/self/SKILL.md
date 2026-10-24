@@ -61,6 +61,7 @@ All settings fields are optional. Project settings are merged on top of global s
 |------|---------|
 | `settings.json` | Default provider, model, thinking, compaction, retry, terminal, image settings |
 | `models.json` | Add or override models per provider (custom ids, base URLs, headers, costs, sweScore) |
+| `provider-usage.json` | Usage/auth warnings: `enabled`, `warn_levels` ([80,95]), `stale_after_seconds` (600), `refresh_grace_minutes` (15), `login_max_age_days` (0=off) |
 | `keybindings.json` | Custom key bindings for interactive mode |
 | `sessions/` | Saved conversation sessions |
 | `skills/` | User-level skills (shared across projects) |
