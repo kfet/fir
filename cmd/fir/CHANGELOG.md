@@ -2,9 +2,15 @@
 
 ## [Unreleased]
 
+## [1.40.1] - 2026-10-24
+
 ### Fixed
 
 - wt skill: spawn each agent in its own detached tmux session so an unrelated `tmux kill-session` cannot kill it.
+
+### Changed
+
+- Model catalog regenerated: pricing/limits changed for openrouter: deepseek/deepseek-v4-pro, ~z-ai/glm-flash-latest.
 
 ## [1.40.0] - 2026-10-24
 
