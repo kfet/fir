@@ -1,7 +1,7 @@
 ---
 builtin: true
 name: wt
-description: Spawn a fresh fir agent in a new tmux window on its own git worktree. Use whenever the user wants the work — or the conversation about the work — to happen over there, not here. If the user points at this skill, or has directly loaded it in the context, that alone is the cue — spawn, don't inline.
+description: Spawn a fresh fir agent in its own tmux session on its own git worktree. Use whenever the user wants the work — or the conversation about the work — to happen over there, not here. If the user points at this skill, or has directly loaded it in the context, that alone is the cue — spawn, don't inline.
 override: true
 ---
 
@@ -49,6 +49,12 @@ Delegate all to a new agent!
    them and do not summarise them away. A count of reaped windows is
    not a substitute: the `REPORT` lines are the part a human needs.
    If there are none, say so in one short sentence.
+
+   Each agent runs in its own detached tmux session (named after the
+   feature, with `.`/`:` replaced by `_`), so killing some other tmux
+   session never takes it down. The script prints `session:`, `window:`
+   and an `attach:` command (`tmux switch-client -t …` inside tmux,
+   `tmux attach -t …` outside). It fails if that session already exists.
 
 5. Report back what the spawn script returned, then every `REPORT` line.
 

@@ -15,6 +15,10 @@
 #   REPORT  agent alive, worktree gone  -> a bug; a human must look
 #   REPORT  agent alive, idle > N days  -> maybe stuck; never auto-kill
 #
+# spawn.sh gives each agent its own session; panes are listed across all
+# sessions, and killing a session's last window removes the session too.
+# Window ids are server-unique, so the self-skip holds across sessions.
+#
 # A live agent is NEVER killed automatically. The caller's own window is
 # always skipped.
 #

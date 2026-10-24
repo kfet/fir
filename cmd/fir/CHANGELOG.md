@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- wt skill: spawn each agent in its own detached tmux session so an unrelated `tmux kill-session` cannot kill it.
+
 ## [1.40.0] - 2026-10-24
 
 ### Changed
