@@ -2,8 +2,11 @@
 
 ## [Unreleased]
 
+## [1.40.2] - 2026-10-25
+
 ### Changed
 
+- Model catalog regenerated: added `opencode-go/gemini-4-argon`, `opencode-go/iceman-contributor-free` (+1 on aggregators); removed `opencode-go/gemini-4-argon-contributor` (+2 on aggregators); 6 models with changed pricing/limits.
 - Docs/skills: extension discovery requires the exec bit + frontmatter; disable an extension with `chmod -x` (renaming the file still loads it).
 
 ## [1.40.1] - 2026-10-24
