@@ -23,7 +23,7 @@ What this exercises:
   timestamp (not bookmark-call order).
 * card slug/detail updated on every bookmark call (key="bookmarks",
   slug "<N> pinned", detail starts with the file path).
-* ``self_handoff`` appends the bookmarks-file pointer line to its
+* ``self_handoff`` appends the bookmark-note digest and pointer line to its
   ``prepend_context`` when bookmarks exist; doesn't when empty.
 
 Each test gets its own ``Bridge`` plus a temporary "transcript" file
@@ -601,6 +601,10 @@ class TestSelfHandoffPointer(_BookmarkBase):
         body_idx = prepend.index("Working on the bookmark continuity")
         ptr_idx = prepend.index("Bookmarks from parent session")
         self.assertLess(body_idx, ptr_idx)
+        # Note digest is inlined, after the briefing, before the pointer.
+        note_idx = prepend.index("(UTC) skip auth")
+        self.assertLess(body_idx, note_idx)
+        self.assertLess(note_idx, prepend.index(self.bookmarks_path))
 
     def test_empty_bookmarks_file_does_not_trigger_pointer(self) -> None:
         # Touch an empty bookmarks file; the pointer logic must check

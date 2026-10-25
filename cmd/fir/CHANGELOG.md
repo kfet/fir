@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- `self_handoff` inlines a digest of the parent's bookmark notes (UTC time + note, last 40) into the briefing footer, not just the file path; `bookmark` tool description now says so.
+
 ## [1.40.2] - 2026-10-25
 
 ### Changed

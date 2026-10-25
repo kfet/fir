@@ -550,6 +550,58 @@ class TestSelfHandoffPointerStub(unittest.TestCase):
             prepend.index("Bookmarks from parent session"),
         )
 
+    def test_digest_lists_notes_in_utc_chronological(self) -> None:
+        _write_jsonl(
+            self.bookmarks,
+            [
+                {
+                    "id": "a",
+                    "timestamp": "2025-05-22T14:05:00+03:00",
+                    "_bookmark_note": "first  note",
+                },
+                {
+                    "id": "b",
+                    "timestamp": "2025-05-22T12:30:00.123456789Z",
+                    "_bookmark_note": "second note",
+                },
+            ],
+        )
+        ctx = _StubContext(session_file=self.session_file, session_id="sid")
+        self.handoff.self_handoff({"content": self._good()}, ctx)
+        prepend = ctx.restart_calls[0][1]
+        self.assertIn("- 11:05 (UTC) first note", prepend)
+        self.assertIn("- 12:30 (UTC) second note", prepend)
+        self.assertLess(prepend.index("first note"), prepend.index("second note"))
+        self.assertLess(prepend.index("Self-Handoff"), prepend.index("first note"))
+        self.assertLess(prepend.index("second note"), prepend.index(self.bookmarks))
+        self.assertNotIn("earlier)", prepend)
+
+    def test_digest_caps_with_earlier_count(self) -> None:
+        cap = self.handoff._DIGEST_MAX_BOOKMARKS
+        _write_jsonl(
+            self.bookmarks,
+            [
+                {
+                    "id": f"e{i:03d}",
+                    "timestamp": f"2025-05-22T10:{i % 60:02d}:00Z",
+                    "_bookmark_note": f"note-{i:03d}",
+                }
+                for i in range(cap + 5)
+            ],
+        )
+        ctx = _StubContext(session_file=self.session_file, session_id="sid")
+        self.handoff.self_handoff({"content": self._good()}, ctx)
+        prepend = ctx.restart_calls[0][1]
+        self.assertIn("(+5 earlier)", prepend)
+        self.assertNotIn("note-004", prepend)
+        self.assertIn("note-005", prepend)
+        self.assertIn(f"note-{cap + 4:03d}", prepend)
+
+    def test_hhmm_utc_fallback(self) -> None:
+        self.assertEqual(self.handoff._hhmm_utc("2025-05-22T14:00:00"), "14:00")
+        self.assertEqual(self.handoff._hhmm_utc("garbage"), "")
+        self.assertEqual(self.handoff._hhmm_utc("2025-05-22T23:30:00-07:00"), "06:30")
+
 
 class TestBookmarkMigration(unittest.TestCase):
     """One-time repair of v1 bookmarks that self-matched the bookmark call."""

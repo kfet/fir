@@ -11,8 +11,8 @@ Two tools and one slash command:
 
 * ``self_handoff(content)`` — abort the in-flight turn and restart with
   a clean LLM context, briefing carried in-context. When bookmarks
-  exist, a pointer line to the bookmarks file is appended to the
-  briefing so the child agent can pull the high-fidelity highlight
+  exist, a digest of their notes plus a pointer line to the bookmarks
+  file is appended to the briefing so the child agent can pull the high-fidelity highlight
   reel without the parent having to re-author it.
 
 * ``bookmark(quote, note)`` — pin a past turn as significant. The
@@ -224,9 +224,10 @@ is copied as-is to bookmarks-<session-id>.jsonl next to the session \
 transcript, with your note injected as _bookmark_note. The file is \
 kept sorted by the original turn's timestamp.
 
-When /handoff runs, the child session is told where to find the \
-bookmarks file and reads it directly. No further action needed at \
-handoff time.
+When /handoff runs, the child's briefing ends with a digest of your \
+bookmark notes (one line each: UTC time + note) plus the path to this \
+file for the verbatim turns. Write notes that stand on their own — \
+the note is often all the child reads.
 
 Returns an error if the quote matches no turn — refine and retry."""
 
@@ -556,6 +557,52 @@ def _hhmm(ts: str) -> str:
             break
     parts = after_t.split(":")
     return f"{parts[0]}:{parts[1]}" if len(parts) >= 2 else ""
+
+
+# Max bookmark lines inlined into a handoff briefing digest.
+_DIGEST_MAX_BOOKMARKS = 40
+
+
+def _hhmm_utc(ts: str) -> str:
+    """Return ``HH:MM`` of ``ts`` converted to UTC; falls back to ``_hhmm``."""
+    import datetime as _dt
+    import re as _re
+
+    norm = ts.strip().replace("Z", "+00:00")
+    # Python 3.9 fromisoformat only accepts 3 or 6 fractional digits.
+    norm = _re.sub(r"\.(\d+)", lambda m: "." + (m.group(1) + "000000")[:6], norm)
+    try:
+        d = _dt.datetime.fromisoformat(norm)
+    except ValueError:
+        return _hhmm(ts)
+    if d.tzinfo is not None:
+        d = d.astimezone(_dt.timezone.utc)
+    return d.strftime("%H:%M")
+
+
+def _render_digest(path: str, entries: list[dict]) -> str:
+    """Render the handoff-briefing footer: note digest + pointer line.
+
+    One ``- HH:MM (UTC) note`` line per bookmark, chronological, capped
+    to the most recent ``_DIGEST_MAX_BOOKMARKS`` with a ``+N earlier``
+    count. Ends with the pointer to the full file for verbatim turns.
+    """
+    lines = [f"## Bookmarks from parent session ({len(entries)})", ""]
+    tail = entries[-_DIGEST_MAX_BOOKMARKS:]
+    dropped = len(entries) - len(tail)
+    if dropped:
+        lines.append(f"(+{dropped} earlier)")
+    for e in tail:
+        hhmm = _hhmm_utc(str(e.get("timestamp") or ""))
+        note = " ".join(str(e.get("_bookmark_note") or "").split())
+        lines.append(f"- {hhmm} (UTC) {note}" if hhmm else f"- {note}")
+    lines.append("")
+    lines.append(
+        f"Bookmarks from parent session: {path} — chronological highlight "
+        "reel of turns the previous agent pinned as significant; read it "
+        "for the verbatim turns behind the notes above."
+    )
+    return "\n".join(lines) + "\n"
 
 
 def _render_card(path: str, entries: list[dict]) -> tuple[str, str]:
@@ -956,21 +1003,17 @@ def self_handoff(params: dict, ctx: fir_ext.Context) -> dict:
     if err is not None:
         return _err(err)
 
-    # Append a single pointer line to the briefing when the bookmarks
-    # file is non-empty. Stat is sufficient — bookmark() never leaves
-    # a half-written or corrupt file (atomic temp+rename), and an
-    # externally truncated/touched file is not our problem to defend
-    # against. The pointer is a footnote: the human-authored briefing
-    # stays the first thing the child sees. ``normalised`` always ends
-    # in ``\n`` (guaranteed by ``_validate_content``) so the leading
-    # ``\n`` on the pointer string yields a blank-line separator.
+    # Append a footer digest of the parent's bookmark notes plus a
+    # pointer to the full file. The child may never open the file, so
+    # the notes themselves must ride along in-context. The human-authored
+    # briefing stays first. ``normalised`` always ends in ``\n``
+    # (guaranteed by ``_validate_content``) so the leading ``\n`` yields
+    # a blank-line separator.
     bm_path = _bookmarks_path(ctx)
     if bm_path and os.path.exists(bm_path) and os.path.getsize(bm_path) > 0:
-        normalised += (
-            f"\nBookmarks from parent session: {bm_path} — chronological "
-            "highlight reel of turns the previous agent pinned as "
-            "significant. Read before proceeding.\n"
-        )
+        entries = _read_bookmarks(bm_path)
+        if entries:
+            normalised += "\n" + _render_digest(bm_path, entries)
 
     try:
         ctx.restart_session(

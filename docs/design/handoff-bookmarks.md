@@ -119,20 +119,30 @@ read the heavy payload.
 
 ## Child session integration
 
-When `self_handoff` calls `restart_session(..., prepend_context=...)`,
-the extension appends a pointer line to the briefing if the bookmarks
-file exists and has non-zero size (a single `os.stat` — no parse):
+When `self_handoff` calls `restart_session(..., prepend_context=...)`
+and the bookmarks file is non-empty, the extension appends a footer to
+the briefing (the human-authored briefing always stays first): a digest
+of the parent's bookmark notes, then a pointer to the full file.
 
 ```text
+## Bookmarks from parent session (43)
+
+(+3 earlier)
+- 11:05 (UTC) final DB schema
+- 11:42 (UTC) user constraint: no auth
+...
 Bookmarks from parent session: /abs/path/to/bookmarks-<parent-id>.jsonl
 — chronological highlight reel of turns the previous agent pinned as
-significant. Read before proceeding.
+significant; read it for the verbatim turns behind the notes above.
 ```
 
-The child uses standard `read` / `grep` tools on that file. No new
-child-side tools needed. The bookmarks file is just a sibling on disk.
-The child also sees the parent's `handoff/bookmarks` card via the
-cards-file-read-on-session-construct mechanism (see
+One line per bookmark, chronological, timestamps converted to UTC,
+capped at the most recent 40 (`_DIGEST_MAX_BOOKMARKS`) with a
+`+N earlier` count. The notes ride along in-context because a child
+may never open the file — passing only the path lost the bookmarks in
+practice. For verbatim turns the child uses standard `read` / `grep`
+on the file. The child also sees the parent's `handoff/bookmarks` card
+via the cards-file-read-on-session-construct mechanism (see
 [observable-cards.md](observable-cards.md)).
 
 A handoff with no bookmarks looks exactly as it does today.
