@@ -314,7 +314,8 @@ stops the process.  Write an ordinary event handler and ignore the distinction.
 +-------------------------+------------------------------------------------+
 | ``message_start``       | *(params key absent)* — LLM message block start|
 +-------------------------+------------------------------------------------+
-| ``message_end``         | ``{role, provider?, model?, usage?}`` — see docs |
+| ``message_end``         | ``{role, provider?, model?, usage?,            |
+|                         |   response_headers?}`` — see docs              |
 +-------------------------+------------------------------------------------+
 | ``tool_execution_start``| ``{"tool_call_id": "...", "tool_name": "..."}``|
 +-------------------------+------------------------------------------------+
@@ -322,7 +323,8 @@ stops the process.  Write an ordinary event handler and ignore the distinction.
 |                         |   "is_error": false}``                         |
 +-------------------------+------------------------------------------------+
 | ``provider_error``      | ``{error_text, kind, retryable, provider?,     |
-|                         |   model?, retry_after_ms?}`` — turn ended in a |
+|                         |   model?, retry_after_ms?, response_headers?}``|
+|                         |   — turn ended in a                            |
 |                         |   provider error. kind: rate_limit/overloaded/ |
 |                         |   server/transport/terminal. See docs.         |
 +-------------------------+------------------------------------------------+
@@ -1097,6 +1099,9 @@ class MessageEndParams(TypedDict, total=False):
     stop_reason: str
     response_id: str
     usage: MessageEndUsage
+    # Provider HTTP response headers (lowercase name -> value, credential
+    # and cookie headers removed). Absent when the transport exposes none.
+    response_headers: dict[str, str]
 
 
 class ToolExecutionStartParams(TypedDict, total=False):
@@ -1118,6 +1123,7 @@ class ProviderErrorParams(TypedDict, total=False):
     provider: str
     model: str
     retry_after_ms: int
+    response_headers: dict[str, str]  # headers of the failed response, if any
 
 
 class MCPServerHealth(TypedDict, total=False):
@@ -2319,6 +2325,12 @@ def provider_stream(provider_id: str) -> Callable:
     when fir sends ``provider/stream/cancel``. Long-running generators
     should periodically check ``fir_ext.is_cancelled(stream_id)`` and
     yield a terminal ``error``/``done`` to bail out promptly.
+
+    Response headers: an event may carry ``"response_headers": {name:
+    value}`` (the upstream HTTP response's headers). It is lifted out of
+    the event and delivered to extensions as ``response_headers`` on
+    ``message_end`` / ``provider_error``. Attach it to the first or the
+    terminal event.
 
     Example::
 
@@ -3763,11 +3775,20 @@ def run(
             _write_message(_make_error(msg_id, -32000, str(exc)), out_stream)
 
     def _send_provider_event(stream_id: str, event: dict[str, Any]) -> None:
+        params: dict[str, Any] = {"stream_id": stream_id, "event": event}
+        # A yielded event may carry the upstream HTTP response headers under
+        # "response_headers"; they travel beside the event, not inside it.
+        if isinstance(event, dict) and "response_headers" in event:
+            event = dict(event)
+            headers = event.pop("response_headers")
+            params = {"stream_id": stream_id, "event": event}
+            if headers:
+                params["response_headers"] = headers
         _write_message(
             {
                 "jsonrpc": "2.0",
                 "method": "provider.stream.event",
-                "params": {"stream_id": stream_id, "event": event},
+                "params": params,
             },
             out,
         )

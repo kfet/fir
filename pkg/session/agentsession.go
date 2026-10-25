@@ -2152,6 +2152,7 @@ func (s *AgentSession) Close() {
 	// Cancel any in-flight LLM stream before tearing down.
 	if s.Agent != nil {
 		s.Agent.Abort()
+		dropResponseHeaders(s.Agent.GetSessionID())
 	}
 	if s.unsubAgent != nil {
 		s.unsubAgent()

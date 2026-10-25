@@ -15,6 +15,7 @@ import os
 import pathlib
 import sys
 import tempfile
+import time
 import unittest
 from datetime import datetime, timedelta, timezone
 from unittest import mock
@@ -533,6 +534,232 @@ class HealthTest(unittest.TestCase):
     def test_frontmatter_is_builtin(self):
         src = pathlib.Path(self.mod.__file__).read_text()
         self.assertIn("# builtin: true", src)
+
+
+def _unified(five=0.42, seven=0.17, five_reset=NOW + 3600, seven_reset=NOW + 86400):
+    return {
+        "anthropic-ratelimit-unified-status": "allowed",
+        "anthropic-ratelimit-unified-5h-utilization": f"{five:.2f}",
+        "anthropic-ratelimit-unified-5h-reset": str(int(five_reset)),
+        "anthropic-ratelimit-unified-7d-utilization": f"{seven:.2f}",
+        "anthropic-ratelimit-unified-7d-reset": str(int(seven_reset)),
+        "anthropic-ratelimit-unified-representative-claim": "five_hour",
+        "content-type": "text/event-stream",
+    }
+
+
+class HeaderFeedTest(unittest.TestCase):
+    """Quota readings from provider response headers (message_end /
+    provider_error ``response_headers``) feed the shared cache."""
+
+    def setUp(self):
+        self.mod, self.err_handler = _load()
+        self.end_handler = fir_ext._event_handlers["message_end"]
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = pathlib.Path(self.tmp.name)
+        self.addCleanup(self.tmp.cleanup)
+        self.addCleanup(mock.patch.stopall)
+        mock.patch.object(self.mod, "_cache_dir", return_value=self.dir).start()
+
+    def _cache(self):
+        return json.loads((self.dir / "anthropic-usage-cache.json").read_text())
+
+    def test_parse_anthropic_unified(self):
+        cache_name, windows, extra = self.mod._parse_anthropic_unified(_unified())
+        self.assertEqual(cache_name, "anthropic-usage")
+        self.assertEqual(windows["five_hour"]["utilization"], 42.0)
+        self.assertEqual(
+            self.mod._parse_iso(windows["five_hour"]["resets_at"]).timestamp(), NOW + 3600
+        )
+        self.assertEqual(windows["seven_day"]["utilization"], 17.0)
+        self.assertEqual(extra["status"], "allowed")
+        self.assertNotIn("content-type", extra)
+
+    def test_parse_ignores_other_providers_and_junk(self):
+        self.assertIsNone(self.mod._parse_headers("openai", _unified()))
+        # An extra account's slot must not feed the default account's cache.
+        self.assertIsNone(self.mod._parse_headers("anthropic#acct2", _unified()))
+        self.assertIsNotNone(self.mod._parse_headers("anthropic", _unified()))
+        self.assertIsNone(self.mod._parse_headers("anthropic", {"content-type": "x"}))
+        self.assertIsNone(self.mod._parse_headers("anthropic", None))
+        bad = {"anthropic-ratelimit-unified-5h-utilization": "nope"}
+        self.assertIsNone(self.mod._parse_headers("anthropic", bad))
+
+    def test_message_end_merges_into_cache_and_series(self):
+        (self.dir / "anthropic-usage-cache.json").write_text(
+            json.dumps(
+                {
+                    "fetched_at": 5,
+                    "data": {
+                        "five_hour": {"utilization": 10.0, "resets_at": "old"},
+                        "seven_day_opus": {"utilization": 3.0},
+                    },
+                }
+            )
+        )
+        self.end_handler(
+            {"role": "assistant", "provider": "anthropic", "response_headers": _unified()},
+            mock.Mock(),
+        )
+        cache = self._cache()
+        self.assertEqual(cache["fetched_at"], 5)
+        self.assertGreater(cache["headers_at"], 0)
+        self.assertEqual(cache["headers"]["representative-claim"], "five_hour")
+        self.assertEqual(cache["data"]["five_hour"]["utilization"], 42.0)
+        self.assertEqual(cache["data"]["seven_day_opus"]["utilization"], 3.0)
+        series = self.mod._read_series()
+        self.assertEqual(len(series), 1)
+        self.assertEqual(series[0]["five_hour"], 42.0)
+
+    def test_message_end_ignores_non_assistant_and_missing_headers(self):
+        self.end_handler({"role": "user"}, mock.Mock())
+        self.end_handler({"role": "assistant", "provider": "anthropic"}, mock.Mock())
+        self.end_handler({}, mock.Mock())
+        self.assertFalse((self.dir / "anthropic-usage-cache.json").exists())
+
+    def test_provider_error_ingests_even_when_not_rate_limit(self):
+        self.err_handler(
+            {"kind": "server", "provider": "anthropic", "response_headers": _unified(five=1.0)},
+            mock.Mock(),
+        )
+        self.assertEqual(self._cache()["data"]["five_hour"]["utilization"], 100.0)
+
+    def test_older_reading_does_not_overwrite_newer(self):
+        self.mod._ingest_reading("anthropic-usage", {"five_hour": {"utilization": 50.0}}, {}, NOW)
+        self.mod._ingest_reading(
+            "anthropic-usage", {"five_hour": {"utilization": 40.0}}, {}, NOW - 5
+        )
+        self.assertEqual(self._cache()["data"]["five_hour"]["utilization"], 50.0)
+
+    def test_series_is_bounded(self):
+        for i in range(5):
+            self.mod._ingest_reading(
+                "anthropic-usage",
+                {"five_hour": {"utilization": 1.0}},
+                {},
+                NOW - self.mod.SERIES_MAX_AGE - 100 + i,
+            )
+        self.mod._ingest_reading("anthropic-usage", {"five_hour": {"utilization": 2.0}}, {}, NOW)
+        self.assertEqual(len(self.mod._read_series()), 1)
+
+    def test_fresh_headers_override_endpoint_backoff_and_staleness(self):
+        now = time.time()
+        cached = {
+            "fetched_at": now - 3 * self.mod.STALE_AFTER_SECONDS,
+            "first_failure_at": now - 3 * self.mod.STALE_AFTER_SECONDS,
+            "backoff_until": now + 600,
+            "rate_limited": True,
+            "headers_at": now - 5,
+            "data": {"five_hour": {"utilization": 42.0}},
+        }
+        (self.dir / "anthropic-usage-cache.json").write_text(json.dumps(cached))
+        res = self.mod._cached_fetch("anthropic-usage", dict)
+        self.assertFalse(res.is_stale or res.is_rate_limited)
+        self.assertEqual(self.mod._usage_health(cached, now), [])
+        # Headers old too: stale again, dated by the newest good reading.
+        cached["headers_at"] = now - 2 * self.mod.STALE_AFTER_SECONDS
+        alerts = self.mod._usage_health(cached, now)
+        self.assertEqual(len(alerts), 1)
+        self.assertIn("last good data from", alerts[0][2])
+        # An auth error still wins over fresh headers.
+        cached.update(headers_at=now - 5, auth_error=True)
+        (self.dir / "anthropic-usage-cache.json").write_text(json.dumps(cached))
+        self.assertTrue(self.mod._cached_fetch("anthropic-usage", dict).is_auth_error)
+
+    def test_fresh_headers_defer_endpoint_poll(self):
+        calls = []
+
+        def fetch():
+            calls.append(1)
+            return {"five_hour": {"utilization": 1.0}}
+
+        now = time.time()
+        (self.dir / "anthropic-usage-cache.json").write_text(
+            json.dumps(
+                {
+                    "fetched_at": now - self.mod.CACHE_SECONDS_TTL - 10,
+                    "headers_at": now - 5,
+                    "data": {"five_hour": {"utilization": 42.0}},
+                }
+            )
+        )
+        res = self.mod._cached_fetch("anthropic-usage", fetch)
+        self.assertEqual(calls, [])
+        self.assertEqual(res.data["five_hour"]["utilization"], 42.0)
+
+        # Past HEADER_POLL_SECONDS the endpoint is polled again, and the
+        # header bookkeeping survives the rewrite.
+        (self.dir / "anthropic-usage-cache.json").write_text(
+            json.dumps(
+                {
+                    "fetched_at": now - self.mod.HEADER_POLL_SECONDS - 10,
+                    "headers_at": now - 5,
+                    "headers": {"status": "allowed"},
+                    "data": {},
+                }
+            )
+        )
+        self.mod._cached_fetch("anthropic-usage", fetch)
+        self.assertEqual(calls, [1])
+        self.assertEqual(self._cache()["headers"], {"status": "allowed"})
+
+
+class BurstTest(unittest.TestCase):
+    def setUp(self):
+        self.mod, _ = _load()
+
+    def _e(self, t, five, reset="R1"):
+        return {"t": t, "five_hour": five, "five_hour_reset": reset}
+
+    def test_rise_within_window_is_a_burst(self):
+        entries = [self._e(NOW - 500, 10.0), self._e(NOW - 200, 11.0), self._e(NOW, 14.0)]
+        rise, start, reset = self.mod._detect_burst(entries, NOW)
+        self.assertEqual(rise, 4.0)
+        self.assertEqual(start, NOW - 500)
+        self.assertEqual(reset, "R1")
+        alerts = self.mod._burst_alerts(entries, NOW)
+        self.assertEqual(len(alerts), 1)
+        self.assertTrue(alerts[0][0].startswith("burst:R1:"))
+        self.assertIn("burst", alerts[0][2])
+
+    def test_slow_rise_or_old_readings_are_not(self):
+        self.assertIsNone(
+            self.mod._detect_burst([self._e(NOW - 500, 10.0), self._e(NOW, 12.0)], NOW)
+        )
+        self.assertIsNone(
+            self.mod._detect_burst([self._e(NOW - 900, 0.0), self._e(NOW, 12.0)], NOW)
+        )
+        self.assertIsNone(self.mod._detect_burst([self._e(NOW, 12.0)], NOW))
+        self.assertEqual(self.mod._burst_alerts([], NOW), [])
+
+    def test_readings_without_reset_are_ignored(self):
+        entries = [{"t": NOW - 300, "five_hour": 1.0}, {"t": NOW, "five_hour": 50.0}]
+        self.assertIsNone(self.mod._detect_burst(entries, NOW))
+
+    def test_window_reset_is_not_compared_across(self):
+        # 60% in the old window, 0 -> 2 in the new one: no burst.
+        entries = [
+            self._e(NOW - 300, 60.0, "R0"),
+            self._e(NOW - 200, 0.0, "R1"),
+            self._e(NOW, 2.0, "R1"),
+        ]
+        self.assertIsNone(self.mod._detect_burst(entries, NOW))
+        # ... but 0 -> 5 right after a reset (cold wake) is one.
+        entries[-1] = self._e(NOW, 5.0, "R1")
+        self.assertIsNotNone(self.mod._detect_burst(entries, NOW))
+
+    def test_alert_text_is_stable_across_the_episode(self):
+        a = self.mod._burst_alerts([self._e(NOW - 300, 10.0), self._e(NOW - 60, 14.0)], NOW - 60)
+        b = self.mod._burst_alerts(
+            [self._e(NOW - 300, 10.0), self._e(NOW - 60, 14.0), self._e(NOW, 19.0)], NOW
+        )
+        self.assertEqual(a[0][0], b[0][0])
+        self.assertEqual(a[0][2], b[0][2])
+
+    def test_config_overrides_burst_thresholds(self):
+        self.assertTrue(self.mod._apply_config({"burst_points": 10, "burst_window_seconds": 60}))
+        self.assertEqual(self.mod.BURST_POINTS, 10.0)
+        self.assertEqual(self.mod.BURST_WINDOW_SECONDS, 60.0)
 
 
 if __name__ == "__main__":

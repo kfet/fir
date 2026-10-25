@@ -35,11 +35,20 @@ A failure on one account (e.g. an expired token) is reported under its header an
 
 ## Step 1 — Run the Script
 
-The script auto-detects your OAuth token(s) from known credential files. The recommended approach is to use `--cached`, which reads from the local cache maintained by the provider-usage extension (refreshed every 5 minutes) — this avoids redundant API calls and rate-limit issues:
+The script auto-detects your OAuth token(s) from known credential files. Prefer `--cached`: it reads the shared cache kept by the provider-usage extension, which costs nothing and is usually fresher than a poll:
 
 ```bash
 bash "$SKILL_DIR/scripts/usage.sh" --cached
 ```
+
+The cache is fed from two sources:
+
+- **Response headers (preferred, live).** Every Claude subscription response carries account-wide `anthropic-ratelimit-unified-*` headers (5h/7d utilization, resets). Each fir session's turns update the cache from them (`headers_at`), so it reflects usage from *every* machine on the account, as of the last turn anywhere.
+- **The usage endpoint** (`fetched_at`), polled at most every 5 minutes — only every 30 minutes while header readings are fresh. It adds windows the headers lack (per-model weekly, `extra_usage`).
+
+`--cached` prints the age of each source to stderr, e.g. `(cache: response headers 1m ago, usage endpoint 12m ago)`. Use a live call only when both are old or the user asks for one.
+
+For trends, `anthropic-usage-series.json` (same dir as the cache) holds the recent header readings: `{"entries": [{"t": epoch, "five_hour": pct, "five_hour_reset": iso, "seven_day": pct, ...}]}`. provider-usage raises a burst warning when 5h utilization jumps ≥3 points within 10 minutes (e.g. many sessions resuming at once after a reset).
 
 If no cache is available, it falls back to a live API call automatically. Note: the cache only tracks the **default** account, so under `--cached` any additional accounts are still fetched live.
 

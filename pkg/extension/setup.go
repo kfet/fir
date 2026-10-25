@@ -328,12 +328,16 @@ func Setup(asession *session.AgentSession, opts SetupOptions) (*SetupResult, err
 		case agent.EventTurnEnd:
 			mgr.EmitEvent("turn_end", nil)
 			if p := providerErrorPayload(ae); p != nil {
+				p.ResponseHeaders = asession.ResponseHeadersFor(ae.TurnMessage.AsAssistant().Timestamp)
 				mgr.EmitEvent("provider_error", p)
 			}
 		case agent.EventMessageStart:
 			mgr.EmitEvent("message_start", nil)
 		case agent.EventMessageEnd:
 			payload := messageEndPayload(ae)
+			if payload != nil && payload.Usage != nil {
+				payload.ResponseHeaders = asession.ResponseHeadersFor(ae.Message.AsAssistant().Timestamp)
+			}
 			mgr.EmitEvent("message_end", payload)
 		case agent.EventToolExecutionStart:
 			mgr.EmitEvent("tool_execution_start", ToolExecutionStartPayload{

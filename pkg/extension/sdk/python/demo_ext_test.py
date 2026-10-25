@@ -966,11 +966,11 @@ class TestDemoEvents(DemoTestCase):
 
     # -- no-op events (subscribed but no outbound call) ----------------------
 
-    def _assert_no_crash(self, event_name: str) -> None:
+    def _assert_no_crash(self, event_name: str, params: Optional[dict] = None) -> None:
         fake = FakeFir()
         self.start_demo_ext(fake)
         fake.send_init()
-        fake.send_event(event_name)
+        fake.send_event(event_name, params)
         # Give handlers time to run, then verify the process is still alive
         time.sleep(0.1)
         # Confirm we can still get a tool response (process alive)
@@ -995,6 +995,29 @@ class TestDemoEvents(DemoTestCase):
 
     def test_provider_error_no_crash(self) -> None:
         self._assert_no_crash("provider_error")
+
+    def test_message_end_with_response_headers(self) -> None:
+        self._assert_no_crash(
+            "message_end",
+            {
+                "role": "assistant",
+                "provider": "anthropic",
+                "model": "m",
+                "usage": {"total_tokens": 3, "cost": {"total": 0.0}},
+                "response_headers": {"anthropic-ratelimit-unified-5h-utilization": "0.4"},
+            },
+        )
+
+    def test_provider_error_with_response_headers(self) -> None:
+        self._assert_no_crash(
+            "provider_error",
+            {
+                "error_text": "429",
+                "kind": "rate_limit",
+                "retryable": True,
+                "response_headers": {"retry-after": "5"},
+            },
+        )
 
     def test_mcp_state_no_crash(self) -> None:
         self._assert_no_crash("mcp_state")
@@ -1301,6 +1324,16 @@ class TestDemoProvider(DemoTestCase):
         msg = done.get("message") or {}
         self.assertEqual(msg.get("provider"), "echo")
         self.assertIn("usage", msg)
+        # response_headers is lifted out of the event into the params.
+        self.assertTrue(all("response_headers" not in e for e in events))
+        with fake._from_ext_lock:
+            hdrs = [
+                (m.get("params") or {}).get("response_headers")
+                for m in fake._from_ext
+                if m.get("method") == "provider.stream.event"
+                and (m.get("params") or {}).get("stream_id") == stream_id
+            ]
+        self.assertIn({"x-ratelimit-remaining-requests": "99"}, hdrs)
 
     def test_provider_stream_cancel_acked(self) -> None:
         fake = FakeFir()
@@ -1363,6 +1396,9 @@ class TestTypedSurface(unittest.TestCase):
         }
         self.assertEqual(params["role"], "assistant")
         self.assertIn("cost", params["usage"])
+        params["response_headers"] = {"x-ratelimit-remaining": "1"}
+        perr: fir_ext.ProviderErrorParams = {"kind": "rate_limit", "response_headers": {}}
+        self.assertIn("response_headers", perr)
 
     def test_hook_result_optional_block(self) -> None:
         allow: fir_ext.ToolCallHookResult = {}

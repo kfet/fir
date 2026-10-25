@@ -31,7 +31,11 @@ func init() {
 			if sideQuery {
 				opts = providers.ApplySideQueryOptions(model, opts)
 			}
-			return ai.StreamSimple(ctx, ai.DefaultRegistry, model, prompt, opts)
+			callCtx := ctx
+			if !sideQuery && opts != nil {
+				callCtx = withResponseHeaderCapture(ctx, opts.SessionID)
+			}
+			return ai.StreamSimple(callCtx, ai.DefaultRegistry, model, prompt, opts)
 		}
 	}
 }

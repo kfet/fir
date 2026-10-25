@@ -135,6 +135,22 @@ fetch_cached() {
   return 1
 }
 
+# --- Describe how fresh the cache is (stderr, default account only) ---
+# headers_at: last quota reading from Anthropic response headers (any fir
+# session's turn); fetched_at: last poll of the usage endpoint.
+
+cache_age() {
+  local now h f
+  now=$(date +%s)
+  h=$(jq -r '.headers_at // 0 | floor' "$CACHE_FILE" 2>/dev/null || echo 0)
+  f=$(jq -r '.fetched_at // 0 | floor' "$CACHE_FILE" 2>/dev/null || echo 0)
+  local msg=""
+  [[ "$h" -gt 0 ]] && msg="response headers $(( (now - h) / 60 ))m ago"
+  [[ "$f" -gt 0 ]] && msg="${msg:+$msg, }usage endpoint $(( (now - f) / 60 ))m ago"
+  [[ -n "$msg" ]] && echo "(cache: $msg)" >&2
+  return 0
+}
+
 # --- Pretty-print one usage body ---
 
 render() {
@@ -200,6 +216,7 @@ while IFS=$'\t' read -r slot label token; do
   # Cache only applies to the default fir account ("anthropic" slot).
   if $CACHED && [[ "$slot" == "anthropic" ]]; then
     BODY=$(fetch_cached || true)
+    [[ -n "$BODY" ]] && cache_age
   fi
   if [[ -z "$BODY" ]]; then
     if ! BODY=$(fetch_live "$token"); then

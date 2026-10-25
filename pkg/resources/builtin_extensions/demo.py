@@ -465,10 +465,15 @@ def on_message_end(params: fir_ext.MessageEndParams, ctx: fir_ext.Context) -> No
         return
     u = params.get("usage") or {}
     cost = (u.get("cost") or {}).get("total", 0.0)
+    # `response_headers` holds the provider's HTTP response headers
+    # (lowercase, credentials removed) — e.g. rate-limit / quota headers.
+    headers = params.get("response_headers") or {}
+    ratelimit = sorted(k for k in headers if "ratelimit" in k)
     print(
         f"demo: message_end role={role} "
         f"model={params.get('provider', '')}/{params.get('model', '')} "
-        f"tokens={u.get('total_tokens', 0)} cost=${cost:.4f}",
+        f"tokens={u.get('total_tokens', 0)} cost=${cost:.4f} "
+        f"headers={len(headers)} ratelimit_headers={len(ratelimit)}",
         file=sys.stderr,
     )
 
@@ -500,6 +505,7 @@ def on_provider_error(params: fir_ext.ProviderErrorParams, ctx: fir_ext.Context)
         f"demo: provider_error kind={params.get('kind', '')} "
         f"retryable={params.get('retryable', False)} "
         f"retry_after_ms={params.get('retry_after_ms', 0)} "
+        f"headers={len(params.get('response_headers') or {})} "
         f"model={params.get('provider', '')}/{params.get('model', '')}",
         file=sys.stderr,
     )
@@ -670,7 +676,14 @@ def echo_stream(params: fir_ext.ProviderStreamStartParams, ctx: fir_ext.Context)
         "timestamp": int(_time.time() * 1000),
     }
 
-    yield {"type": "start", "partial": {**final_msg, "content": []}}
+    # A real provider would attach the upstream HTTP response's headers;
+    # the SDK lifts `response_headers` out of the event and fir forwards it
+    # (redacted) on message_end.
+    yield {
+        "type": "start",
+        "partial": {**final_msg, "content": []},
+        "response_headers": {"x-ratelimit-remaining-requests": "99"},
+    }
     yield {"type": "text_start", "contentIndex": 0}
     # Emit a couple of deltas so streaming is observable.
     if text:

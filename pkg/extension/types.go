@@ -360,6 +360,11 @@ type MessageEndPayload struct {
 	StopReason string           `json:"stop_reason,omitempty"`
 	ResponseID string           `json:"response_id,omitempty"`
 	Usage      *MessageEndUsage `json:"usage,omitempty"`
+	// ResponseHeaders are the HTTP response headers of the provider
+	// response that produced this assistant message (lowercase name ->
+	// value, credential/cookie headers removed). Absent when the transport
+	// exposes none (websocket, SDK-managed clients, extension providers).
+	ResponseHeaders map[string]string `json:"response_headers,omitempty"`
 }
 
 // ProviderErrorPayload is emitted on provider_error when a turn ends with an
@@ -374,6 +379,9 @@ type ProviderErrorPayload struct {
 	Provider     string `json:"provider,omitempty"`
 	Model        string `json:"model,omitempty"`
 	RetryAfterMs int64  `json:"retry_after_ms,omitempty"`
+	// ResponseHeaders: as MessageEndPayload.ResponseHeaders, for the failed
+	// response (e.g. a 429's rate-limit headers). Absent on transport errors.
+	ResponseHeaders map[string]string `json:"response_headers,omitempty"`
 }
 
 // SessionStartPayload is the per-extension payload for session_start.

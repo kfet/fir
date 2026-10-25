@@ -33,9 +33,23 @@ Load is bounded: one HTTP fetch per TTL across *all* sessions (flock'd shared
 cache), and every failure — 429, auth, network — backs off exponentially, so
 a broken endpoint is never re-polled by each session every cycle.
 
+Header feed (zero cost): ``message_end`` / ``provider_error`` carry the
+provider's HTTP ``response_headers``. Per-provider parsers
+(``HEADER_PARSERS``) turn quota headers into the same window shape the usage
+endpoint returns — Anthropic subscription responses carry account-wide
+``anthropic-ratelimit-unified-*`` headers covering every machine on the
+account. Each reading updates the shared cache (``headers_at``, ``headers``)
+and appends to a short time-series (``anthropic-usage-series.json``). While
+header readings are fresh the endpoint is polled only every
+``HEADER_POLL_SECONDS``. A rise of ``burst_points`` (default 3) in 5-hour
+utilization within ``burst_window_seconds`` (default 600) inside one window —
+typically many idle sessions waking at once after a reset, each paying a
+cold prompt cache — raises a burst alert (section + exactly-once announce).
+
 Config: ``provider-usage.json`` in any fir config dir, e.g.
 ``{"enabled": true, "warn_levels": [80, 95], "stale_after_seconds": 600,
-"refresh_grace_minutes": 15, "login_max_age_days": 0}``. ``"enabled": false``
+"refresh_grace_minutes": 15, "login_max_age_days": 0, "burst_points": 3,
+"burst_window_seconds": 600}``. ``"enabled": false``
 turns the extension off entirely.
 """
 
@@ -94,6 +108,16 @@ REFRESH_GRACE_MINUTES = 15.0
 LOGIN_MAX_AGE_DAYS = 0.0  # 0 disables the login-age warning
 ALERT_MEMORY = 7 * 24 * 3600  # how long an announced health alert stays claimed
 
+# -- header feed ----------------------------------------------------------------
+# While header readings are fresher than CACHE_SECONDS_TTL, the usage endpoint
+# is polled only this often (it still supplies windows headers lack).
+HEADER_POLL_SECONDS = 1800
+SERIES_MAX_AGE = 6 * 3600  # how much time-series history to keep
+SERIES_MAX_LEN = 500
+BURST_POINTS = 3.0  # 5-hour utilization rise (percentage points) ...
+BURST_WINDOW_SECONDS = 600.0  # ... within this long counts as a burst
+BURST_BUCKET = 1800  # one burst alert episode per bucket per window
+
 # Cache dict keys
 _K_FETCHED_AT = "fetched_at"
 _K_BACKOFF_UNTIL = "backoff_until"
@@ -103,6 +127,8 @@ _K_FIRST_FAILURE = "first_failure_at"
 _K_AUTH_ERROR = "auth_error"
 _K_AUTH_KEY = "auth_key"
 _K_RATE_LIMITED = "rate_limited"
+_K_HEADERS_AT = "headers_at"
+_K_HEADERS = "headers"
 
 _stop_event = threading.Event()
 _thread: threading.Thread | None = None
@@ -227,7 +253,12 @@ def _cached_fetch(cache_name: str, fetch_fn, key: str = "") -> CacheResult:
     cd.mkdir(parents=True, exist_ok=True)
 
     def _is_fresh(cached: dict) -> bool:
-        return (time.time() - cached.get(_K_FETCHED_AT, 0)) < CACHE_SECONDS_TTL
+        age = time.time() - cached.get(_K_FETCHED_AT, 0)
+        if age < CACHE_SECONDS_TTL:
+            return True
+        # Fresh header readings keep the windows current; poll less often.
+        headers_age = time.time() - cached.get(_K_HEADERS_AT, 0)
+        return headers_age < CACHE_SECONDS_TTL and age < HEADER_POLL_SECONDS
 
     def _is_backed_off(cached: dict) -> bool:
         if cached.get(_K_AUTH_ERROR) and cached.get(_K_AUTH_KEY, "") != key:
@@ -254,7 +285,11 @@ def _cached_fetch(cache_name: str, fetch_fn, key: str = "") -> CacheResult:
         """Convert cached dict to CacheResult if usable, else None to signal refetch needed."""
         if not cached:
             return None
+        headers_fresh = time.time() - cached.get(_K_HEADERS_AT, 0) < CACHE_SECONDS_TTL
         if _is_backed_off(cached):
+            if headers_fresh and not cached.get(_K_AUTH_ERROR) and cached.get(_K_DATA):
+                # Endpoint backed off, but header readings keep data live.
+                return CacheResult(cached[_K_DATA])
             return CacheResult(
                 cached.get(_K_DATA),
                 is_stale=True,
@@ -312,7 +347,12 @@ def _cached_fetch(cache_name: str, fetch_fn, key: str = "") -> CacheResult:
                         is_auth_error=bool(obj.get(_K_AUTH_ERROR)),
                     )
 
-                _write_cache({_K_FETCHED_AT: time.time(), _K_DATA: data})
+                obj = {_K_FETCHED_AT: time.time(), _K_DATA: data}
+                prev = cached or {}
+                for k in (_K_HEADERS_AT, _K_HEADERS):
+                    if prev.get(k) is not None:
+                        obj[k] = prev[k]
+                _write_cache(obj)
                 return CacheResult(data)
             finally:
                 fcntl.flock(lf, fcntl.LOCK_UN)
@@ -464,6 +504,200 @@ def _fetch_poe_usage(api_key: str) -> str | None:
 
 
 # ---------------------------------------------------------------------------
+# Header feed: quota readings from provider response headers
+# ---------------------------------------------------------------------------
+#
+# Each parser takes a response-header map (lowercase names) and returns
+# ``(cache_name, windows, extra)`` or None. ``windows`` uses the usage
+# endpoint's shape — ``{window_key: {"utilization": percent, "resets_at":
+# iso}}`` — so every consumer of the shared cache reads header and endpoint
+# readings alike. ``extra`` is the raw provider-specific detail kept beside
+# them. Add a provider by appending to HEADER_PARSERS.
+
+_ANTHROPIC_UNIFIED = "anthropic-ratelimit-unified-"
+# header window prefix -> usage-endpoint window key
+_ANTHROPIC_WINDOWS = {"5h": "five_hour", "7d": "seven_day"}
+
+
+def _iso_from_epoch(value: object) -> str | None:
+    try:
+        epoch = float(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+    if epoch <= 0:
+        return None
+    if epoch > 1e11:  # milliseconds
+        epoch /= 1000
+    return datetime.fromtimestamp(epoch, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _parse_anthropic_unified(headers: dict) -> tuple[str, dict, dict] | None:
+    """Anthropic subscription (OAuth) quota headers: account-wide 5h / 7d
+    utilization as a 0..1 fraction and reset instants in epoch seconds."""
+    extra = {
+        k[len(_ANTHROPIC_UNIFIED) :]: v
+        for k, v in headers.items()
+        if k.startswith(_ANTHROPIC_UNIFIED) and isinstance(v, str)
+    }
+    windows: dict[str, dict] = {}
+    for prefix, key in _ANTHROPIC_WINDOWS.items():
+        try:
+            frac = float(extra.get(f"{prefix}-utilization", ""))
+        except ValueError:
+            continue
+        win: dict = {"utilization": round(frac * 100, 2)}
+        if (iso := _iso_from_epoch(extra.get(f"{prefix}-reset"))) is not None:
+            win["resets_at"] = iso
+        windows[key] = win
+    if not windows:
+        return None
+    return "anthropic-usage", windows, extra
+
+
+# provider id -> parser. Exact ids only: an extra account's slot
+# ("anthropic#<account>") must not feed the default account's cache.
+HEADER_PARSERS = {"anthropic": _parse_anthropic_unified}
+
+
+def _parse_headers(provider: str, headers: object) -> tuple[str, dict, dict] | None:
+    if not isinstance(headers, dict) or not headers:
+        return None
+    parser = HEADER_PARSERS.get(provider or "")
+    if parser is None:
+        return None
+    try:
+        return parser(headers)
+    except Exception:
+        return None
+
+
+def _atomic_write_json(path: Path, obj: object) -> None:
+    tmp_fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+    try:
+        with os.fdopen(tmp_fd, "w") as f:
+            json.dump(obj, f)
+        os.replace(tmp_path, str(path))
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp_path)
+        raise
+
+
+def _ingest_reading(cache_name: str, windows: dict, extra: dict, now: float) -> None:
+    """Merge a header reading into the shared cache and its time-series.
+
+    Shares the cache's flock with :func:`_cached_fetch`. Windows the headers
+    do not carry (e.g. per-model weekly windows) keep their endpoint values.
+    """
+    cd = _cache_dir()
+    cd.mkdir(parents=True, exist_ok=True)
+    cache_file = cd / f"{cache_name}-cache.json"
+    series_file = cd / f"{cache_name}-series.json"
+    with open(cd / f"{cache_name}-cache.lock", "w") as lf:
+        fcntl.flock(lf, fcntl.LOCK_EX)
+        try:
+            cached = _read_json(cache_file) or {}
+            if float(cached.get(_K_HEADERS_AT) or 0) > now:
+                return  # a newer reading already landed
+            data = cached.get(_K_DATA)
+            data = dict(data) if isinstance(data, dict) else {}
+            for key, win in windows.items():
+                merged = dict(data.get(key) or {}) if isinstance(data.get(key), dict) else {}
+                merged.update(win)
+                data[key] = merged
+            cached[_K_DATA] = data
+            cached[_K_HEADERS_AT] = now
+            cached[_K_HEADERS] = extra
+            _atomic_write_json(cache_file, cached)
+
+            series = _read_json(series_file)
+            entries = series.get("entries") if isinstance(series, dict) else None
+            entries = [e for e in entries or [] if isinstance(e, dict)]
+            entry: dict = {"t": now}
+            for key, win in windows.items():
+                entry[key] = win.get("utilization")
+                if win.get("resets_at"):
+                    entry[f"{key}_reset"] = win["resets_at"]
+            entries.append(entry)
+            entries = [e for e in entries if now - float(e.get("t") or 0) <= SERIES_MAX_AGE]
+            _atomic_write_json(series_file, {"entries": entries[-SERIES_MAX_LEN:]})
+        finally:
+            fcntl.flock(lf, fcntl.LOCK_UN)
+
+
+def _ingest_headers(provider: str, headers: object, now: float) -> bool:
+    """Parse and store a response's quota headers; True if a reading landed."""
+    found = _parse_headers(provider, headers)
+    if found is None:
+        return False
+    try:
+        _ingest_reading(*found, now)
+    except OSError:
+        return False
+    return True
+
+
+def _read_series(cache_name: str = "anthropic-usage") -> list[dict]:
+    series = _read_json(_cache_dir() / f"{cache_name}-series.json")
+    entries = series.get("entries") if isinstance(series, dict) else None
+    return [e for e in entries or [] if isinstance(e, dict)]
+
+
+def _detect_burst(entries: list[dict], now: float, key: str = "five_hour") -> tuple | None:
+    """Return (rise_points, start_t, reset_iso) when ``key`` utilization rose
+    by at least BURST_POINTS within the last BURST_WINDOW_SECONDS, comparing
+    only readings of the same window (same reset instant)."""
+    recent = [
+        e
+        for e in entries
+        if now - float(e.get("t") or 0) <= BURST_WINDOW_SECONDS
+        and isinstance(e.get(key), (int, float))
+        and e.get(f"{key}_reset")  # unknown window: never compared
+    ]
+    if len(recent) < 2:
+        return None
+    latest = max(recent, key=lambda e: e["t"])
+    reset = latest.get(f"{key}_reset")
+    same = [e for e in recent if e.get(f"{key}_reset") == reset]
+    low = min(same, key=lambda e: e[key])
+    rise = float(latest[key]) - float(low[key])
+    if rise < BURST_POINTS:
+        return None
+    return rise, float(low["t"]), reset
+
+
+def _burst_alerts(entries: list[dict], now: float) -> list:
+    """Health-alert tuples (tag, expiry, text) for a detected usage burst.
+
+    The text names the threshold, not the live numbers, so the section stays
+    byte-stable for the whole episode (one per window per BURST_BUCKET).
+    """
+    found = _detect_burst(entries, now)
+    if found is None:
+        return []
+    _rise, start, reset = found
+    bucket = int(start) // BURST_BUCKET * BURST_BUCKET
+    return [
+        (
+            f"burst:{reset}:{bucket}",
+            now + ALERT_MEMORY,
+            f"Anthropic usage burst: account-wide 5-hour utilization rose "
+            f"≥{BURST_POINTS:g} points within {BURST_WINDOW_SECONDS / 60:g} min "
+            f"(since {_fmt_clock(bucket)}) — likely many sessions resuming at once "
+            "(cold prompt caches); avoid starting heavy parallel work.",
+        )
+    ]
+
+
+@fir_ext.on("message_end")
+def on_message_end(params: fir_ext.MessageEndParams, ctx: fir_ext.Context) -> None:
+    """Record quota readings carried by the provider's response headers."""
+    if not params or params.get("role") != "assistant":
+        return
+    _ingest_headers(params.get("provider") or "", params.get("response_headers"), time.time())
+
+
+# ---------------------------------------------------------------------------
 # Rate-limit reset reporting
 # ---------------------------------------------------------------------------
 #
@@ -568,7 +802,11 @@ def _rate_limit_notice(
 @fir_ext.on("provider_error")
 def on_provider_error(params: fir_ext.ProviderErrorParams, ctx: fir_ext.Context) -> None:
     """Tell the user when an Anthropic subscription usage limit resets."""
-    if not params or params.get("kind") != "rate_limit":
+    if not params:
+        return
+    # A failed response (429) carries the freshest quota reading of all.
+    _ingest_headers(params.get("provider") or "", params.get("response_headers"), time.time())
+    if params.get("kind") != "rate_limit":
         return
     if "anthropic" not in (params.get("provider") or "").lower():
         return
@@ -740,11 +978,12 @@ def _usage_health(cached: dict | None, now: float) -> list:
                 "usage numbers are not live; log in again (/login anthropic).",
             )
         ]
-    since = fetched or first_fail
+    good = max(fetched, float(cached.get(_K_HEADERS_AT) or 0))
+    since = good or first_fail
     if now - since <= STALE_AFTER_SECONDS:
         return []
     stamp = _fmt_clock(since)
-    what = f"last good data from {stamp}" if fetched else f"no data since {stamp}"
+    what = f"last good data from {stamp}" if good else f"no data since {stamp}"
     return [
         (
             f"stale:{episode}",
@@ -831,6 +1070,7 @@ def _anthropic_credential() -> dict | None:
 def _apply_config(cfg: dict | None) -> bool:
     """Apply ``provider-usage.json`` overrides; return False when disabled."""
     global WARN_LEVELS, STALE_AFTER_SECONDS, REFRESH_GRACE_MINUTES, LOGIN_MAX_AGE_DAYS
+    global BURST_POINTS, BURST_WINDOW_SECONDS
     if not isinstance(cfg, dict):
         return True
     levels = cfg.get("warn_levels")
@@ -842,6 +1082,8 @@ def _apply_config(cfg: dict | None) -> bool:
         ("stale_after_seconds", "STALE_AFTER_SECONDS"),
         ("refresh_grace_minutes", "REFRESH_GRACE_MINUTES"),
         ("login_max_age_days", "LOGIN_MAX_AGE_DAYS"),
+        ("burst_points", "BURST_POINTS"),
+        ("burst_window_seconds", "BURST_WINDOW_SECONDS"),
     ):
         v = cfg.get(key)
         if isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0:
@@ -872,9 +1114,12 @@ def _refresh_loop(ctx: fir_ext.Context) -> None:
             result = _fetch_anthropic_result(anthropic_token)
             if s := _format_anthropic_status(result):
                 parts.append(s)
-            alerts = _usage_health(
-                _read_json(_cache_dir() / "anthropic-usage-cache.json"), time.time()
-            ) + _credential_health(_anthropic_credential(), time.time())
+            now = time.time()
+            alerts = (
+                _usage_health(_read_json(_cache_dir() / "anthropic-usage-cache.json"), now)
+                + _credential_health(_anthropic_credential(), now)
+                + _burst_alerts(_read_series(), now)
+            )
             _publish_warnings(ctx, result.data, mode, alerts)
         if poe_key and (s := _fetch_poe_usage(poe_key)):
             parts.append(s)

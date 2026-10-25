@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/ai/providers"
 	"github.com/kfet/fir/pkg/models"
 )
 
@@ -34,6 +35,17 @@ type extProviderRegistration struct {
 type providerStreamEventParams struct {
 	StreamID string                   `json:"stream_id"`
 	Event    ai.AssistantMessageEvent `json:"event"`
+	// ResponseHeaders optionally reports the upstream HTTP response headers
+	// the extension received; forwarded (redacted) to message_end /
+	// provider_error like a built-in provider's.
+	ResponseHeaders map[string]string `json:"response_headers,omitempty"`
+}
+
+// extActiveStream is an in-flight ext provider stream: its destination and
+// the caller's response-header sink (nil when the caller wants none).
+type extActiveStream struct {
+	out  *ai.AssistantMessageEventStream
+	sink providers.ResponseHeaderSink
 }
 
 // extStreamTimeout bounds how long start/cancel/toolResult RPCs may wait.
@@ -232,7 +244,7 @@ func (b *Bridge) UnregisterProviders() {
 	// Cancel any in-flight streams owned by this bridge — there's nobody
 	// left to deliver events. Push an error and close.
 	b.activeStreams.Range(func(k, v any) bool {
-		s := v.(*ai.AssistantMessageEventStream)
+		s := v.(*extActiveStream).out
 		s.Push(ai.AssistantMessageEvent{Type: ai.EventError, Reason: ai.StopReasonError})
 		s.End(nil)
 		b.activeStreams.Delete(k)
@@ -247,7 +259,7 @@ func newExtStreamAdapter(b *Bridge, providerID string) ai.StreamFunction {
 		out := ai.NewAssistantMessageEventStream()
 		streamID := newStreamID()
 		prompt.SystemPrompt = ai.FlattenSystemPrompt(prompt.SystemPrompt)
-		b.activeStreams.Store(streamID, out)
+		b.activeStreams.Store(streamID, &extActiveStream{out: out, sink: providers.ResponseHeaderSinkFrom(ctx)})
 
 		// Marshal model+prompt+options as opaque JSON — the extension is free
 		// to interpret only the bits it cares about.
@@ -315,8 +327,13 @@ func (b *Bridge) handleProviderStreamEvent(raw *json.RawMessage) {
 	if !ok {
 		return
 	}
-	stream := v.(*ai.AssistantMessageEventStream)
-	stream.Push(p.Event)
+	st := v.(*extActiveStream)
+	// Report headers before pushing: a terminal event releases the turn,
+	// whose message_end reads the recorded headers.
+	if st.sink != nil && len(p.ResponseHeaders) > 0 {
+		st.sink(providers.RedactHeaderMap(p.ResponseHeaders))
+	}
+	st.out.Push(p.Event)
 }
 
 // extModelLister adapts an ext-shipped provider's listModels capability to

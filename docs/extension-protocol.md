@@ -403,10 +403,10 @@ timeout and proceeds, which is no worse than the fixed sleep this replaced.
 | `turn_start` | *(params key absent)* — streaming turn is starting. One per turn, so a loop that drains queued follow-ups emits several. |
 | `turn_end` | *(params key absent)* — streaming turn has finished. |
 | `message_start` | *(params key absent)* — LLM message block is starting. |
-| `message_end` | `{role, provider?, model?, stop_reason?, response_id?, usage?}` — LLM message block has finished. `role` is `"user"`, `"assistant"`, or `"toolResult"`. Assistant messages also carry `provider`, `model`, `stop_reason`, `response_id`, and a `usage` object: `{input, output, cache_read, cache_write, total_tokens, cost: {input, output, cache_read, cache_write, total}}`. Token counts are integers; cost values are USD floats from the upstream provider (zero when unavailable). |
+| `message_end` | `{role, provider?, model?, stop_reason?, response_id?, usage?, response_headers?}` — LLM message block has finished. `role` is `"user"`, `"assistant"`, or `"toolResult"`. Assistant messages also carry `provider`, `model`, `stop_reason`, `response_id`, and a `usage` object: `{input, output, cache_read, cache_write, total_tokens, cost: {input, output, cache_read, cache_write, total}}`. Token counts are integers; cost values are USD floats from the upstream provider (zero when unavailable). `response_headers` is the HTTP response headers of the provider response that produced the message, as `{lowercase-name: value}` (repeated headers joined with `", "`); cookie, auth, and any header whose name contains `token`/`secret`/`api-key`/`apikey`/`session`/`auth` are removed. It is present for built-in HTTP providers and for extension providers that report headers (see `provider.stream.event`); absent for websocket/SDK-managed transports and for side queries. When the provider retried within one turn, these are the last attempt's headers. Example use: Anthropic subscription responses carry account-wide `anthropic-ratelimit-unified-*` quota headers. |
 | `tool_execution_start` | `{"tool_call_id": "...", "tool_name": "..."}` |
 | `tool_execution_end` | `{"tool_call_id": "...", "tool_name": "...", "is_error": false}` |
-| `provider_error` | `{error_text, kind, retryable, provider?, model?, retry_after_ms?}` — emitted on `turn_end` when the turn ended with a provider/LLM error (assistant `stop_reason == error`). `kind` is one of `"rate_limit"`, `"overloaded"`, `"server"`, `"transport"`, `"terminal"`. `retryable` is true for transient classes (overloaded/rate-limit/5xx/transport) and false for terminal errors (auth/400/context-length). `retry_after_ms` is the provider-indicated delay in milliseconds when parseable, else absent. Use it to drive auto-resume/backoff. |
+| `provider_error` | `{error_text, kind, retryable, provider?, model?, retry_after_ms?}` — emitted on `turn_end` when the turn ended with a provider/LLM error (assistant `stop_reason == error`). `kind` is one of `"rate_limit"`, `"overloaded"`, `"server"`, `"transport"`, `"terminal"`. `retryable` is true for transient classes (overloaded/rate-limit/5xx/transport) and false for terminal errors (auth/400/context-length). `retry_after_ms` is the provider-indicated delay in milliseconds when parseable, else absent. Use it to drive auto-resume/backoff. `response_headers` (same shape as on `message_end`) carries the failed response's headers when the provider answered (e.g. a 429's rate-limit headers); absent on transport errors. A 429 that fir retried to success surfaces only as the successful `message_end`'s headers. |
 | `mcp_state` | `{"servers": [{name, state, source?, error?, tools, fix?}]}` — emitted whenever any configured MCP server's health record changes (initial connect result, login required, token expired mid-session, error, recovery, reload). `state` is one of `"ok"`, `"connecting"`, `"needs_auth"`, `"token_expired"`, `"error"`, `"disabled"`; `fix` is the fir command that resolves an unhealthy state (e.g. `/mcp login slack`). The same list is in `agent.info` under `mcp.servers`. |
 
 ---
@@ -1695,6 +1695,12 @@ shapes:
 * `{"type": "toolcall_start" | "toolcall_delta" | "toolcall_end", "toolCall": {…}}`
 * `{"type": "done",          "reason": "stop", "message": <AssistantMessage>}`
 * `{"type": "error",         "reason": "error" | "aborted", "error": <AssistantMessage>}`
+
+An optional `"response_headers": {name: value}` param beside `event`
+reports the upstream HTTP response headers; fir redacts them like its own
+and forwards them as `response_headers` on `message_end` /
+`provider_error`. Send them on or before the terminal event. (Python SDK:
+put a `response_headers` key in a yielded event; it is lifted out.)
 
 Notification params keys are snake_case (`stream_id`); the inner
 `event` object uses camelCase to match Go's `AssistantMessageEvent`

@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Added
+
+- Extensions receive provider HTTP response headers: `response_headers` (lowercase, credential/cookie headers removed) on `message_end` and `provider_error`, captured for every built-in HTTP provider; extension providers can report theirs via `provider.stream.event`.
+- provider-usage reads account-wide Anthropic quota from `anthropic-ratelimit-unified-*` response headers: fresher shared cache, endpoint polled every 30 min while headers are fresh, a reading time-series, and a burst warning when 5h utilization jumps ≥3 points in 10 min.
+
+### Changed
+
+- claude-usage skill prefers the header-fed cache; `--cached` reports the age of header and endpoint readings.
+
 ## [1.40.3] - 2026-10-25
 
 ### Fixed

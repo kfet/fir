@@ -60,9 +60,19 @@ func unixTransport(sock string) *http.Transport {
 
 // providerTransport routes unix:// requests over a unix socket and all
 // others through sharedTransport.
+// Every response is reported to the request context's response-header sink,
+// if any (see respheaders.go).
 type providerTransport struct{}
 
-func (providerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+func (t providerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := t.roundTrip(req)
+	if err == nil {
+		reportResponseHeaders(req, resp)
+	}
+	return resp, err
+}
+
+func (providerTransport) roundTrip(req *http.Request) (*http.Response, error) {
 	if req.URL.Scheme != "unix" {
 		return sharedTransport.RoundTrip(req)
 	}
