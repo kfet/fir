@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.41.0] - 2026-10-25
+
 ### Added
 
 - Extensions receive provider HTTP response headers: `response_headers` (lowercase, credential/cookie headers removed) on `message_end` and `provider_error`, captured for every built-in HTTP provider; extension providers can report theirs via `provider.stream.event`.
@@ -9,6 +11,7 @@
 
 ### Changed
 
+- **Model catalog regenerated**: pricing changed for amazon-bedrock: amazon.nova-2-lite-v1:0.
 - claude-usage skill prefers the header-fed cache; `--cached` reports the age of header and endpoint readings.
 
 ## [1.40.3] - 2026-10-25
