@@ -1048,22 +1048,34 @@ func TestManager_SetSetStatusFn_PropagatesToRunningBridges(t *testing.T) {
 		name string
 		text string
 	}
-	got := make(chan seen, 4)
+	got := make(chan seen, 64)
 	mgr.SetSetStatusFn(func(name, status string) {
-		got <- seen{name: name, text: status}
+		select {
+		case got <- seen{name: name, text: status}:
+		default:
+		}
 	})
 
 	// Trigger session_start; the extension reacts by sending set_status.
 	mgr.EmitEvent("session_start", nil)
 
-	select {
-	case s := <-got:
-		if s.name != "status-ext" || s.text != "HELLO-LATE" {
-			t.Fatalf("got name=%q status=%q; want status-ext / HELLO-LATE", s.name, s.text)
+	// Other extensions (e.g. embedded builtins) may also set a status;
+	// only ours matters.
+	deadline := time.After(15 * time.Second)
+	for {
+		select {
+		case s := <-got:
+			if s.name != "status-ext" {
+				continue
+			}
+			if s.text != "HELLO-LATE" {
+				t.Fatalf("got status=%q; want HELLO-LATE", s.text)
+			}
+			return
+		case <-deadline:
+			t.Fatal("SetStatusFn registered after Start was never invoked — " +
+				"set_status from a running bridge silently no-oped")
 		}
-	case <-time.After(3 * time.Second):
-		t.Fatal("SetStatusFn registered after Start was never invoked — " +
-			"set_status from a running bridge silently no-oped")
 	}
 }
 
