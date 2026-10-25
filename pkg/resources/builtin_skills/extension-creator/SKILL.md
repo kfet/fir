@@ -88,6 +88,7 @@ Always call `fir_ext.run(name="<name>")` at the end of the script.
 
 - [ ] Create `.fir/extensions/<name>.py` with a shebang (`#!/usr/bin/env python3`) **and make it executable immediately**: `chmod +x .fir/extensions/<name>.py`. Discovery silently skips non-executable files. Always `chmod +x` right after creating the file.
 - [ ] Add comment frontmatter (`# ---` / `# ---`) with at least `name:`. Files without frontmatter are ignored by discovery.
+- [ ] Disable an extension with `chmod -x`; a renamed file still loads.
 - [ ] Define tools with `@fir_ext.tool(...)`, slash commands with `@fir_ext.command(...)`, and/or event handlers with `@fir_ext.on(...)`. The init handshake reports them to fir — there is no need to declare them again in frontmatter.
 - [ ] End with `fir_ext.run(name="<name>")`.
 - [ ] **Never put test files in the extensions directory** — use `pkg/resources/testdata/` for Python tests or `pkg/extension/integration/` for Go integration tests.

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Docs/skills: extension discovery requires the exec bit + frontmatter; disable an extension with `chmod -x` (renaming the file still loads it).
+
 ## [1.40.1] - 2026-10-24
 
 ### Fixed

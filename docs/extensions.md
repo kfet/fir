@@ -185,7 +185,9 @@ fir looks for extensions in two locations at startup:
 | `.fir/extensions/` | Project | Extensions for the current project only |
 | `<agent-dir>/extensions/` (`~/.config/fir/extensions/` by default) | Global | Extensions available in all projects; override the agent dir with `FIR_AGENT_DIR` or `--agent-dir` |
 
-Extensions must be **executable files** (have the execute permission bit set). The extension name is derived from the filename without its extension (e.g., `wordcount.py` → `wordcount`).
+Extensions must be **executable files** (have the execute permission bit set). The extension name is derived from the filename without its extension (e.g., `wordcount.py` → `wordcount`). Discovery does not look at the suffix: any executable file with a `# ---` comment frontmatter block loads, whatever its runtime. Only the last suffix is stripped, so a renamed `gcal.py.migrated-to-mcp` still loads, as a second extension named `gcal.py`.
+
+**Disabling an extension:** run `chmod -x` on it (fir logs the skip) or move it out of the extensions directory. Renaming it does not disable it.
 
 **Shadowing:** If a project-local extension has the same name as a global one, the project-local version takes precedence.
 
@@ -356,6 +358,9 @@ fir --debug
 Look for lines containing `extension stderr` for output from your extension process, and `started extension` to confirm successful initialization.
 
 ### Common Issues
+
+**Extension loads twice, or a "disabled" one still loads:**
+- A renamed copy (`foo.py.bak`, `foo.py.migrated-to-mcp`) that is still executable is a separate extension. `chmod -x` it or move it out of the directory.
 
 **Extension not loading:**
 - Check the file is executable: `chmod +x .fir/extensions/my_ext.py`
