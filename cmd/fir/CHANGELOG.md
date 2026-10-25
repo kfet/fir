@@ -2,12 +2,15 @@
 
 ## [Unreleased]
 
+## [1.42.0] - 2026-10-25
+
 ### Added
 
 - ACP: generic MCP data passthrough (`dev.fir.mcp/v1`) for client-side MCP Apps — tool-call `_meta` with tool/result `_meta` and `structuredContent`, `resource`/`resource_link` blocks kept, and `_fir/mcp/resources/read` / `_fir/mcp/tools/call` methods on the session's MCP connections. See `docs/acp-mcp-passthrough.md`.
 
 ### Changed
 
+- **Model catalog regenerated**: pricing changed for openrouter: ~z-ai/glm-flash-latest.
 - ACP: live tool-call `rawOutput` now uses the `session/load` replay shape (`content`/`isError`/`details`, image `data`/`mimeType` included) instead of Go field names, and live results show their text content.
 
 ## [1.41.0] - 2026-10-25
