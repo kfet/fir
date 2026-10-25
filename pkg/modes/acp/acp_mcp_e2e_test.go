@@ -32,6 +32,7 @@ import (
 	"time"
 
 	acpsdk "github.com/coder/acp-go-sdk"
+	"github.com/kfet/fir/pkg/mcp/mcptest"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -43,6 +44,10 @@ import (
 // When MCP_TEST_SERVER=1 the process acts as a minimal MCP echo server on
 // stdin/stdout and exits without running any tests.
 func TestMain(m *testing.M) {
+	if os.Getenv("MCP_TEST_SERVER") == "ui" {
+		_ = mcptest.NewUIServer().Run(context.Background(), &sdk.StdioTransport{})
+		os.Exit(0)
+	}
 	if os.Getenv("MCP_TEST_SERVER") == "1" {
 		runMCPEchoServer()
 		os.Exit(0)

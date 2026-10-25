@@ -144,6 +144,7 @@ const serverEventBuffer = 64
 // Manager owns the lifecycle of all MCP client sessions for one fir session.
 type Manager struct {
 	servers  sync.Map // string → *serverEntry
+	toolInfo sync.Map // adapted tool name → ToolOrigin (see passthrough.go)
 	verbose  bool
 	reloadMu sync.Mutex // serialises concurrent Reload calls
 
@@ -811,7 +812,7 @@ func (m *Manager) clientOptions(serverName string) *sdk.ClientOptions {
 						firlog.Warn("MCP re-list tools error", "server", serverName, "err", err)
 						return
 					}
-					updated = append(updated, AdaptTool(m.serverSession(serverName), serverName, tool, &m.progressReg))
+					updated = append(updated, m.adaptTool(serverName, tool))
 				}
 				var caps *sdk.ServerCapabilities
 				m.withEntry(serverName, func(e *serverEntry) {
@@ -1276,7 +1277,7 @@ func (m *Manager) dialOnce(ctx context.Context, name string, cfg ServerConfig) (
 			_ = session.Close()
 			return nil, nil, nil, fmt.Errorf("list tools: %w", terr)
 		}
-		tools = append(tools, AdaptTool(m.serverSession(name), name, tool, &m.progressReg))
+		tools = append(tools, m.adaptTool(name, tool))
 	}
 
 	initResult := session.InitializeResult()

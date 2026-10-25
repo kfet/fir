@@ -66,7 +66,7 @@ func AdaptTool(getSession SessionGetter, serverName string, tool *sdk.Tool, regi
 
 	// Sanitize the combined name to match Anthropic's tool name pattern:
 	// ^[a-zA-Z0-9_-]{1,128}$
-	sanitizedName := sanitizeToolName("mcp__" + serverName + "__" + toolName)
+	sanitizedName := ToolName(serverName, toolName)
 
 	return agent.AgentTool{
 		Tool: ai.Tool{
@@ -112,7 +112,9 @@ func AdaptTool(getSession SessionGetter, serverName string, tool *sdk.Tool, regi
 				firlog.Warn("mcp tool call failed", "server", serverName, "tool", toolName, "err", err)
 				return agent.AgentToolResult{}, err
 			}
-			return convertResult(result), nil
+			res := convertResult(result)
+			attachPassthrough(&res, serverName, toolName, result)
+			return res, nil
 		},
 	}
 }

@@ -739,6 +739,9 @@ func (pa *firAgent) replaySessionHistory(sessionID string, entry *firSession) {
 					if len(locs) > 0 {
 						startOpts = append(startOpts, acpsdk.WithStartLocations(locs))
 					}
+					if meta := mcpToolStartMeta(entry, tc.Name); meta != nil {
+						startOpts = append(startOpts, withStartMeta(meta))
+					}
 					_ = pa.conn.SessionUpdate(context.Background(), entry.notification(sid, acpsdk.StartToolCall(acpsdk.ToolCallId(tc.ID), BuildToolTitleWithHint(tc.Name, tc.Arguments, hint), startOpts...)))
 				}
 			}
@@ -773,7 +776,11 @@ func (pa *firAgent) replaySessionHistory(sessionID string, entry *firSession) {
 				toolName = pt.name
 				delete(pendingTools, tr.ToolCallID)
 			}
-			content, locations := BuildToolCallContent(toolName, argsMap, resultMap, tr.IsError)
+			content, locations := BuildToolCallContent(toolName, argsMap, mcpDisplayResult(resultMap), tr.IsError)
+			content = append(content, mcpResourceContent(resultMap)...)
+			if meta := mcpToolEndMeta(entry, toolName, resultMap); meta != nil {
+				updateOpts = append(updateOpts, withUpdateMeta(meta))
+			}
 			if len(content) > 0 {
 				updateOpts = append(updateOpts, acpsdk.WithUpdateContent(content))
 			}
@@ -815,10 +822,17 @@ func extractUserText(content any) string {
 func toolResultToContent(content []ai.ToolResultContent) []any {
 	result := make([]any, 0, len(content))
 	for _, c := range content {
-		result = append(result, map[string]any{
+		m := map[string]any{
 			"type": c.Type,
 			"text": c.Text,
-		})
+		}
+		if c.Data != "" {
+			m["data"] = c.Data
+		}
+		if c.MimeType != "" {
+			m["mimeType"] = c.MimeType
+		}
+		result = append(result, m)
 	}
 	return result
 }
@@ -888,6 +902,10 @@ func (pa *firAgent) handleEvent(sessionID string, entry *firSession, event sessi
 			startOpts = append(startOpts, acpsdk.WithStartContent(initContent))
 		}
 
+		if meta := mcpToolStartMeta(entry, ev.ToolName); meta != nil {
+			startOpts = append(startOpts, withStartMeta(meta))
+		}
+
 		title := BuildToolTitleWithHint(ev.ToolName, argsMap, ev.DisplayHint)
 		// Progress updates overwrite the title (that is what clients render as
 		// the spinner label), so remember it and restore it when the call ends.
@@ -937,8 +955,15 @@ func (pa *firAgent) handleEvent(sessionID string, entry *firSession, event sessi
 			status = "failed"
 		}
 
+		// Live results arrive as agent.AgentToolResult; use the replay map
+		// shape so display content and rawOutput match session/load.
+		result := normalizeToolResult(ev.Result)
+
 		var updateOpts []acpsdk.ToolCallUpdateOpt
-		updateOpts = append(updateOpts, acpsdk.WithUpdateStatus(status), acpsdk.WithUpdateRawOutput(ev.Result))
+		updateOpts = append(updateOpts, acpsdk.WithUpdateStatus(status), acpsdk.WithUpdateRawOutput(result))
+		if meta := mcpToolEndMeta(entry, ev.ToolName, result); meta != nil {
+			updateOpts = append(updateOpts, withUpdateMeta(meta))
+		}
 
 		// Restore the title, which in-flight progress updates overwrote, so a
 		// finished call is not left labelled with its last progress message.
@@ -949,7 +974,8 @@ func (pa *firAgent) handleEvent(sessionID string, entry *firSession, event sessi
 		}
 
 		if !usedAcpTerminal {
-			content, locations := BuildToolCallContent(ev.ToolName, argsMap, ev.Result, ev.IsError)
+			content, locations := BuildToolCallContent(ev.ToolName, argsMap, mcpDisplayResult(result), ev.IsError)
+			content = append(content, mcpResourceContent(result)...)
 			if len(content) > 0 {
 				updateOpts = append(updateOpts, acpsdk.WithUpdateContent(content))
 			}

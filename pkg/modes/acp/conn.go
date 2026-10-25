@@ -93,6 +93,13 @@ func rawMethodHandler(pa *firAgent, wn *writeNotifier) acpsdk.MethodHandler {
 				// fir extension: session/prompt responses carry _meta.leafId,
 				// the turn's leaf entry, accepted as session/fork _meta.at.
 				caps["promptCapabilities"] = mergeMeta(caps["promptCapabilities"], "leafId")
+				// fir extension: generic MCP data passthrough (mcppassthrough.go).
+				capMeta, _ := caps["_meta"].(map[string]any)
+				if capMeta == nil {
+					capMeta = map[string]any{}
+				}
+				capMeta[mcpExtKey] = mcpCapability()
+				caps["_meta"] = capMeta
 			}
 			// Replace authMethods with extended format (RFD auth-methods).
 			// The SDK's AuthMethod only has id/name/description/_meta, but the RFD
@@ -325,6 +332,9 @@ func rawMethodHandler(pa *firAgent, wn *writeNotifier) acpsdk.MethodHandler {
 			}()
 			firlog.Info("acp dispatch: "+method+" done", "total_ms", time.Since(methodStart).Milliseconds())
 			return respMap, nil
+
+		case mcpMethodReadResource, mcpMethodCallTool:
+			return pa.handleMCPMethod(ctx, method, params)
 
 		default:
 			return nil, acpsdk.NewMethodNotFound(method)
