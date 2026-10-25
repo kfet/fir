@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.40.3] - 2026-10-25
+
 ### Fixed
 
 - Test flake: `TestManager_SetSetStatusFn_PropagatesToRunningBridges` ignores set_status from other (builtin) extensions.
