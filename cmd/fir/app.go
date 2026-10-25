@@ -660,7 +660,6 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	close(setup.ExtReady) // extensions loaded synchronously
 	defer setup.result.Session.Close()
 	defer func() {
 		if setup.mcpManager != nil {
@@ -677,6 +676,9 @@ func run() error {
 		setup.extSetup.EmitSessionStart(nil)
 		defer func() { setup.extSetup.EmitSessionShutdown() }()
 	}
+	// Extensions loaded synchronously and session_start has been acked, so
+	// any context its handlers prepended is in place before the first prompt.
+	close(setup.ExtReady)
 
 	// Process @file arguments
 	var initialMessage string

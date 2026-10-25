@@ -394,7 +394,7 @@ timeout and proceeds, which is no worse than the fixed sleep this replaced.
 
 | Event name | `params` |
 |------------|----------|
-| `session_start` | `{"session_id": "...", "session_data": {"key": "value", ...}}` — `session_id` is the unique session identifier (always present, also retrievable any time via `get_session_id`).  `session_data` is the map previously stored via `set_session_data`, seeded from the reexec sidecar on `/reexec`; absent on a fresh session (no prior data). |
+| `session_start` | `{"session_id": "...", "session_data": {"key": "value", ...}}` — `session_id` is the unique session identifier (always present, also retrievable any time via `get_session_id`).  `session_data` is the map previously stored via `set_session_data`, seeded from the reexec sidecar on `/reexec`; absent on a fresh session (no prior data). |  Sent as a request: the host awaits the ack (up to 5s, all extensions concurrently) before dispatching the first prompt.
 | `session_shutdown` | *(params key absent)* — session is about to stop; last chance for cleanup. |
 | `session_named` | `{"name": "..."}` — fired when the session acquires a display name (on start if one already exists, or when it is set later). |
 | `session_update` | `{"type": "session_named"│"plan_update", "session_name": "...", "plan": {"total": N, "completed": N, "metadata": {...}}}` — generic session state change. |
@@ -1061,7 +1061,13 @@ authoritative extension of the system prompt.  The system prompt itself is
 **not** mutated — the provider's prompt cache stays valid.  The message is
 saved in the transcript, so a resumed session replays it in place; text
 identical to an injection already in the conversation is not added again.  It
-does not start a turn; the model sees it on its next turn.
+does not start a turn.  When idle, the model sees it on its next turn.  During
+a run it is held and delivered as its own user message right before the next
+request (after tool calls, or ahead of a steer or follow-up; tool results are
+never modified), or appended when
+the run ends.  Calls made from a `session_start` handler land before the first
+prompt is dispatched: the host awaits `session_start` (bounded, 5s) before
+releasing a queued prompt.
 
 ```json
 {"jsonrpc":"2.0","id":1018,"method":"prepend_context","params":{"content":"Project language: Go."}}

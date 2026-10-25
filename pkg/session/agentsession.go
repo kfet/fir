@@ -285,6 +285,13 @@ type AgentSession struct {
 	// upgrade sees fully-initialised auth-provider OAuth registrations.
 	extReady <-chan struct{}
 
+	// prependMu guards prependInFlight and serialises PrependContext so
+	// its duplicate check and append are atomic. prependInFlight holds the
+	// texts queued during a run until their message_end, when they reach
+	// agent state, so a duplicate is caught in between.
+	prependMu       sync.Mutex
+	prependInFlight map[string]struct{}
+
 	// sections tracks persistent extension sections (never nil).
 	sections *sectionTracker
 	mcp      mcpHealthState
@@ -568,6 +575,7 @@ func (s *AgentSession) handleAgentEvent(event agent.AgentEvent) {
 	// Session persistence on message_end
 	if event.Type == agent.EventMessageEnd && event.Message != nil {
 		s.persistMessage(*event.Message)
+		s.prependDelivered(*event.Message)
 
 		// Track last assistant message for auto-compaction (checked on agent_end)
 		if event.Message.Role() == "assistant" {
@@ -577,6 +585,11 @@ func (s *AgentSession) handleAgentEvent(event agent.AgentEvent) {
 
 	// Auto-compaction check on agent_end
 	if event.Type == agent.EventAgentEnd {
+		// Every queued PrependContext has been delivered by now.
+		s.prependMu.Lock()
+		clear(s.prependInFlight)
+		s.prependMu.Unlock()
+
 		if s.lastAssistantMessage != nil {
 			msg := s.lastAssistantMessage
 			s.lastAssistantMessage = nil
@@ -1260,16 +1273,44 @@ func (s *AgentSession) PrependContext(content string) {
 	// a normal transcript entry so a reloaded session replays it at its
 	// original position. A re-run of the same injector (e.g. session_start
 	// after an ACP idle reap) finds it already present and adds nothing.
-	for _, m := range s.Agent.State().Messages {
-		if u := m.AsUser(); u != nil && u.Content == text {
-			return
+	s.prependMu.Lock()
+	defer s.prependMu.Unlock()
+	isDup := func(msgs []agent.AgentMessage) bool {
+		for _, m := range msgs {
+			if u := m.AsUser(); u != nil && u.Content == text {
+				return true
+			}
 		}
+		return false
+	}
+	if _, inFlight := s.prependInFlight[text]; inFlight || isDup(s.Agent.State().Messages) || isDup(s.Agent.PeekContextQueue()) {
+		return
 	}
 	msg := agent.NewAgentMessage(ai.NewUserMsg(text, time.Now().UnixMilli()))
-	s.Agent.AppendMessage(msg)
-	if s.SessionStore != nil {
+	// During a run the agent holds the message and delivers it as a user
+	// message before the loop's next request (or at agent_end); it is then
+	// persisted on message_end like any other message. Idle: persist now.
+	if s.Agent.AppendContext(msg) {
+		if s.prependInFlight == nil {
+			s.prependInFlight = map[string]struct{}{}
+		}
+		s.prependInFlight[text] = struct{}{}
+	} else if s.SessionStore != nil {
 		s.SessionStore.AppendAgentMessage(msg)
 	}
+}
+
+// prependDelivered clears the in-flight mark of a queued PrependContext once
+// its message_end shows it in agent state.
+func (s *AgentSession) prependDelivered(msg agent.AgentMessage) {
+	u := msg.AsUser()
+	if u == nil {
+		return
+	}
+	text, _ := u.Content.(string)
+	s.prependMu.Lock()
+	delete(s.prependInFlight, text)
+	s.prependMu.Unlock()
 }
 
 // GetCwd returns the working directory.

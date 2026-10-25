@@ -3273,8 +3273,12 @@ class Context:
         transcript, so a resumed session replays it in place — the system
         prompt itself is left untouched, so this does not invalidate the
         provider's prompt cache. Text identical to an injection already in
-        the conversation is not added again. It does not start a turn: the
-        model sees it on its next turn.
+        the conversation is not added again. It does not start a turn. Idle:
+        the model sees it on its next turn. During a run: it arrives as its
+        own user message before the next request (after tool calls or a
+        steer/follow-up), or is
+        appended when the run ends. Calls from a session_start handler land
+        before the first prompt (the host awaits session_start, bounded).
 
         Parameters
         ----------

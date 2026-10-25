@@ -1234,11 +1234,19 @@ func (m *Manager) SeedSessionData(data map[string]map[string]string) {
 // session_start handler without a separate get_session_data call.
 // The data is also seeded into each bridge's store so ctx.get_session_data()
 // works throughout the session.
+//
+// It returns once every extension has acknowledged the event (its handler
+// returned, so any prepend_context it called has landed) or after
+// sessionStartAckTimeout. Callers close their extension-ready gate after this,
+// so a queued first prompt is never sent before session_start injections.
 func (m *Manager) EmitSessionStartWithData(reexecData map[string]map[string]string) {
 	m.mu.Lock()
 	bridges := append([]*managedBridge(nil), m.bridges...)
 	m.mu.Unlock()
 
+	ctx, cancel := context.WithTimeout(context.Background(), sessionStartAckTimeout)
+	defer cancel()
+	var wg sync.WaitGroup
 	for _, mb := range bridges {
 		var payload *SessionStartPayload
 		// Always include session_id so extensions can identify the session.
@@ -1257,9 +1265,21 @@ func (m *Manager) EmitSessionStartWithData(reexecData map[string]map[string]stri
 				SessionData: data,
 			}
 		}
-		_ = mb.bridge.EmitEvent("session_start", payload)
+		wg.Add(1)
+		go func(mb *managedBridge, payload *SessionStartPayload) {
+			defer wg.Done()
+			if err := mb.bridge.EmitEventAwait(ctx, "session_start", payload, sessionStartAckTimeout); err != nil {
+				m.logger.Warn("extension: session_start not acknowledged; continuing", "extension", mb.cfg.Name, "timeout", sessionStartAckTimeout, "err", err)
+			}
+		}(mb, payload)
 	}
+	wg.Wait()
 }
+
+// sessionStartAckTimeout bounds how long session_start waits for extensions to
+// acknowledge (all are awaited concurrently). A hung extension delays the first
+// prompt by at most this much and is then logged and left running.
+var sessionStartAckTimeout = 5 * time.Second
 
 // ---------------------------------------------------------------------------
 // Reserved observable-card source names

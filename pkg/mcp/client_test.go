@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -940,6 +941,21 @@ func TestManager_OnServerDisconnected_BenignOnServerShutdown(t *testing.T) {
 			return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: "ok"}}}, nil
 		})
 
+	// go-sdk v1.8.0 races ServerSession.Close against a subscriptions/listen
+	// that arrives during it: the listen registers after Close cancelled the
+	// known ones, parks, and Close waits on it forever. Close only once the
+	// client's listen has reached the server.
+	listening := make(chan struct{})
+	var listenOnce sync.Once
+	server.AddReceivingMiddleware(func(next sdk.MethodHandler) sdk.MethodHandler {
+		return func(ctx context.Context, method string, req sdk.Request) (sdk.Result, error) {
+			if method == "subscriptions/listen" {
+				listenOnce.Do(func() { close(listening) })
+			}
+			return next(ctx, method, req)
+		}
+	})
+
 	mgr := NewManager(map[string]ServerConfig{"srv": {}}, false)
 	mgr.dialFn = inMemoryDial(t, server)
 
@@ -947,6 +963,11 @@ func TestManager_OnServerDisconnected_BenignOnServerShutdown(t *testing.T) {
 
 	startAndWait(t, mgr, context.Background())
 	defer mgr.Close()
+	select {
+	case <-listening:
+	case <-time.After(15 * time.Second):
+		t.Fatal("client never opened subscriptions/listen")
+	}
 
 	// Shut the server side down the orderly way: a clean close of every live
 	// session, which makes the client's session.Wait() return nil.
