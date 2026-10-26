@@ -2,9 +2,15 @@
 
 ## [Unreleased]
 
+## [1.42.1] - 2026-10-26
+
 ### Fixed
 
 - Context prepended by extensions now reaches the model on the run it lands in: `session_start` is awaited (bounded 5s, logged) before a queued first prompt is dispatched (`fir -p`, ACP `session/prompt`, interactive initial prompt, wt briefs), and a `PrependContext` during a run is delivered as a `[SYS_EXT]` user message before the next request (after tool calls, or ahead of a steer or follow-up), or appended at agent_end — never forcing a turn or touching tool results (agent v0.6.1 `AppendContext`).
+
+### Changed
+
+- **Model catalog regenerated**: pricing/limits changed for openrouter: deepseek/deepseek-v4-flash-0731, deepseek/deepseek-v4-pro, qwen/qwen3.6-27b, tencent/hy3, tencent/hy4-preview, ~deepseek/deepseek-pro-latest, ~deepseek/deepseek-v4-flash-latest, ~moonshotai/kimi-latest, ~z-ai/glm-flash-latest.
 
 ## [1.42.0] - 2026-10-25
 
