@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **`self_handoff` no longer hands off twice.** The message that started the handing-off turn is carried with a note that the handoff already happened, so the new session answers it instead of handing off again.
+- **`self_handoff` carries a repeated message.** Carry-at-most-once now tracks each message, not its text, so a later message that repeats an earlier one (e.g. "continue") is still carried.
+- **`self_handoff` keeps message order.** A message that arrives while the handoff is unwinding is carried after the messages queued before it, not ahead of them.
+
+### Changed
+
+- **`ship-it` / `ship-wt`: the review-and-fix loop is mandatory.** An urgent or "quick" brief, or a small diff, no longer waives it.
+
 ## [1.43.1] - 2026-10-28
 
 ### Fixed

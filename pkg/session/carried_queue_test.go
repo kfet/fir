@@ -132,3 +132,28 @@ func TestQueueNotices(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+// TestPromptWithCarried_PreservesTimestamps: the handoff's carry-at-most-once
+// guard (extension.carryKey) recognises a carried message in the new session
+// by content and timestamp, so delivery must not restamp it.
+func TestPromptWithCarried_PreservesTimestamps(t *testing.T) {
+	for _, prompt := range []string{"handoff", ""} {
+		s := newTestAgentSessionWithModel(t, nil)
+		s.Agent.SetStreamFn(replyOK)
+		q := agent.NewAgentMessage(ai.NewUserMsg("q", 12345))
+		if err := s.PromptWithCarried(prompt, []agent.AgentMessage{q}); err != nil {
+			t.Fatal(err)
+		}
+		s.Agent.WaitForIdle()
+		found := false
+		for _, m := range s.State().Messages {
+			if u := m.Message.AsUser(); u != nil && u.Content == "q" {
+				found = u.Timestamp == 12345
+			}
+		}
+		s.Close()
+		if !found {
+			t.Fatalf("prompt %q: carried message missing or restamped", prompt)
+		}
+	}
+}

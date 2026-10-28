@@ -204,7 +204,7 @@ func TestHandleHandoff_CarriesQueuedFollowUp(t *testing.T) {
 			break
 		}
 	}
-	if idx < 0 || idx+2 >= len(got) || got[idx+1] != "start the long tool" || got[idx+2] != queuedText {
+	if idx < 0 || idx+2 >= len(got) || got[idx+1] != extension.CarriedNote+"\n\nstart the long tool" || got[idx+2] != queuedText {
 		t.Fatalf("want handoff prompt, then the unanswered turn, then the queued follow-up; user turns = %q", got)
 	}
 	if !tm.waitForOutput("2 unanswered messages carried into the new session") {

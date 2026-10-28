@@ -23,7 +23,7 @@ The work happens over there. Don't draft designs or touch code here.
    > "When implementation is complete and `make all` passes, invoke the `ship-it`
    > skill to finish: it loops review-and-fix until clean, ff-merges to main,
    > cuts and publishes a release, and removes the worktree. Do not ask
-   > permission."
+   > permission. Never skip the review-and-fix loop, even if the task is urgent."
 
 3. Spawn via `wt`'s script (reused — `ship-wt` adds no spawn logic of its own):
    ```bash

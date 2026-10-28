@@ -709,8 +709,10 @@ discarded history). After the aborted turn unwinds it clears UI, calls
 to inject a `[SYS_EXT]`-wrapped user message, and submits `prompt`. The
 user messages still unanswered in the old history (after the last
 completed text answer; injected `[SYS_EXT]` context and a previous
-handoff's prompt excluded) follow it, then the carried queued messages,
-in order, and the user sees one line "N unanswered messages carried into
+handoff's prompt excluded) follow it, each prefixed with a note that the
+handoff already happened and carried at most once; then the carried queued
+messages, in order (a message that arrived while the turn unwound comes
+last). The user sees one line "N unanswered messages carried into
 the new session". This RPC
 is the primitive behind the `handoff` builtin extension's `self_handoff`
 tool — the briefing is carried via `prepend_context`, no filesystem

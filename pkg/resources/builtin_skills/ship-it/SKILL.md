@@ -16,7 +16,9 @@ Run only on a worktree feature branch with implementation complete and
 ## Steps
 
 1. **review-and-fix** — invoke the `review-and-fix` skill. It loops internally
-   until a pass finds zero new issues, then commits.
+   until a pass finds zero new issues, then commits. Always run it: an
+   urgent or "quick" brief, or a small diff, does not waive it. Skipped
+   reviews have shipped bugs.
 2. **merge-to-main** — invoke the `merge-to-main` skill (squash, rebase, verify
    no main content lost, ff-merge, build).
 3. **release** — in the main worktree (the branch is already merged there),

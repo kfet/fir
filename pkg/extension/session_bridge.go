@@ -37,9 +37,10 @@ type SessionBridge struct {
 	// starts the new session and must not be carried as unanswered when
 	// that session hands off again.
 	lastRestartPrompt string
-	// lastCarried holds the content of the messages the last restart carried
-	// over. A message is carried at most once: if a carried message asks
-	// for a handoff, re-carrying it would loop forever.
+	// lastCarried identifies the messages the last restart carried over
+	// (see carryKey). A message is carried at most once: if a carried
+	// message asks for a handoff, re-carrying it would loop forever. It is
+	// replaced on every restart, so it never grows past one carry.
 	lastCarried map[string]struct{}
 
 	reloadMu sync.RWMutex
@@ -492,7 +493,7 @@ func (b *SessionBridge) RestartSession(prompt, prependContext string) error {
 	// history, which the restart then erases. This store happens-before
 	// Abort, which happens-before the in-flight Prompt() returns, so an
 	// inline consumer (ACP) always observes it without racing fn.
-	req := &RestartRequest{Prompt: prompt, PrependContext: prependContext}
+	req := &RestartRequest{Prompt: prompt, PrependContext: prependContext, requestedAt: time.Now().UnixMilli()}
 	b.restartMu.Lock()
 	if b.session != nil && b.session.Agent != nil {
 		req.Carried = b.session.TakeQueuedMessages()
@@ -550,10 +551,38 @@ func unansweredUserMessages(msgs []agent.AgentMessage, skip string, carried map[
 	return out
 }
 
-// carryKey identifies a carried user message by its content.
+// CarriedNote prefixes a message that started the turn which handed off.
+// The model already acted on it — the handoff included — so without the
+// note the new session repeats the handoff it asks for.
+const CarriedNote = "(Sent before the context handoff, which has already happened. Do not hand off again for this message.)"
+
+// withCarriedNote returns m with CarriedNote before its content, keeping the
+// timestamp.
+func withCarriedNote(m agent.AgentMessage) agent.AgentMessage {
+	u := m.AsUser()
+	content := u.Content
+	note := CarriedNote + "\n\n"
+	switch c := u.Content.(type) {
+	case string:
+		if strings.HasPrefix(c, note) {
+			return m
+		}
+		content = note + c
+	case []any:
+		if len(c) > 0 && c[0] == any(ai.TextContent{Type: "text", Text: note}) {
+			return m
+		}
+		content = append([]any{ai.TextContent{Type: "text", Text: note}}, c...)
+	}
+	return agent.NewAgentMessage(ai.NewUserMsg(content, u.Timestamp))
+}
+
+// carryKey identifies a carried user message by content and timestamp. A
+// carried message keeps its timestamp, so it is recognised in the new
+// session; a later message that merely repeats its text is a new message.
 func carryKey(m agent.AgentMessage) string {
 	if u := m.AsUser(); u != nil {
-		if b, err := json.Marshal(u.Content); err == nil {
+		if b, err := json.Marshal(u); err == nil {
 			return string(b)
 		}
 	}
@@ -568,6 +597,9 @@ type RestartRequest struct {
 	// follow-ups, each in enqueue order) when the restart was requested.
 	// They belong to the new session: deliver them after Prompt.
 	Carried []agent.AgentMessage
+	// requestedAt (Unix ms) splits unanswered history: messages newer than
+	// the request arrived while the aborted turn unwound, after Carried.
+	requestedAt int64
 }
 
 // TakePendingRestart returns and clears any restart request recorded by
@@ -586,7 +618,15 @@ func (b *SessionBridge) TakePendingRestart() (RestartRequest, bool) {
 	req := *b.pendingRestart
 	b.pendingRestart = nil
 	if b.session != nil && b.session.Agent != nil {
-		req.Carried = append(unansweredUserMessages(b.session.Agent.State().Messages, b.lastRestartPrompt, b.lastCarried), req.Carried...)
+		var before, after []agent.AgentMessage
+		for _, m := range unansweredUserMessages(b.session.Agent.State().Messages, b.lastRestartPrompt, b.lastCarried) {
+			if m.AsUser().Timestamp > req.requestedAt {
+				after = append(after, m)
+			} else {
+				before = append(before, withCarriedNote(m))
+			}
+		}
+		req.Carried = append(append(before, req.Carried...), after...)
 	}
 	b.lastRestartPrompt = req.Prompt
 	b.lastCarried = make(map[string]struct{}, len(req.Carried))
