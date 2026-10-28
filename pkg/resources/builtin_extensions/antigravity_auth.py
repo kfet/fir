@@ -394,7 +394,7 @@ def _probe_models(access: str, project: str, ids: list[str]) -> tuple[list[str],
 #
 #   - pkg/ai/providers/register_antigravity.go (DeclGoogleConfig)
 #   - pkg/ai/provider_registry_builtins.go (RegisteredProvider record)
-#   - cmd/generate-models/main.go + pkg/ai/models_generated.go (12 models)
+#   - cmd/generate-models/main.go + pkg/ai/models_catalog.bin (12 models)
 #
 # Migration also corrects a latent inconsistency: the antigravity Api wire
 # was previously registered but never actively used at runtime — antigravity

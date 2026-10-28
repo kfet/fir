@@ -2,7 +2,6 @@ package resources
 
 import (
 	"crypto/sha256"
-	"embed"
 	"encoding/hex"
 	"fmt"
 	"io/fs"
@@ -15,9 +14,6 @@ import (
 	"github.com/kfet/fir/pkg/envvars"
 	"github.com/kfet/fir/pkg/mcp"
 )
-
-//go:embed builtin_skills
-var BuiltinSkillsFS embed.FS
 
 var (
 	builtinExtractOnce sync.Once

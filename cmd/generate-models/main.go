@@ -12,14 +12,13 @@
 //
 // Usage:
 //
-//	go run ./cmd/generate-models/ [-out pkg/ai/models_generated.go]
+//	go run ./cmd/generate-models/ [-out pkg/ai/models_catalog.bin]
 package main
 
 import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"go/format"
 	"io"
 	"log"
 	"math"
@@ -30,7 +29,6 @@ import (
 	"runtime"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/kfet/fir/pkg/ai"
 )
@@ -2292,13 +2290,6 @@ func deduplicate(all []modelSpec) []modelSpec {
 	return unique
 }
 
-// formatFloat formats a float64 for Go source output.
-// It rounds to 8 decimal places to avoid floating-point noise from
-// per-token price arithmetic (e.g. 0.2 × 1e6 → 0.19999999999999998).
-func formatFloat(f float64) string {
-	return fmt.Sprintf("%g", roundEmitted(f))
-}
-
 // roundEmitted is the precision the generated catalog actually carries. Costs
 // arrive from the aggregators as $/token multiplied by a million, so they are
 // riddled with float noise (0.30000000000000004); rounding here is what makes
@@ -2314,129 +2305,78 @@ func goString(s string) string {
 	return string(b)
 }
 
-// renderCompat renders a compatSpec as a Go expression.
-func renderCompat(c *compatSpec) string {
-	if c == nil {
-		return "nil"
+// toCatalogModel converts a modelSpec to the ai.Model the catalog stores.
+// Empty maps/slices collapse to nil, and costs are rounded to the emitted
+// precision, exactly as the old Go-literal output did.
+func toCatalogModel(m modelSpec) *ai.Model {
+	out := &ai.Model{
+		ID:        m.ID,
+		Name:      m.Name,
+		API:       ai.Api(m.API),
+		Provider:  ai.Provider(m.Provider),
+		BaseURL:   m.BaseURL,
+		Reasoning: m.Reasoning,
+		Input:     make([]ai.InputModality, len(m.Input)),
+		Cost: ai.ModelCost{
+			Input: roundEmitted(m.CostInput), Output: roundEmitted(m.CostOutput),
+			CacheRead: roundEmitted(m.CostCacheRead), CacheWrite: roundEmitted(m.CostCacheWrite),
+		},
+		ContextWindow:    m.ContextWindow,
+		MaxTokens:        m.MaxTokens,
+		Compaction:       m.Compaction,
+		AdaptiveThinking: m.AdaptiveThinking,
+		SWEInferred:      m.SWEInferred,
 	}
-	var fields []string
-	if c.SupportsStore != nil {
-		fields = append(fields, fmt.Sprintf("SupportsStore: boolRef(%v)", *c.SupportsStore))
+	for i, in := range m.Input {
+		out.Input[i] = ai.InputModality(in)
 	}
-	if c.SupportsDeveloperRole != nil {
-		fields = append(fields, fmt.Sprintf("SupportsDeveloperRole: boolRef(%v)", *c.SupportsDeveloperRole))
+	if len(m.Headers) > 0 {
+		out.Headers = m.Headers
 	}
-	if c.SupportsReasoningEffort != nil {
-		fields = append(fields, fmt.Sprintf("SupportsReasoningEffort: boolRef(%v)", *c.SupportsReasoningEffort))
-	}
-	if c.ThinkingFormat != "" {
-		fields = append(fields, fmt.Sprintf("ThinkingFormat: %s", goString(c.ThinkingFormat)))
-	}
-	if c.ZaiToolStream != nil {
-		fields = append(fields, fmt.Sprintf("ZaiToolStream: boolRef(%v)", *c.ZaiToolStream))
-	}
-	if c.RequiresReasoningContentOnAssistantMessages != nil {
-		fields = append(fields, fmt.Sprintf("RequiresReasoningContentOnAssistantMessages: boolRef(%v)", *c.RequiresReasoningContentOnAssistantMessages))
-	}
-	if len(c.ReasoningEffortMap) > 0 {
-		pairs := make([]string, 0, len(c.ReasoningEffortMap))
-		for k, v := range c.ReasoningEffortMap {
-			pairs = append(pairs, fmt.Sprintf("%s: %s", goString(k), goString(v)))
+	if c := m.Compat; c != nil {
+		cc := &ai.OpenAICompletionsCompat{
+			SupportsStore:           c.SupportsStore,
+			SupportsDeveloperRole:   c.SupportsDeveloperRole,
+			SupportsReasoningEffort: c.SupportsReasoningEffort,
+			ThinkingFormat:          ai.ThinkingFormat(c.ThinkingFormat),
+			ZaiToolStream:           c.ZaiToolStream,
+			RequiresReasoningContentOnAssistantMessages: c.RequiresReasoningContentOnAssistantMessages,
 		}
-		sort.Strings(pairs)
-		fields = append(fields, "ReasoningEffortMap: map[string]string{"+strings.Join(pairs, ", ")+"}")
+		if len(c.ReasoningEffortMap) > 0 {
+			cc.ReasoningEffortMap = c.ReasoningEffortMap
+		}
+		if !isZeroCompat(cc) {
+			out.Compat = cc
+		}
 	}
-	if len(fields) == 0 {
-		return "nil"
+	if len(m.ServerTools) > 0 {
+		out.ServerTools = m.ServerTools
 	}
-	return "&OpenAICompletionsCompat{" + strings.Join(fields, ", ") + "}"
+	if m.SWEScore > 0 {
+		out.SWEScore = roundEmitted(m.SWEScore)
+	}
+	if len(m.ReasoningEffortValues) > 0 {
+		out.ReasoningEffortValues = m.ReasoningEffortValues
+	}
+	return out
 }
 
-// renderHeaders renders a map[string]string as a Go map literal or nil.
-func renderHeaders(h map[string]string) string {
-	if len(h) == 0 {
-		return "nil"
-	}
-	// Sort keys for deterministic output
-	keys := make([]string, 0, len(h))
-	for k := range h {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	var parts []string
-	for _, k := range keys {
-		parts = append(parts, fmt.Sprintf("%s: %s", goString(k), goString(h[k])))
-	}
-	return "map[string]string{" + strings.Join(parts, ", ") + "}"
+// isZeroCompat reports whether c carries no fields (the old renderer emitted
+// no Compat at all in that case).
+func isZeroCompat(c *ai.OpenAICompletionsCompat) bool {
+	return c.SupportsStore == nil && c.SupportsDeveloperRole == nil &&
+		c.SupportsReasoningEffort == nil && c.ThinkingFormat == "" &&
+		c.ZaiToolStream == nil && c.RequiresReasoningContentOnAssistantMessages == nil &&
+		len(c.ReasoningEffortMap) == 0
 }
 
-// renderInput renders a []string as a Go string slice literal.
-func renderInput(input []string) string {
-	quoted := make([]string, len(input))
-	for i, s := range input {
-		quoted[i] = goString(s)
+// generateCatalog encodes the model list into the embedded catalog format.
+func generateCatalog(models []modelSpec) []byte {
+	ms := make([]*ai.Model, len(models))
+	for i, m := range models {
+		ms[i] = toCatalogModel(m)
 	}
-	return "[]string{" + strings.Join(quoted, ", ") + "}"
-}
-
-func renderStringSlice(items []string) string {
-	quoted := make([]string, len(items))
-	for i, s := range items {
-		quoted[i] = goString(s)
-	}
-	return "[]string{" + strings.Join(quoted, ", ") + "}"
-}
-
-// generateGoSource generates the complete Go source file from the model list.
-func generateGoSource(models []modelSpec) string {
-	var sb strings.Builder
-	sb.WriteString("// Code generated by cmd/generate-models. DO NOT EDIT.\n")
-	sb.WriteString(fmt.Sprintf("// Generated at: %s\n", time.Now().UTC().Format(time.RFC3339)))
-	sb.WriteString("package ai\n\n")
-	sb.WriteString("func init() {\n")
-
-	for _, m := range models {
-		sb.WriteString("\tRegisterModel(&Model{\n")
-		sb.WriteString(fmt.Sprintf("\t\tID:            %s,\n", goString(m.ID)))
-		sb.WriteString(fmt.Sprintf("\t\tName:          %s,\n", goString(m.Name)))
-		sb.WriteString(fmt.Sprintf("\t\tAPI:           %s,\n", goString(m.API)))
-		sb.WriteString(fmt.Sprintf("\t\tProvider:      %s,\n", goString(m.Provider)))
-		sb.WriteString(fmt.Sprintf("\t\tBaseURL:       %s,\n", goString(m.BaseURL)))
-		sb.WriteString(fmt.Sprintf("\t\tReasoning:     %v,\n", m.Reasoning))
-		sb.WriteString(fmt.Sprintf("\t\tInput:         %s,\n", renderInput(m.Input)))
-		sb.WriteString(fmt.Sprintf("\t\tCost:          ModelCost{Input: %s, Output: %s, CacheRead: %s, CacheWrite: %s},\n",
-			formatFloat(m.CostInput), formatFloat(m.CostOutput),
-			formatFloat(m.CostCacheRead), formatFloat(m.CostCacheWrite)))
-		sb.WriteString(fmt.Sprintf("\t\tContextWindow: %d,\n", m.ContextWindow))
-		sb.WriteString(fmt.Sprintf("\t\tMaxTokens:     %d,\n", m.MaxTokens))
-		sb.WriteString(fmt.Sprintf("\t\tHeaders:       %s,\n", renderHeaders(m.Headers)))
-		compat := renderCompat(m.Compat)
-		if compat != "nil" {
-			sb.WriteString(fmt.Sprintf("\t\tCompat:        %s,\n", compat))
-		}
-		if len(m.ServerTools) > 0 {
-			sb.WriteString(fmt.Sprintf("\t\tServerTools:   %s,\n", renderStringSlice(m.ServerTools)))
-		}
-		if m.Compaction {
-			sb.WriteString("\t\tCompaction:    true,\n")
-		}
-		if m.AdaptiveThinking {
-			sb.WriteString("\t\tAdaptiveThinking: true,\n")
-		}
-		if m.SWEScore > 0 {
-			sb.WriteString(fmt.Sprintf("\t\tSWEScore:      %s,\n", formatFloat(m.SWEScore)))
-		}
-		if m.SWEInferred {
-			sb.WriteString("\t\tSWEInferred:   true,\n")
-		}
-		if len(m.ReasoningEffortValues) > 0 {
-			sb.WriteString(fmt.Sprintf("\t\tReasoningEffortValues: %s,\n", renderStringSlice(m.ReasoningEffortValues)))
-		}
-		sb.WriteString("\t})\n")
-	}
-
-	sb.WriteString("}\n")
-	return sb.String()
+	return ai.EncodeCatalog(ms)
 }
 
 // repoRoot returns the root of the fir repository (parent of cmd/generate-models).
@@ -2462,7 +2402,7 @@ func restoreStdLogOutput() {
 func main() {
 	restoreStdLogOutput()
 	root := repoRoot()
-	out := flag.String("out", filepath.Join(root, "pkg", "ai", "models_generated.go"), "output file path")
+	out := flag.String("out", filepath.Join(root, "pkg", "ai", "models_catalog.bin"), "output file path")
 	// Nightly model-watch flags; see watch.go. All optional — with none of
 	// them set this is exactly the generator `make generate-models` runs.
 	report := flag.String("report", "", "write a human-readable new-model report (markdown) to this path")
@@ -2545,21 +2485,8 @@ func main() {
 	// Propagate scores to unbenched models via family lineage inheritance.
 	all = inferSWEScores(all)
 
-	// Generate Go source
-	source := generateGoSource(all)
-
-	// gofmt the output so the committed file is always gofmt-clean. Without
-	// this, a model with a long field name (e.g. ReasoningEffortValues) widens
-	// struct-field alignment and `make all`'s fmt step rewrites the file in CI,
-	// leaving the tree dirty and failing the GoReleaser git-state check.
-	if formatted, ferr := format.Source([]byte(source)); ferr != nil {
-		log.Printf("Warning: gofmt of generated source failed (%v); writing unformatted", ferr)
-	} else {
-		source = string(formatted)
-	}
-
-	// Write output
-	if err := os.WriteFile(*out, []byte(source), 0o644); err != nil {
+	data := generateCatalog(all)
+	if err := os.WriteFile(*out, data, 0o644); err != nil {
 		log.Fatalf("write %s: %v", *out, err)
 	}
 

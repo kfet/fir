@@ -31,7 +31,7 @@ Everything that makes fir a product, not a library:
 - Session store, sidecars, compaction (`pkg/session/...`).
 - Extension host (`pkg/extension/...`).
 - MCP runtime (`pkg/mcp/...`).
-- Provider catalog (`pkg/ai/models_generated.go`, `pkg/ai/providers/...`),
+- Provider catalog (`pkg/ai/models_catalog.bin`, `pkg/ai/providers/...`),
   config (`pkg/config`), auth (`pkg/auth`), models (`pkg/models`).
 - All resources (`pkg/resources/...`).
 
@@ -153,7 +153,7 @@ Carve `pkg/ai` into:
 - Portable types: `Message`, `Tool`, `Usage`, `Context`, `Provider`,
   `AssistantMessageEvent*`, `StreamFunction`, `Model` (shape only — the
   generated catalog stays in fir).
-- Fir-resident: `models_generated.go`, `provider_registry_builtins.go`,
+- Fir-resident: `models_catalog.bin`, `provider_registry_builtins.go`,
   the OAuth registry helpers wired to specific fir providers, `Registry`
   (the API transport registry with its extension-source-tracking
   policy), `stream.go` (uses `Registry`).
@@ -166,7 +166,7 @@ re-export aliases.
 - `pkg/ai/aliases.go` re-exports every public symbol from core via
   `type X = core.X`, `var X = core.X`, `const X = core.X`. The 150+
   existing call sites see no change.
-- `pkg/ai/stream.go`, `registry.go`, `models.go`, `models_generated.go`,
+- `pkg/ai/stream.go`, `registry.go`, `models.go`, `models_catalog.bin`,
   `oauthreg.go`, `provider_registry*.go` stay in `pkg/ai` and continue
   to reference types by their alias names.
 

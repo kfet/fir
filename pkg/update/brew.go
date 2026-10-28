@@ -10,8 +10,6 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-
-	selfupdate "github.com/creativeprojects/go-selfupdate"
 )
 
 // standardBrewPrefixes are the prefixes Homebrew itself documents and uses by
@@ -61,7 +59,7 @@ type brewEnv struct {
 // defaultBrewEnv is the production environment.
 func defaultBrewEnv() brewEnv {
 	return brewEnv{
-		executablePath:  selfupdate.ExecutablePath,
+		executablePath:  executablePath,
 		evalSymlinks:    filepath.EvalSymlinks,
 		lookPath:        exec.LookPath,
 		brewPrefix:      execBrewPrefix,

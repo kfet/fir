@@ -121,7 +121,9 @@ check-size:
 
 # Ensure modules are tidy once; other targets depend on this.
 # Skipped when TIDY_DONE=1 (set by `make all` after running tidy upfront).
+# Regenerate compressed embedded assets (pkg/zfs) so blobs are never stale.
 tidy:
+	@go generate ./pkg/resources ./pkg/extension/sdk
 ifndef TIDY_DONE
 	@go mod tidy
 endif
@@ -239,6 +241,7 @@ generate-models:
 	@mkdir -p $(BINDIR)
 	go build -o $(BINDIR)/generate-models ./cmd/generate-models/
 	$(BINDIR)/generate-models
+	go test ./pkg/ai/ -run TestRegistryGolden -count=1 -update-golden
 
 clean:
 	rm -rf $(BINDIR)

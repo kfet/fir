@@ -194,7 +194,7 @@ func (b *Bridge) RegisterProviders() {
 
 		// Static model catalogue (any models the spec ships explicitly).
 		// Metadata-only ext providers may omit Models entirely and rely
-		// on the existing models_generated.go catalogue.
+		// on the existing models_catalog.bin catalogue.
 		for _, m := range ps.Models {
 			ai.RegisterModel(modelFromSpec(ps.ID, api, m))
 		}

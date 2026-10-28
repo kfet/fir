@@ -322,7 +322,7 @@ func TestGetModel_NewGemini31Models(t *testing.T) {
 }
 
 func TestGeneratedModelsRegistered(t *testing.T) {
-	// Verify the init() from models_generated.go registered models
+	// Verify the embedded catalog (models_catalog.bin) registered models
 	providers := GetProviders()
 	if len(providers) < 5 {
 		t.Errorf("expected at least 5 providers, got %d", len(providers))

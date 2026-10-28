@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	selfupdate "github.com/creativeprojects/go-selfupdate"
 	goversion "github.com/hashicorp/go-version"
 )
 
@@ -41,8 +40,8 @@ var errNoRelease = errors.New("no release found")
 type Release struct {
 	// Version is the release tag, e.g. "v0.5.0".
 	Version string
-	// inner is the underlying go-selfupdate release (nil for cache-only results).
-	inner *selfupdate.Release
+	// inner is the matched platform asset (nil for cache-only results).
+	inner *asset
 }
 
 // cacheEntry is persisted to agentDir/update-check.json to limit API calls.
@@ -58,26 +57,6 @@ type cacheEntry struct {
 	// needing debug logging to have been enabled at the right moment.
 	DistkitVersion string `json:"distkit_version,omitempty"`
 	DistkitError   string `json:"distkit_error,omitempty"`
-}
-
-// newUpdater creates a go-selfupdate Updater configured for our asset naming.
-// Our release assets are named "fir-{os}-{arch}" (raw binaries, no archive).
-func newUpdater(source selfupdate.Source) (*selfupdate.Updater, error) {
-	return selfupdate.NewUpdater(selfupdate.Config{
-		Source: source,
-	})
-}
-
-// newGitHubSource creates a GitHub source, optionally with a token.
-func newGitHubSource(token string) (*selfupdate.GitHubSource, error) {
-	return selfupdate.NewGitHubSource(selfupdate.GitHubConfig{
-		APIToken: token,
-	})
-}
-
-// repo returns the repository slug for our project.
-func repo() selfupdate.RepositorySlug {
-	return selfupdate.ParseSlug(repoOwner + "/" + repoName)
 }
 
 // CheckLatest returns the latest release if it is newer than currentVersion,
@@ -117,21 +96,12 @@ func checkLatest(ctx context.Context, currentVersion, cacheDir string, forceRefr
 	}
 
 	// Slow path: fetch from GitHub (no auth for background check).
-	source, err := newGitHubSource("")
-	if err != nil {
-		return nil, err
-	}
-	updater, err := newUpdater(source)
-	if err != nil {
-		return nil, err
-	}
-
 	// The dormant distkit resolver runs CONCURRENTLY with go-selfupdate, so
 	// the shadow costs latency only when it is the slower of the two, not
 	// on top of the authoritative check.
 	shadowCh := startShadowResolve(ctx, currentVersion)
 
-	latest, found, err := updater.DetectLatest(ctx, repo())
+	latest, version, found, err := detectLatest(ctx, apiBase, repoOwner+"/"+repoName)
 	if err != nil {
 		shadowCh.logPrimaryFailure(err)
 		return nil, err
@@ -140,8 +110,6 @@ func checkLatest(ctx context.Context, currentVersion, cacheDir string, forceRefr
 		shadowCh.logPrimaryFailure(errNoRelease)
 		return nil, nil
 	}
-
-	version := latest.Version()
 
 	// Persist the authoritative answer straight away, and never block it on
 	// the dormant resolver: a distkit call that hangs until the context
@@ -161,26 +129,18 @@ func checkLatest(ctx context.Context, currentVersion, cacheDir string, forceRefr
 // FetchLatest fetches the latest release from the public distribution repo
 // via HTTPS (no auth required).
 func FetchLatest(ctx context.Context) (*Release, error) {
-	source, err := newGitHubSource("")
-	if err != nil {
-		return nil, err
-	}
-	return fetchLatestWithSource(ctx, source)
+	return fetchLatestFrom(ctx, apiBase)
 }
 
-func fetchLatestWithSource(ctx context.Context, source selfupdate.Source) (*Release, error) {
-	updater, err := newUpdater(source)
-	if err != nil {
-		return nil, err
-	}
-	latest, found, err := updater.DetectLatest(ctx, repo())
+func fetchLatestFrom(ctx context.Context, base string) (*Release, error) {
+	latest, version, found, err := detectLatest(ctx, base, repoOwner+"/"+repoName)
 	if err != nil {
 		return nil, err
 	}
 	if !found {
 		return nil, fmt.Errorf("no release found for %s/%s", repoOwner, repoName)
 	}
-	return &Release{Version: latest.Version(), inner: latest}, nil
+	return &Release{Version: version, inner: latest}, nil
 }
 
 // SelfUpdate downloads the release binary for the current platform and
@@ -188,7 +148,7 @@ func fetchLatestWithSource(ctx context.Context, source selfupdate.Source) (*Rele
 // replaced executable (symlinks resolved), which is the path a caller must
 // use to restart into the new binary.
 //
-// The path matters: the underlying updater renames the running binary to
+// The path matters: the updater renames the running binary to
 // <dir>/.<name>.old before moving the new one into place and then deletes
 // it, so after this call os.Executable() (i.e. /proc/self/exe) points at a
 // deleted file. Restarting must use the returned path, not os.Executable().
@@ -205,21 +165,12 @@ func SelfUpdate(ctx context.Context, rel *Release) (string, error) {
 		return "", fmt.Errorf("no release assets available")
 	}
 
-	source, err := newGitHubSource("")
-	if err != nil {
-		return "", err
-	}
-	updater, err := newUpdater(source)
-	if err != nil {
-		return "", err
-	}
-
-	exePath, err := selfupdate.ExecutablePath()
+	exePath, err := executablePath()
 	if err != nil {
 		return "", fmt.Errorf("locate current executable: %w", err)
 	}
 
-	if err := updater.UpdateTo(ctx, rel.inner, exePath); err != nil {
+	if err := updateTo(ctx, rel.inner, exePath); err != nil {
 		return "", err
 	}
 	return exePath, nil

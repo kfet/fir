@@ -565,3 +565,23 @@ func TestReportCatalogDiff(t *testing.T) {
 	// No -changelog path: the summary is logged and nothing is written.
 	reportCatalogDiff([]modelSpec{spec("watch-release", "releasemodel-2")}, []string{"poe: boom"}, "")
 }
+
+func TestToCatalogModelNormalisation(t *testing.T) {
+	m := toCatalogModel(modelSpec{
+		ID: "x", Input: []string{"text"}, CostInput: 0.30000000000000004,
+		Headers: map[string]string{}, Compat: &compatSpec{}, ServerTools: []string{},
+	})
+	if m.Headers != nil || m.Compat != nil || m.ServerTools != nil {
+		t.Fatalf("empty containers must collapse to nil: %#v", m)
+	}
+	if m.Cost.Input != 0.3 {
+		t.Fatalf("cost not rounded: %v", m.Cost.Input)
+	}
+	m = toCatalogModel(modelSpec{ID: "y", Compat: &compatSpec{SupportsStore: boolPtr(false)}})
+	if c, ok := m.Compat.(*ai.OpenAICompletionsCompat); !ok || c.SupportsStore == nil || *c.SupportsStore {
+		t.Fatalf("compat lost: %#v", m.Compat)
+	}
+	if len(generateCatalog([]modelSpec{{ID: "y"}})) == 0 {
+		t.Fatal("empty catalog blob")
+	}
+}

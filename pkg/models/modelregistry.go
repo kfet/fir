@@ -226,7 +226,7 @@ type ProviderOverride struct {
 
 // Model definition origins, reported by ModelRegistry.ModelOrigin.
 const (
-	// OriginBuiltIn is the compiled-in catalog (models_generated.go).
+	// OriginBuiltIn is the compiled-in catalog (models_catalog.bin).
 	OriginBuiltIn = "builtin"
 	// OriginOverlay is the fir-dist catalog overlay.
 	OriginOverlay = "overlay"

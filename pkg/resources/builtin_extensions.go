@@ -2,7 +2,6 @@ package resources
 
 import (
 	"crypto/sha256"
-	"embed"
 	"fmt"
 	"io/fs"
 	"os"
@@ -12,9 +11,6 @@ import (
 
 	"github.com/kfet/fir/pkg/cache"
 )
-
-//go:embed builtin_extensions
-var BuiltinExtensionsFS embed.FS
 
 var (
 	builtinExtExtractOnce sync.Once

@@ -54,9 +54,15 @@
 ^github\.com/kfet/fir/cmd/fir/[^/]+\.go:
 
 # Build-time code generator. Fetches live provider model catalogues over the
-# network and rewrites pkg/ai/models_generated.go; not part of the shipped
+# network and rewrites pkg/ai/models_catalog.bin; not part of the shipped
 # binary.
 ^github\.com/kfet/fir/cmd/generate-models/[^/]+\.go:
+
+# Build-time archive packer (pkg/zfs/pack.go) and its CLI. Used by
+# `go generate` and freshness tests; its happy path is covered by zfs_test.go,
+# the rest is I/O error plumbing.
+^github\.com/kfet/fir/cmd/zfsgen/[^/]+\.go:
+^github\.com/kfet/fir/pkg/zfs/pack\.go:
 
 # Bubble Tea TUI: event loop, key handling, and ANSI/viewport rendering.
 # Output is terminal geometry, not values — assertions would pin escape

@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Added
+
+- `fir update` now checks the downloaded binary against the release's `checksums.txt` and refuses to install a corrupt or truncated download.
+
+### Changed
+
+- Built-in model catalog is now a flate-compressed JSON blob (`pkg/ai/models_catalog.bin`) decoded lazily on first use instead of ~1500 Go struct literals; binary ~0.6 MB smaller, registry contents identical (golden-tested).
+- Embedded skills, builtin extensions and SDK stubs are now stored as gzip archives (`pkg/zfs`), and SDK test files are no longer embedded; binary ~1.1 MB smaller.
+- Self-update no longer depends on go-selfupdate (go-github, xz, bzip2, oauth2): a small stdlib implementation does release lookup, platform asset selection and atomic replace with rollback; binary ~1.3 MB smaller.
+
 ## [1.43.2] - 2026-10-28
 
 ### Fixed

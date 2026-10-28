@@ -56,7 +56,7 @@ type RegisteredProvider struct {
 	ClaimsModelIDGlobs []string
 	// RefuseFuzzyMatch disables sibling-clone fallback for unknown model IDs
 	// under this provider.  Used when an unknown id almost always means a
-	// typo (e.g. Poe's bot catalogue is exhaustive in models_generated.go).
+	// typo (e.g. Poe's bot catalogue is exhaustive in models_catalog.bin).
 	RefuseFuzzyMatch bool
 	Source           string // "builtin" or "ext:<name>"
 }

@@ -44,7 +44,7 @@ step 1); that line alone is not grounds for a minor bump either.
    Run the generator **once**. Its baseline is the catalog compiled into the
    binary it just built from the checkout, so a second run diffs against the
    first run's own output and reports nothing changed. If you have already run
-   it twice, `git checkout pkg/ai/models_generated.go` and run it once more.
+   it twice, `git checkout pkg/ai/models_catalog.bin` and run it once more.
 2. **Full build & test** — execute `make all` and confirm everything passes.
 2b. **Docs** — review repo docs against this release; update them, and update or generate high-level docs. Bigger diagrams, less words.
 3. **Check CHANGELOG** — read `CHANGELOG.md` and confirm there are entries under `## [Unreleased]`. If empty, ask the user.

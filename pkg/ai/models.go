@@ -10,22 +10,37 @@ import (
 var (
 	modelRegistryMu sync.RWMutex
 	modelRegistry   = make(map[Provider]map[string]*Model) // provider -> modelID -> Model
+	catalogOnce     sync.Once
 )
 
-// RegisterModel adds a model to the built-in registry.
-// Called by init() in models_generated.go and can be called for custom models.
-func RegisterModel(m *Model) {
-	modelRegistryMu.Lock()
-	defer modelRegistryMu.Unlock()
+// ensureCatalog loads the embedded built-in catalog into the registry the
+// first time the registry is touched. Every accessor calls it before taking
+// the lock, so callers observe exactly what an eager init() would give —
+// catalog first, later registrations on top — without paying the decode on
+// startup paths that never look at models (fir --version, observe, send).
+func ensureCatalog() { catalogOnce.Do(func() { registerCatalog(catalogData) }) }
+
+func registerLocked(m *Model) {
 	if _, ok := modelRegistry[m.Provider]; !ok {
 		modelRegistry[m.Provider] = make(map[string]*Model)
 	}
 	modelRegistry[m.Provider][m.ID] = m
 }
 
+// RegisterModel adds a model to the built-in registry.
+// The built-in catalog is loaded first (see ensureCatalog), so a custom
+// model with the same provider and ID overrides the built-in one.
+func RegisterModel(m *Model) {
+	ensureCatalog()
+	modelRegistryMu.Lock()
+	defer modelRegistryMu.Unlock()
+	registerLocked(m)
+}
+
 // UnregisterModel removes a model from the registry. Used when an extension
 // withdraws a provider that previously registered models. No-op if absent.
 func UnregisterModel(provider Provider, modelID string) {
+	ensureCatalog()
 	modelRegistryMu.Lock()
 	defer modelRegistryMu.Unlock()
 	if pm := modelRegistry[provider]; pm != nil {
@@ -39,6 +54,7 @@ func UnregisterModel(provider Provider, modelID string) {
 // UnregisterProviderModels removes every model under the given provider.
 // Used when an extension shuts down to roll back its model contributions.
 func UnregisterProviderModels(provider Provider) {
+	ensureCatalog()
 	modelRegistryMu.Lock()
 	defer modelRegistryMu.Unlock()
 	delete(modelRegistry, provider)
@@ -46,6 +62,7 @@ func UnregisterProviderModels(provider Provider) {
 
 // GetModel returns a model by provider and model ID, or nil if not found.
 func GetModel(provider Provider, modelID string) *Model {
+	ensureCatalog()
 	modelRegistryMu.RLock()
 	defer modelRegistryMu.RUnlock()
 	providerModels := modelRegistry[provider]
@@ -57,6 +74,7 @@ func GetModel(provider Provider, modelID string) *Model {
 
 // GetProviders returns all known provider names.
 func GetProviders() []Provider {
+	ensureCatalog()
 	modelRegistryMu.RLock()
 	defer modelRegistryMu.RUnlock()
 	providers := make([]Provider, 0, len(modelRegistry))
@@ -68,6 +86,7 @@ func GetProviders() []Provider {
 
 // GetModels returns all models for a given provider.
 func GetModels(provider Provider) []*Model {
+	ensureCatalog()
 	modelRegistryMu.RLock()
 	defer modelRegistryMu.RUnlock()
 	providerModels := modelRegistry[provider]
@@ -159,9 +178,6 @@ func ModelsAreEqual(a, b *Model) bool {
 	}
 	return a.ID == b.ID && a.Provider == b.Provider
 }
-
-// boolRef returns a pointer to b. Used in model registration for Compat fields.
-func boolRef(b bool) *bool { return &b }
 
 // IsUnixURL reports whether a base URL uses the unix:// scheme (HTTP over a
 // unix domain socket; no API key required).

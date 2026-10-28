@@ -67,7 +67,7 @@ whole-tree number through no sin). Tier 1's 100% never moves.
 Bubble Tea TUI and widget rendering (`pkg/modes/interactive*`,
 `pkg/tui/components`), self-update, session re-exec, the OS clipboard shim,
 the standalone binary-size skill helper, and the generated
-`pkg/ai/models_generated.go`. Covering these means testing the terminal, the
+`pkg/ai/models_catalog.bin`. Covering these means testing the terminal, the
 OS or the network rather than fir's logic. These lines may legitimately
 never leave the file — though the right long-term move for several is to
 push the unmockable part behind a narrow wrapper and shrink the exclusion to

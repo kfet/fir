@@ -1196,7 +1196,8 @@ class DefaultAdvisorFallbackIsSane(unittest.TestCase):
         "..",
         "..",
         "ai",
-        "models_generated.go",
+        "testdata",
+        "registry_golden.txt",
     )
 
     def _registry_ids(self):
@@ -1204,7 +1205,7 @@ class DefaultAdvisorFallbackIsSane(unittest.TestCase):
 
         with open(self._MODELS_GO, encoding="utf-8") as f:
             models_src = f.read()
-        id_re = re.compile(r'ID:\s*"([^"]+)"(?:[^}]*?)Provider:\s*"anthropic"', re.DOTALL)
+        id_re = re.compile(r"^anthropic/(\S+) ", re.MULTILINE)
         return set(id_re.findall(models_src))
 
     def test_fallback_chain_is_ranked_registered_flagships(self):
@@ -1255,7 +1256,7 @@ class DefaultDelegateFallbackIsSane(unittest.TestCase):
         )
         with open(self._MODELS_GO, encoding="utf-8") as f:
             models_src = f.read()
-        id_re = re.compile(r'ID:\s*"([^"]+)"(?:[^}]*?)Provider:\s*"anthropic"', re.DOTALL)
+        id_re = re.compile(r"^anthropic/(\S+) ", re.MULTILINE)
         self.assertIn(parsed["model"], set(id_re.findall(models_src)))
 
 

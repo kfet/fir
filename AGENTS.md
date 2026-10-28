@@ -117,7 +117,7 @@ New entries go at the top of their subsection (most recent first).
 
 ## Models
 
-`pkg/ai/models_generated.go` is a generated file — **never edit it directly**. It is completely overwritten by `make generate-models`. Any manual edits will be lost.
+`pkg/ai/models_catalog.bin` (flate-compressed JSON, embedded, decoded lazily) and its golden `pkg/ai/testdata/registry_golden.txt` are generated — **never edit them directly**. `make generate-models` overwrites both. Any manual edits will be lost.
 
 To add or fix a model so it survives regeneration, add it to `applyOverridesAndAdditions()` in `cmd/generate-models/main.go`. Use a `!hasModel(all, provider, id)` guard so it doesn't create duplicates if the upstream API starts returning it.
 
