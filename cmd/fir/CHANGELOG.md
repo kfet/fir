@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.43.2] - 2026-10-28
+
 ### Fixed
 
 - **`self_handoff` no longer hands off twice.** The message that started the handing-off turn is carried with a note that the handoff already happened, so the new session answers it instead of handing off again.
@@ -11,6 +13,7 @@
 ### Changed
 
 - **`ship-it` / `ship-wt`: the review-and-fix loop is mandatory.** An urgent or "quick" brief, or a small diff, no longer waives it.
+- Model catalog regenerated: added `amazon-bedrock/{global.,us.,}openai.gpt-6.1-terra`; pricing/limits changed for openrouter: deepseek-v4.1-flash-1017, deepseek-v4-pro-0813, gemma-4-26b-a4b-it, kimi-k3, kimi-latest, nemotron-3-super-120b-a12b, glm-5.2, glm-5.3-flash.
 
 ## [1.43.1] - 2026-10-28
 
