@@ -2,9 +2,15 @@
 
 ## [Unreleased]
 
+## [1.43.0] - 2026-10-28
+
 ### Added
 
 - **Context provenance (`ctx`)**: core logs every prompt chunk (system prompt, AGENTS.md, sections, lessons, skills index, tool schemas, skill reads, tool results, user msgs) per provider call to `ctx-<session>.jsonl` and tags chunks ≥100 tokens with a stable `[ctx:<addr>]` (provider copy only, cache-safe); the builtin `ctx` extension adds the `ctx_used` cite tool, a `ctx` observable card, `/ctx` cross-session report, and a periodic per-model trim/dedupe review prompt (proposals only, pinned chunks exempt).
+
+### Changed
+
+- **Model catalog regenerated**: 4 model(s) with changed pricing/limits (amazon-bedrock: amazon.nova-2-lite-v1:0; openrouter: moonshotai/kimi-k3, moonshotai/kimi-k3.1-pro, z-ai/glm-5.3-flash).
 
 ## [1.42.2] - 2026-10-28
 
