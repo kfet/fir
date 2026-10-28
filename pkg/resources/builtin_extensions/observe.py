@@ -1193,7 +1193,7 @@ def _read_line_range(path: str, start: int, end: int) -> tuple[list[str], int]:
 # the cards_path published in this extension's discovery sidecar.
 
 # Header-priority sources land first; everything else falls alphabetically.
-_CARDS_HEADER_PRIORITY = ("plan", "mood", "model", "session")
+_CARDS_HEADER_PRIORITY = ("plan", "mood", "ctx", "model", "session")
 
 # Inline limit before truncating to "…+N more".
 _CARDS_HEADER_LIMIT = 3

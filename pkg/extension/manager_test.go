@@ -15,9 +15,6 @@ import (
 )
 
 // builtinToolCount is the number of tools registered by builtin extensions
-// that start eagerly (aside=1, install=4, agent-introspect=1, doctor=2).
-// Tests must add their own extensions' tool counts on top.
-// builtinToolCount is the number of tools registered by builtin extensions
 // loaded by default. Update when adding/removing builtin extension tools.
 //
 // Currently:
@@ -34,12 +31,13 @@ import (
 //	handoff:        3 tools (self_handoff, bookmark, pin)
 //	forge:          1 tool  (forge_tool)
 //	remote:         6 tools (rexec, rjob, rput, rget, rtmux, rhosts)
+//	ctx:            1 tool  (ctx_used)
 //
 // (openrouter-auth registers an auth provider but no tools.)
 //
 // The exact composition is tested elsewhere; this constant pins the total
 // for shape-checking tests in this file.
-const builtinToolCount = 33
+const builtinToolCount = 34
 
 // Write a test extension script that responds to the init handshake
 // and then stays alive reading from stdin.

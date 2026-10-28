@@ -3,6 +3,7 @@ package extension
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"strings"
 	"time"
 
@@ -225,6 +226,22 @@ func Setup(asession *session.AgentSession, opts SetupOptions) (*SetupResult, err
 	if err := mgr.Start(context.Background(), opts.ProjectDir, cwd, bridge); err != nil {
 		firlog.Warn("extension manager start failed", "err", err)
 	}
+
+	// Context provenance is on only while the ctx extension actually runs
+	// (its ctx_used tool is how the model cites the tagged chunks). The
+	// recorder latches this on the first provider call.
+	asession.EnableContextProvenance(
+		func() bool { return slices.Contains(mgr.ExtensionToolNames()[session.CtxExtensionName], "ctx_used") },
+		func() map[string]string {
+			owners := map[string]string{}
+			for ext, tools := range mgr.ExtensionToolNames() {
+				for _, t := range tools {
+					owners[t] = ext
+				}
+			}
+			return owners
+		},
+	)
 
 	result := &SetupResult{
 		Manager: mgr,

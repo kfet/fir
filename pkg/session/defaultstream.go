@@ -34,6 +34,7 @@ func init() {
 			callCtx := ctx
 			if !sideQuery && opts != nil {
 				callCtx = withResponseHeaderCapture(ctx, opts.SessionID)
+				prompt = applyContextProvenance(opts.SessionID, model, prompt)
 			}
 			return ai.StreamSimple(callCtx, ai.DefaultRegistry, model, prompt, opts)
 		}

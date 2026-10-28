@@ -2199,6 +2199,7 @@ func (s *AgentSession) Close() {
 	if s.Agent != nil {
 		s.Agent.Abort()
 		dropResponseHeaders(s.Agent.GetSessionID())
+		dropCtxRecorder(s.Agent.GetSessionID())
 	}
 	if s.unsubAgent != nil {
 		s.unsubAgent()
