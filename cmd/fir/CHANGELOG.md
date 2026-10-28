@@ -2,9 +2,15 @@
 
 ## [Unreleased]
 
+## [1.42.2] - 2026-10-28
+
 ### Fixed
 
 - `self_handoff` no longer drops the user message that started the turn: unanswered user messages (after the last text answer) are carried into the new session after the handoff prompt and ahead of queued messages, in every mode; the notice now reads "N unanswered message(s) carried into the new session".
+
+### Changed
+
+- **Model catalog regenerated**: added `amazon-bedrock/au.anthropic.claude-sonnet-5-5`, `azure-openai-responses/gpt-6.1-terra`, `github-copilot/gpt-6.1-terra`, `huggingface/MiniMaxAI/MiniMax-M3.1-Flash`, `openai/gpt-6.1-terra` (+7 on aggregators); removed `opencode/deepseek-v4-flash` (+8 on aggregators); 33 model(s) with changed pricing/limits.
 
 ## [1.42.1] - 2026-10-26
 
