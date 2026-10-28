@@ -37,6 +37,10 @@ type SessionBridge struct {
 	// starts the new session and must not be carried as unanswered when
 	// that session hands off again.
 	lastRestartPrompt string
+	// lastCarried holds the content of the messages the last restart carried
+	// over. A message is carried at most once: if a carried message asks
+	// for a handoff, re-carrying it would loop forever.
+	lastCarried map[string]struct{}
 
 	reloadMu sync.RWMutex
 	reloadFn func(name string) error
@@ -518,7 +522,7 @@ func (b *SessionBridge) RestartSession(prompt, prependContext string) error {
 // messages do not count as an answer. Injected [SYS_EXT] context and the
 // previous handoff's prompt (skip) are machinery, not the user speaking, so
 // a chained handoff does not replay them.
-func unansweredUserMessages(msgs []agent.AgentMessage, skip string) []agent.AgentMessage {
+func unansweredUserMessages(msgs []agent.AgentMessage, skip string, carried map[string]struct{}) []agent.AgentMessage {
 	start := 0
 	for i := len(msgs) - 1; i >= 0; i-- {
 		m := msgs[i]
@@ -538,9 +542,22 @@ func unansweredUserMessages(msgs []agent.AgentMessage, skip string) []agent.Agen
 		if text, ok := u.Content.(string); ok && (strings.HasPrefix(text, "[SYS_EXT]") || (skip != "" && text == skip)) {
 			continue
 		}
+		if _, done := carried[carryKey(m)]; done {
+			continue
+		}
 		out = append(out, m)
 	}
 	return out
+}
+
+// carryKey identifies a carried user message by its content.
+func carryKey(m agent.AgentMessage) string {
+	if u := m.AsUser(); u != nil {
+		if b, err := json.Marshal(u.Content); err == nil {
+			return string(b)
+		}
+	}
+	return ""
 }
 
 // RestartRequest is a captured RestartSession request awaiting consumption.
@@ -569,9 +586,13 @@ func (b *SessionBridge) TakePendingRestart() (RestartRequest, bool) {
 	req := *b.pendingRestart
 	b.pendingRestart = nil
 	if b.session != nil && b.session.Agent != nil {
-		req.Carried = append(unansweredUserMessages(b.session.Agent.State().Messages, b.lastRestartPrompt), req.Carried...)
+		req.Carried = append(unansweredUserMessages(b.session.Agent.State().Messages, b.lastRestartPrompt, b.lastCarried), req.Carried...)
 	}
 	b.lastRestartPrompt = req.Prompt
+	b.lastCarried = make(map[string]struct{}, len(req.Carried))
+	for _, m := range req.Carried {
+		b.lastCarried[carryKey(m)] = struct{}{}
+	}
 	return req, true
 }
 

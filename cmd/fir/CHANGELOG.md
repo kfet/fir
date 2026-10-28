@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **`self_handoff` no longer loops.** A carried user message is carried at most once, so a message asking for a handoff no longer re-triggers it in every new session.
+
 ## [1.43.0] - 2026-10-28
 
 ### Added

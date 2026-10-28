@@ -280,12 +280,14 @@ func TestSessionBridge_RestartSession_ChainedSkipsHandoffPrompt(t *testing.T) {
 	if req, _ := sb.TakePendingRestart(); len(req.Carried) != 1 {
 		t.Fatalf("first handoff carried %d, want 1", len(req.Carried))
 	}
-	a.ReplaceMessages([]agent.AgentMessage{user("[SYS_EXT]\nb\n[/SYS_EXT]"), user("HANDOFF"), user("q")})
+	a.ReplaceMessages([]agent.AgentMessage{user("[SYS_EXT]\nb\n[/SYS_EXT]"), user("HANDOFF"), user("q"), user("q2")})
 	if err := sb.RestartSession("HANDOFF", ""); err != nil {
 		t.Fatal(err)
 	}
 	req, _ := sb.TakePendingRestart()
-	if len(req.Carried) != 1 || req.Carried[0].AsUser().Content != "q" {
-		t.Fatalf("chained handoff carried %+v, want only q", req.Carried)
+	// q was carried once already; carrying it again would loop forever when
+	// q itself asks for a handoff. Only the new q2 is carried.
+	if len(req.Carried) != 1 || req.Carried[0].AsUser().Content != "q2" {
+		t.Fatalf("chained handoff carried %+v, want only q2", req.Carried)
 	}
 }
