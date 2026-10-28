@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- `self_handoff` no longer drops the user message that started the turn: unanswered user messages (after the last text answer) are carried into the new session after the handoff prompt and ahead of queued messages, in every mode; the notice now reads "N unanswered message(s) carried into the new session".
+
 ## [1.42.1] - 2026-10-26
 
 ### Fixed

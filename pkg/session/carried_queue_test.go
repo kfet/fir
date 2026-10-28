@@ -122,10 +122,10 @@ func TestPromptWithCarried_FailureKeepsQueue(t *testing.T) {
 }
 
 func TestQueueNotices(t *testing.T) {
-	if got := CarriedQueueNotice(1); got != "1 queued message carried into the new session" {
+	if got := CarriedQueueNotice(1); got != "1 unanswered message carried into the new session" {
 		t.Fatal(got)
 	}
-	if got := CarriedQueueNotice(3); got != "3 queued messages carried into the new session" {
+	if got := CarriedQueueNotice(3); got != "3 unanswered messages carried into the new session" {
 		t.Fatal(got)
 	}
 	if got := DiscardedQueueNotice(2); got != "Discarded 2 queued messages" {

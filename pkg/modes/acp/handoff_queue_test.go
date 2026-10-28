@@ -32,10 +32,15 @@ func newHandoffSession(t *testing.T) (*session.AgentSession, *extension.SessionB
 	model := &ai.Model{Provider: "test", ID: "test-model", Name: "Test", ContextWindow: 100000}
 	var mu sync.Mutex
 	calls := 0
+	aborting := false
 	streamFn := func(_ *ai.Model, _ ai.Context, _ *ai.SimpleStreamOptions) *ai.AssistantMessageEventStream {
 		mu.Lock()
 		calls++
 		first := calls == 1
+		// The request right after the handoff tool runs on the aborted
+		// context; a real provider answers it with an aborted message.
+		afterAbort := aborting
+		aborting = false
 		mu.Unlock()
 		stream := ai.NewAssistantMessageEventStream()
 		go func() {
@@ -48,6 +53,10 @@ func newHandoffSession(t *testing.T) (*session.AgentSession, *extension.SessionB
 				msg.Content = []ai.AssistantContent{{ToolCall: &ai.ToolCall{
 					Type: ai.ContentTypeToolCall, ID: "tc-long-1", Name: "long_tool", Arguments: map[string]any{},
 				}}}
+			} else if afterAbort {
+				msg.StopReason = ai.StopReasonAborted
+				msg.ErrorMessage = "aborted"
+				msg.Content = []ai.AssistantContent{{Text: &ai.TextContent{Type: "text", Text: "partial"}}}
 			} else {
 				msg.Content = []ai.AssistantContent{{Text: &ai.TextContent{Type: "text", Text: "ok"}}}
 			}
@@ -88,6 +97,9 @@ func newHandoffSession(t *testing.T) (*session.AgentSession, *extension.SessionB
 			case <-tc.Context.Done():
 				return extension.ToolResult{IsError: true, Content: []ai.ToolResultContent{{Type: ai.ContentTypeText, Text: "aborted"}}}, nil
 			}
+			mu.Lock()
+			aborting = true
+			mu.Unlock()
 			if err := bridge.RestartSession(handoffPromptText, "## Briefing\nline2\nline3"); err != nil {
 				return extension.ToolResult{}, err
 			}
@@ -161,7 +173,8 @@ func userTexts(t *testing.T, file string) []string {
 // TestRunPendingHandoffs_CarriesQueuedFollowUp is the regression test for
 // queued prompts being lost on a self_handoff: a follow-up queued while a
 // long tool runs must not be drained into the old (discarded) history but
-// arrive in the new session as the first user turn after the handoff prompt.
+// arrive in the new session after the handoff prompt and the unanswered
+// message that started the turn.
 func TestRunPendingHandoffs_CarriesQueuedFollowUp(t *testing.T) {
 	sess, bridge, started, release := newHandoffSession(t)
 	bridge.SetRestartFn(func() {})
@@ -192,8 +205,8 @@ func TestRunPendingHandoffs_CarriesQueuedFollowUp(t *testing.T) {
 			break
 		}
 	}
-	if idx < 0 || idx+1 >= len(got) || got[idx+1] != queuedText {
-		t.Fatalf("want queued follow-up as the first user turn after the handoff prompt; user turns = %q", got)
+	if idx < 0 || idx+2 >= len(got) || got[idx+1] != "start the long tool" || got[idx+2] != queuedText {
+		t.Fatalf("want handoff prompt, then the unanswered turn, then the queued follow-up; user turns = %q", got)
 	}
 	if sess.Agent.HasQueuedMessages() {
 		t.Fatal("queue should be drained in the new session")
@@ -202,7 +215,7 @@ func TestRunPendingHandoffs_CarriesQueuedFollowUp(t *testing.T) {
 	var sawNotice bool
 	for _, u := range mc.getUpdates() {
 		if c := u.Update.AgentMessageChunk; c != nil && c.Content.Text != nil &&
-			strings.Contains(c.Content.Text.Text, "1 queued message carried into the new session") {
+			strings.Contains(c.Content.Text.Text, "2 unanswered messages carried into the new session") {
 			sawNotice = true
 		}
 	}

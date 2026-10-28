@@ -33,6 +33,10 @@ type SessionBridge struct {
 	// drain them into the history that is about to be discarded. Every mode
 	// consumes it via TakePendingRestart once the aborted turn has unwound.
 	pendingRestart *RestartRequest
+	// lastRestartPrompt is the prompt of the last consumed restart; it
+	// starts the new session and must not be carried as unanswered when
+	// that session hands off again.
+	lastRestartPrompt string
 
 	reloadMu sync.RWMutex
 	reloadFn func(name string) error
@@ -508,6 +512,37 @@ func (b *SessionBridge) RestartSession(prompt, prependContext string) error {
 	return nil
 }
 
+// unansweredUserMessages returns the plain user messages that follow the
+// last completed assistant message carrying text — the ones the user has not
+// had an answer to yet. Tool-call-only, aborted and errored assistant
+// messages do not count as an answer. Injected [SYS_EXT] context and the
+// previous handoff's prompt (skip) are machinery, not the user speaking, so
+// a chained handoff does not replay them.
+func unansweredUserMessages(msgs []agent.AgentMessage, skip string) []agent.AgentMessage {
+	start := 0
+	for i := len(msgs) - 1; i >= 0; i-- {
+		m := msgs[i]
+		if am := m.AsAssistant(); m.Custom == nil && am != nil &&
+			am.StopReason != ai.StopReasonAborted && am.StopReason != ai.StopReasonError &&
+			strings.TrimSpace(m.Text()) != "" {
+			start = i + 1
+			break
+		}
+	}
+	var out []agent.AgentMessage
+	for _, m := range msgs[start:] {
+		u := m.AsUser()
+		if m.Custom != nil || u == nil {
+			continue
+		}
+		if text, ok := u.Content.(string); ok && (strings.HasPrefix(text, "[SYS_EXT]") || (skip != "" && text == skip)) {
+			continue
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
 // RestartRequest is a captured RestartSession request awaiting consumption.
 type RestartRequest struct {
 	Prompt         string
@@ -519,7 +554,11 @@ type RestartRequest struct {
 }
 
 // TakePendingRestart returns and clears any restart request recorded by
-// RestartSession. Modes call this after the aborted turn unwinds. Returns
+// RestartSession. Modes call this after the aborted turn unwinds (agent
+// idle): only then is history settled — the agent applies events to its
+// state asynchronously — so this is where the unanswered user messages that
+// started the turn are read from history. They are prepended to Carried,
+// ahead of the queued messages, because the restart erases history. Returns
 // ok=false when no restart is pending (e.g. already consumed).
 func (b *SessionBridge) TakePendingRestart() (RestartRequest, bool) {
 	b.restartMu.Lock()
@@ -529,6 +568,10 @@ func (b *SessionBridge) TakePendingRestart() (RestartRequest, bool) {
 	}
 	req := *b.pendingRestart
 	b.pendingRestart = nil
+	if b.session != nil && b.session.Agent != nil {
+		req.Carried = append(unansweredUserMessages(b.session.Agent.State().Messages, b.lastRestartPrompt), req.Carried...)
+	}
+	b.lastRestartPrompt = req.Prompt
 	return req, true
 }
 

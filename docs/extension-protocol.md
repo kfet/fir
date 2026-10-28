@@ -706,9 +706,12 @@ follow-ups, each in enqueue order) off the agent, then calls
 short-circuited and the aborted run cannot drain the queue into the
 discarded history). After the aborted turn unwinds it clears UI, calls
 `NewSessionCmd()`, optionally calls `session.PrependContext(prepend_context)`
-to inject a `[SYS_EXT]`-wrapped user message, and submits `prompt`; the
-carried queued messages follow it as follow-ups, in order, and the user
-sees one line "N queued messages carried into the new session". This RPC
+to inject a `[SYS_EXT]`-wrapped user message, and submits `prompt`. The
+user messages still unanswered in the old history (after the last
+completed text answer; injected `[SYS_EXT]` context and a previous
+handoff's prompt excluded) follow it, then the carried queued messages,
+in order, and the user sees one line "N unanswered messages carried into
+the new session". This RPC
 is the primitive behind the `handoff` builtin extension's `self_handoff`
 tool — the briefing is carried via `prepend_context`, no filesystem
 artifact is written.

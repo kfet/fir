@@ -2932,7 +2932,8 @@ class Context:
         a ``[SYS_EXT]``-wrapped user message, and submits ``prompt`` as
         the first user-typed message of the new session.
 
-        Messages queued on the agent (steering, then follow-ups) are
+        User messages the old session had not yet answered, then
+        messages queued on the agent (steering, then follow-ups), are
         carried into the new session and delivered after ``prompt``,
         in order, rather than lost with the old history.
 

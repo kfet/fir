@@ -196,3 +196,96 @@ func TestSessionBridge_PendingSteers(t *testing.T) {
 		t.Fatalf("nil session PendingSteers = %d", n)
 	}
 }
+
+// TestSessionBridge_RestartSession_CarriesUnanswered: a user message that
+// started the in-flight turn lives in history, which the restart erases, so
+// TakePendingRestart must carry it — ahead of queued messages. Messages already
+// answered with text are not carried; tool-call-only turns are not answers.
+func TestSessionBridge_RestartSession_CarriesUnanswered(t *testing.T) {
+	user := func(s string) agent.AgentMessage { return agent.NewAgentMessage(ai.NewUserMsg(s, 0)) }
+	asst := func(c ai.AssistantContent) agent.AgentMessage {
+		return agent.NewAgentMessage(ai.NewAssistantMsg(ai.AssistantMessage{Content: []ai.AssistantContent{c}}))
+	}
+	text := func(s string) agent.AgentMessage {
+		return asst(ai.AssistantContent{Text: &ai.TextContent{Type: "text", Text: s}})
+	}
+	toolCall := asst(ai.AssistantContent{ToolCall: &ai.ToolCall{Type: ai.ContentTypeToolCall, ID: "tc", Name: "self_handoff"}})
+
+	for _, tc := range []struct {
+		name    string
+		history []agent.AgentMessage
+		want    string
+	}{
+		{"unanswered", []agent.AgentMessage{user("u1"), text("a1"), user("u2"), user("u3"), toolCall}, "u2,u3,s1,f1"},
+		{"answered", []agent.AgentMessage{user("u1"), toolCall, text("a1")}, "s1,f1"},
+		{"aborted text is no answer", []agent.AgentMessage{user("u1"), text("a1"), user("u2"), toolCall,
+			agent.NewAgentMessage(ai.NewAssistantMsg(ai.AssistantMessage{StopReason: ai.StopReasonAborted,
+				Content: []ai.AssistantContent{{Text: &ai.TextContent{Type: "text", Text: "part"}}}}))}, "u2,s1,f1"},
+		{"injected context is not carried", []agent.AgentMessage{user("[SYS_EXT]\nbrief\n[/SYS_EXT]"), user("u1"), toolCall}, "u1,s1,f1"},
+		{"no answer yet", []agent.AgentMessage{user("u1"), toolCall}, "u1,s1,f1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := agent.NewAgent(agent.AgentOptions{})
+			sess := session.NewAgentSession(session.AgentSessionOptions{
+				Agent:          a,
+				SessionStore:   store.InMemorySessionStore(),
+				ResourceLoader: &stubResourceLoader{},
+				Cwd:            t.TempDir(),
+			})
+			t.Cleanup(sess.Close)
+			sb := NewSessionBridge(sess)
+			sb.SetRestartFn(func() {})
+			a.ReplaceMessages(tc.history)
+			a.FollowUp(user("f1"))
+			a.Steer(user("s1"))
+			if err := sb.RestartSession("p", ""); err != nil {
+				t.Fatal(err)
+			}
+			req, ok := sb.TakePendingRestart()
+			if !ok || req.Prompt != "p" {
+				t.Fatalf("TakePendingRestart = %+v, %v", req, ok)
+			}
+			var got []string
+			for _, m := range req.Carried {
+				got = append(got, m.Message.AsUser().Content.(string))
+			}
+			if s := strings.Join(got, ","); s != tc.want {
+				t.Fatalf("carried = %s, want %s", s, tc.want)
+			}
+		})
+	}
+}
+
+// TestSessionBridge_RestartSession_ChainedSkipsHandoffPrompt: when the new
+// session hands off again before answering, its own handoff prompt is not
+// replayed as an unanswered user message, but the still-unanswered original
+// is.
+func TestSessionBridge_RestartSession_ChainedSkipsHandoffPrompt(t *testing.T) {
+	a := agent.NewAgent(agent.AgentOptions{})
+	sess := session.NewAgentSession(session.AgentSessionOptions{
+		Agent:          a,
+		SessionStore:   store.InMemorySessionStore(),
+		ResourceLoader: &stubResourceLoader{},
+		Cwd:            t.TempDir(),
+	})
+	t.Cleanup(sess.Close)
+	sb := NewSessionBridge(sess)
+	sb.SetRestartFn(func() {})
+	user := func(s string) agent.AgentMessage { return agent.NewAgentMessage(ai.NewUserMsg(s, 0)) }
+
+	a.ReplaceMessages([]agent.AgentMessage{user("q")})
+	if err := sb.RestartSession("HANDOFF", ""); err != nil {
+		t.Fatal(err)
+	}
+	if req, _ := sb.TakePendingRestart(); len(req.Carried) != 1 {
+		t.Fatalf("first handoff carried %d, want 1", len(req.Carried))
+	}
+	a.ReplaceMessages([]agent.AgentMessage{user("[SYS_EXT]\nb\n[/SYS_EXT]"), user("HANDOFF"), user("q")})
+	if err := sb.RestartSession("HANDOFF", ""); err != nil {
+		t.Fatal(err)
+	}
+	req, _ := sb.TakePendingRestart()
+	if len(req.Carried) != 1 || req.Carried[0].AsUser().Content != "q" {
+		t.Fatalf("chained handoff carried %+v, want only q", req.Carried)
+	}
+}

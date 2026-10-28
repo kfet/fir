@@ -799,9 +799,14 @@ func (s *AgentSession) PromptWithCarried(prompt string, carried []agent.AgentMes
 }
 
 // CarriedQueueNotice is the one-line notice every mode shows when a session
-// restart (handoff) carries n queued messages into the new session.
+// restart (handoff) carries n unanswered (in-flight or queued) messages into
+// the new session.
 func CarriedQueueNotice(n int) string {
-	return fmt.Sprintf("%d %s carried into the new session", n, queuedNoun(n))
+	noun := "unanswered messages"
+	if n == 1 {
+		noun = "unanswered message"
+	}
+	return fmt.Sprintf("%d %s carried into the new session", n, noun)
 }
 
 // DiscardedQueueNotice is shown when a clean restart (/new) drops n queued

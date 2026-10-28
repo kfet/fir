@@ -155,6 +155,8 @@ Use when:
   - the user explicitly asks for a handoff or fresh start
   - a long session has accumulated irrelevant context
 
+If the user asked something you have not answered, answer it first, then hand off.
+
 The doc must be a curated briefing — not a transcript dump. Cover: \
 project + branch, what's done, what's in progress with concrete file/\
 line anchors, key decisions worth remembering, running services / \
