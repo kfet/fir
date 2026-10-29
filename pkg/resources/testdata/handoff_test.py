@@ -218,11 +218,28 @@ class TestSelfHandoffHandler(unittest.TestCase):
         self.assertEqual(len(ctx.restart_calls), 1)
         prompt, prepend = ctx.restart_calls[0]
         # Prompt is short and natural.
-        self.assertTrue(0 < len(prompt) < 100, f"unexpected prompt: {prompt!r}")
+        self.assertTrue(0 < len(prompt) < 160, f"unexpected prompt: {prompt!r}")
         self.assertIn("handoff", prompt.lower())
         # Briefing travels in prepend_context, modulo trailing-newline
         # normalisation done by _validate_content.
-        self.assertEqual(prepend.rstrip("\n"), good.rstrip("\n"))
+        self.assertIn(good.rstrip("\n"), prepend)
+
+    def test_briefing_is_labelled_as_agent_written_not_user(self) -> None:
+        """Regression: children called a parent agent's rule a "user order".
+
+        The briefing rides in an authoritative [SYS_EXT] block, so it must
+        say up front that the previous agent wrote it, and that its claims
+        about what the user wants are not user orders.
+        """
+        ctx = _StubContext()
+        good = _good_content()
+        self.handoff.self_handoff({"content": good}, ctx)
+        prompt, prepend = ctx.restart_calls[0]
+        header = prepend[: prepend.index(good.rstrip("\n"))]
+        self.assertIn("previous agent", header)
+        self.assertIn("not the user", header)
+        # The continuation prompt arrives user-role: it must not pose as user.
+        self.assertIn("not a user message", prompt.lower())
 
     def test_no_filesystem_artifact_written(self) -> None:
         """Handoff must not create .fir/ or any file in the cwd."""

@@ -582,7 +582,8 @@ class TestSelfHandoffPointer(_BookmarkBase):
         self.assertEqual(len(self.bridge.restart_calls), 1)
         prepend = self.bridge.restart_calls[0].get("prepend_context", "")
         # Briefing carried through with at most a trailing-newline tweak.
-        self.assertEqual(prepend.rstrip("\n"), self.GOOD.rstrip("\n"))
+        self.assertTrue(prepend.rstrip("\n").endswith(self.GOOD.rstrip("\n")))
+        self.assertIn("not the user", prepend)
         self.assertNotIn("Bookmarks from parent session", prepend)
 
     def test_existing_bookmarks_appends_pointer_line(self) -> None:

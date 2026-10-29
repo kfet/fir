@@ -337,11 +337,14 @@ def _apply_set_model(spec: str, ctx: fir_ext.Context) -> dict[str, Any]:
     full = f"{m['provider']}/{m['id']}"
     try:
         ok = ctx.set_model(m["provider"], m["id"])
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return {"ok": False, "model": full, "error": str(e)}
     if not ok:
-        return {"ok": False, "model": full,
-                "error": f"model {full} rejected (unknown, not enabled, or no credentials)"}
+        return {
+            "ok": False,
+            "model": full,
+            "error": f"model {full} rejected (unknown, not enabled, or no credentials)",
+        }
     _update_state(model=full)
     return {"ok": True, "model": full}
 
