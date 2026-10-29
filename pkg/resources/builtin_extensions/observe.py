@@ -359,6 +359,10 @@ def _send_set_model(id_prefix: str, cwd_flag: str, spec: str) -> str:
     sock_path = s.get("socket_path", "") or ""
     if not sock_path:
         raise ValueError(f"session {sid8} has no input socket (ended or not started)")
+    return _set_model_on_socket(sock_path, sid8, spec)
+
+
+def _set_model_on_socket(sock_path: str, sid8: str, spec: str) -> str:
     conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     conn.settimeout(30)
     try:
@@ -1769,8 +1773,9 @@ def tool_observe(params: dict[str, Any], ctx: fir_ext.Context) -> str:
         "finishes and prints the agent's final reply (exit 1 if the turn "
         "failed); `fir send <id> '!steer text'` interrupts; "
         "`fir send <id> --abort` cancels the turn; "
-        "`fir send <id> --model provider/id` switches its model. Set `model` "
-        "here to switch provider+model (alone, or before the message). Prefer this to typing "
+        "`fir send <id> --model provider/id` switches its provider+model. "
+        "Set `model` to switch the target's provider+model (empty content = "
+        "switch only; else switch, then send). Prefer this to typing "
         "into a tmux pane."
     ),
     parameters={
@@ -1909,6 +1914,7 @@ First-line sigils control delivery:
   ~            → abort: CANCELS the current turn (including a stuck tool),
                  without killing the session (text after ~ is ignored)
   \\!message    → literal '!' (escaped); likewise \\+ for '+', \\~ for '~'
+  /model p/id  → switch the session's provider+model (not sent as a message)
 
 To message a session without attaching, use `fir send`:
   fir send <id> 'run the tests'          send a prompt
@@ -1953,6 +1959,7 @@ First-line sigils (override the default delivery per message):
   ~            → abort: CANCELS the current turn (including a stuck tool),
                  without killing the session (text after ~ is ignored)
   \\!message    → literal '!' (escaped); likewise \\+ for '+', \\~ for '~'
+  /model p/id  → switch the session's provider+model (not sent as a message)
 """
 
 # Exit code for --timeout expiry, matching coreutils `timeout`.
@@ -2091,7 +2098,7 @@ def _verb_observe_tail(
                 # the process down regardless of this thread's state.
                 threading.Thread(
                     target=_interact_send_loop,
-                    args=(host, conn, interact_stop),
+                    args=(host, conn, interact_stop, sock_path, (s.get("session_id", "") or "")[:8]),
                     daemon=True,
                 ).start()
 
@@ -2150,7 +2157,26 @@ def _verb_observe_tail(
             f.close()
 
 
-def _interact_send_loop(host: fir_ext.Host, conn: socket.socket, stop: threading.Event) -> None:
+def _interactive_model_cmd(host: fir_ext.Host, sock_path: str, sid8: str, line: str) -> bool:
+    """Handle a typed `/model provider/id` line in an interactive pump.
+    Returns True when the line was a /model command (handled, not sent)."""
+    parts = line.strip().split()
+    if not parts or parts[0] != "/model":
+        return False
+    if len(parts) != 2:
+        host.eprintln("usage: /model provider/model-id")
+        return True
+    try:
+        host.eprintln(f"model → {_set_model_on_socket(sock_path, sid8, parts[1])}")
+    except (ValueError, OSError) as e:
+        host.eprintln(str(e))
+    return True
+
+
+def _interact_send_loop(
+    host: fir_ext.Host, conn: socket.socket, stop: threading.Event,
+    sock_path: str = "", sid8: str = "",
+) -> None:
     """--interact stdin pump: each non-empty line of host.readline() is sent
     as one NDJSON message through `conn`. Ends on EOF or `stop`."""
     try:
@@ -2163,6 +2189,8 @@ def _interact_send_loop(host: fir_ext.Host, conn: socket.socket, stop: threading
                 continue
             line = line.rstrip("\n")
             if not line.strip():
+                continue
+            if sock_path and _interactive_model_cmd(host, sock_path, sid8, line):
                 continue
             payload = _encode_send(line, "")
             if payload is None:
@@ -2615,7 +2643,8 @@ def cli_send(argv: list[str], host: fir_ext.Host) -> int:
                 f"Connected to session {name}{suffix}. Enter to send. Ctrl-\\ to disconnect."
             )
             host.eprintln(
-                "  ! prefix → steer (interrupt)   + prefix → followUp (queue)   ~ → abort turn"
+                "  ! prefix → steer (interrupt)   + prefix → followUp (queue)   ~ → abort turn\n"
+                "  /model provider/id → switch the session's model"
             )
             while True:
                 line = host.readline()
@@ -2623,6 +2652,8 @@ def cli_send(argv: list[str], host: fir_ext.Host) -> int:
                     break
                 line = line.rstrip("\n")
                 if not line.strip():
+                    continue
+                if _interactive_model_cmd(host, sock_path, sid8, line):
                     continue
                 payload = _encode_send(line, o.deliver_as)
                 if payload is None:

@@ -2,11 +2,17 @@
 
 ## [Unreleased]
 
+## [1.45.0] - 2026-10-29
+
 ### Added
-- Remote model switch: `fir send <id> --model provider/id`, `send_session(model=…)`; observe socket op `set_model` replies with the result.
+- Remote model switch: `fir send <id> --model provider/id`, `send_session(model=…)`; observe socket op `set_model` replies with the result; `/model provider/id` typed in interactive `fir send` / `fir observe --interact`.
 
 ### Fixed
 - Extension `set_model` now resolves the full catalog model (API, base URL, limits) and refuses unknown models instead of installing a provider+id skeleton.
+- Handoff: the briefing now says the previous agent wrote it, not the user, and the continue prompt is marked as fir machinery. Children no longer pass the parent's own rules on as "user orders".
+
+### Changed
+- Model catalog regenerated: removed 1 aggregator model; 13 models with changed pricing/limits.
 
 ## [1.44.1] - 2026-10-29
 
