@@ -2098,7 +2098,13 @@ def _verb_observe_tail(
                 # the process down regardless of this thread's state.
                 threading.Thread(
                     target=_interact_send_loop,
-                    args=(host, conn, interact_stop, sock_path, (s.get("session_id", "") or "")[:8]),
+                    args=(
+                        host,
+                        conn,
+                        interact_stop,
+                        sock_path,
+                        (s.get("session_id", "") or "")[:8],
+                    ),
                     daemon=True,
                 ).start()
 
@@ -2174,8 +2180,11 @@ def _interactive_model_cmd(host: fir_ext.Host, sock_path: str, sid8: str, line: 
 
 
 def _interact_send_loop(
-    host: fir_ext.Host, conn: socket.socket, stop: threading.Event,
-    sock_path: str = "", sid8: str = "",
+    host: fir_ext.Host,
+    conn: socket.socket,
+    stop: threading.Event,
+    sock_path: str = "",
+    sid8: str = "",
 ) -> None:
     """--interact stdin pump: each non-empty line of host.readline() is sent
     as one NDJSON message through `conn`. Ends on EOF or `stop`."""
