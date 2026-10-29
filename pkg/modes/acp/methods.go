@@ -185,6 +185,19 @@ func (pa *firAgent) Prompt(ctx context.Context, params acpsdk.PromptRequest) (ac
 		<-entry.extReady
 	}
 
+	// ACP runs one prompt per session at a time. A prompt that arrives
+	// while a run is still active is almost always the client's next
+	// message after a session/cancel: the cancelled run is still
+	// unwinding. Queueing it as a follow-up would answer this request
+	// at once with an empty end_turn, and the aborted run would then
+	// drain the message into an aborted, empty assistant turn. Wait for
+	// the run to end, so the message gets a real turn of its own.
+	select {
+	case <-entry.session.Agent.IdleChan():
+	case <-ctx.Done():
+		return acpsdk.PromptResponse{}, ctx.Err()
+	}
+
 	text, images := ExtractPromptContent(params.Prompt)
 
 	// Handle slash commands

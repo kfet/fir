@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Model catalog regenerated: added `mistral/deepseek-v4-1-flash-1017` (+2 on aggregators); removed `opencode/nemotron-3-ultra-free` (+7 on aggregators); 22 models with changed pricing/limits.
+
+### Fixed
+
+- ACP: a `session/prompt` that arrives while a cancelled run is still unwinding now waits for the run to end and gets its own turn. Before, it was queued as a follow-up, answered at once with an empty `end_turn`, and then drained into the aborted run as an empty assistant message, so a mid-turn chat message was never acted on. Slash commands sent over ACP now also wait for the running turn to end.
+
 ## [1.44.0] - 2026-10-28
 
 ### Added
