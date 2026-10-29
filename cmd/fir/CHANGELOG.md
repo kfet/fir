@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.44.1] - 2026-10-29
+
 ### Changed
 
 - Model catalog regenerated: added `mistral/deepseek-v4-1-flash-1017` (+2 on aggregators); removed `opencode/nemotron-3-ultra-free` (+7 on aggregators); 22 models with changed pricing/limits.
