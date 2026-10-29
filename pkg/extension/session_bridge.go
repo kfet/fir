@@ -204,6 +204,16 @@ func (b *SessionBridge) ClearLabel(entryID string) {
 
 func (b *SessionBridge) SetModel(model *ai.Model) bool {
 	mr := b.session.ModelRegistryRef()
+	// Extensions pass only provider+id over RPC. Resolve the full catalog
+	// entry (API, base URL, context window…) or the next turn would run
+	// against a skeleton model. Unknown models are refused.
+	if mr != nil {
+		full := mr.Find(model.Provider, model.ID)
+		if full == nil {
+			return false
+		}
+		model = full
+	}
 	if mr != nil && mr.GetApiKey(model) == "" && !mr.IsKeyless(model.Provider) {
 		return false
 	}

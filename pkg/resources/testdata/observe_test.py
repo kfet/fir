@@ -327,6 +327,48 @@ class TestSocket(unittest.TestCase):
             c.close()
         ctx.send_user_message.assert_called_with("hello agent", deliver_as="")
 
+    def _set_model(self, ctx: MagicMock, spec: str) -> dict:
+        observe.on_session_start({"session_id": self.session_id}, ctx)
+        c = self._connect()
+        c.settimeout(10)
+        try:
+            c.sendall((json.dumps({"op": "set_model", "model": spec}) + "\n").encode())
+            c.shutdown(socket.SHUT_WR)
+            line = c.makefile("r").readline()
+        finally:
+            c.close()
+        return json.loads(line)
+
+    def test_set_model_provider_slash_id(self) -> None:
+        ctx = _make_ctx()
+        ctx.available_models.return_value = [{"provider": "p", "id": "m"}]
+        ctx.set_model.return_value = True
+        reply = self._set_model(ctx, "p/m")
+        self.assertEqual(reply, {"ok": True, "model": "p/m"})
+        ctx.set_model.assert_called_with("p", "m")
+        ctx.send_user_message.assert_not_called()
+
+    def test_set_model_bare_id_unique_and_ambiguous(self) -> None:
+        ctx = _make_ctx()
+        ctx.available_models.return_value = [
+            {"provider": "a", "id": "m"},
+            {"provider": "b", "id": "m"},
+            {"provider": "a", "id": "u"},
+        ]
+        ctx.set_model.return_value = True
+        self.assertEqual(self._set_model(ctx, "u")["model"], "a/u")
+        reply = self._set_model(ctx, "m")
+        self.assertFalse(reply["ok"])
+        self.assertIn("ambiguous", reply["error"])
+
+    def test_set_model_rejected(self) -> None:
+        ctx = _make_ctx()
+        ctx.available_models.return_value = []
+        ctx.set_model.return_value = False
+        reply = self._set_model(ctx, "p/nope")
+        self.assertFalse(reply["ok"])
+        self.assertIn("rejected", reply["error"])
+
     def test_steer_sigil_passes_through(self) -> None:
         ctx = _make_ctx()
         observe.on_session_start({"session_id": self.session_id}, ctx)
@@ -879,6 +921,9 @@ class TestArgParsers(unittest.TestCase):
 
     def test_send_no_args_required(self):
         self.assertIn("required", observe._parse_send_args([]).error or "")
+        o = observe._parse_send_args(["abc", "--model", "p/m", "hi"])
+        self.assertEqual((o.id_prefix, o.model, o.message), ("abc", "p/m", "hi"))
+        self.assertIn("--model", observe._parse_send_args(["abc", "--model"]).error or "")
 
     def test_send_unknown_flag(self):
         self.assertIn("unknown flag", observe._parse_send_args(["--bogus"]).error or "")

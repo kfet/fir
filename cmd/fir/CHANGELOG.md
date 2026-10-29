@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Added
+- Remote model switch: `fir send <id> --model provider/id`, `send_session(model=…)`; observe socket op `set_model` replies with the result.
+
+### Fixed
+- Extension `set_model` now resolves the full catalog model (API, base URL, limits) and refuses unknown models instead of installing a provider+id skeleton.
+
 ## [1.44.1] - 2026-10-29
 
 ### Changed

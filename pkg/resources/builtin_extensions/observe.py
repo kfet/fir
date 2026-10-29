@@ -281,6 +281,11 @@ def _handle_conn(conn: socket.socket, ctx: fir_ext.Context) -> None:
                     msg = json.loads(line)
                 except json.JSONDecodeError:
                     continue
+                if msg.get("op") == "set_model":
+                    reply = _apply_set_model(str(msg.get("model", "")), ctx)
+                    with contextlib.suppress(OSError):
+                        conn.sendall((json.dumps(reply) + "\n").encode())
+                    continue
                 deliver_as = msg.get("deliver_as", "")
                 if deliver_as not in ("", "steer", "followUp", "abort"):
                     deliver_as = ""
@@ -301,6 +306,74 @@ def _handle_conn(conn: socket.socket, ctx: fir_ext.Context) -> None:
                     print(f"observe: send_user_message failed: {e}", file=sys.stderr)
     except Exception as e:
         print(f"observe: connection handler exited: {e}", file=sys.stderr)
+
+
+def _apply_set_model(spec: str, ctx: fir_ext.Context) -> dict[str, Any]:
+    """Switch this session's model. spec is "provider/id" or a bare id.
+
+    A bare id must match exactly one available model. Returns a reply dict
+    {"ok": bool, "model": "provider/id", "error": str}.
+    """
+    spec = spec.strip()
+    if not spec:
+        return {"ok": False, "error": "model is empty"}
+    avail = ctx.available_models()
+    provider, _, mid = spec.partition("/")
+    if not mid:
+        provider, mid = "", spec
+    if provider:
+        cands = [m for m in avail if m.get("provider") == provider and m.get("id") == mid]
+        if not cands:
+            # Not in the authed list: let the host decide (it may still resolve).
+            cands = [{"provider": provider, "id": mid}]
+    else:
+        cands = [m for m in avail if m.get("id") == mid]
+        if not cands:
+            return {"ok": False, "error": f"no available model with id {mid!r}"}
+        if len(cands) > 1:
+            names = ", ".join(f"{m['provider']}/{m['id']}" for m in cands)
+            return {"ok": False, "error": f"model id {mid!r} is ambiguous: {names}"}
+    m = cands[0]
+    full = f"{m['provider']}/{m['id']}"
+    try:
+        ok = ctx.set_model(m["provider"], m["id"])
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "model": full, "error": str(e)}
+    if not ok:
+        return {"ok": False, "model": full,
+                "error": f"model {full} rejected (unknown, not enabled, or no credentials)"}
+    _update_state(model=full)
+    return {"ok": True, "model": full}
+
+
+def _send_set_model(id_prefix: str, cwd_flag: str, spec: str) -> str:
+    """Ask a live session to switch model. Returns "provider/id" on success,
+    raises ValueError/OSError on failure."""
+    s = _resolve_sidecar(id_prefix, cwd_flag)
+    sid8 = (s.get("session_id", "") or "")[:8]
+    if s.get("status") == OBSERVE_LOST:
+        raise ValueError(_observe_lost_send_msg(s))
+    sock_path = s.get("socket_path", "") or ""
+    if not sock_path:
+        raise ValueError(f"session {sid8} has no input socket (ended or not started)")
+    conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    conn.settimeout(30)
+    try:
+        conn.connect(sock_path)
+        conn.sendall((json.dumps({"op": "set_model", "model": spec}) + "\n").encode())
+        conn.shutdown(socket.SHUT_WR)
+        line = conn.makefile("r", encoding="utf-8").readline()
+    finally:
+        with contextlib.suppress(Exception):
+            conn.close()
+    if not line.strip():
+        raise ValueError(
+            f"session {sid8} sent no reply to set_model (its fir is too old for remote model switch?)"
+        )
+    reply = json.loads(line)
+    if not reply.get("ok"):
+        raise ValueError(f"set model on session {sid8}: {reply.get('error') or 'failed'}")
+    return str(reply.get("model") or spec)
 
 
 # ---------------------------------------------------------------------------
@@ -1692,7 +1765,9 @@ def tool_observe(params: dict[str, Any], ctx: fir_ext.Context) -> str:
         "`fir send <id> --wait --timeout 10m 'message'` sends, blocks until that turn "
         "finishes and prints the agent's final reply (exit 1 if the turn "
         "failed); `fir send <id> '!steer text'` interrupts; "
-        "`fir send <id> --abort` cancels the turn. Prefer this to typing "
+        "`fir send <id> --abort` cancels the turn; "
+        "`fir send <id> --model provider/id` switches its model. Set `model` "
+        "here to switch provider+model (alone, or before the message). Prefer this to typing "
         "into a tmux pane."
     ),
     parameters={
@@ -1710,6 +1785,10 @@ def tool_observe(params: dict[str, Any], ctx: fir_ext.Context) -> str:
                 "type": "string",
                 "description": "Message text to deliver to the target session.",
             },
+            "model": {
+                "type": "string",
+                "description": "Switch the target's provider+model first: 'provider/model-id' (or a bare id if unique). With empty content, only switches the model.",
+            },
             "deliver_as": {
                 "type": "string",
                 "enum": ["prompt", "steer", "followUp", "abort"],
@@ -1717,7 +1796,7 @@ def tool_observe(params: dict[str, Any], ctx: fir_ext.Context) -> str:
                 "default": "prompt",
             },
         },
-        "required": ["content"],
+        "required": [],
     },
 )
 def tool_send(params: dict[str, Any], ctx: fir_ext.Context) -> dict[str, Any]:
@@ -1731,11 +1810,18 @@ def tool_send(params: dict[str, Any], ctx: fir_ext.Context) -> dict[str, Any]:
         raise fir_ext.ToolError("one of id_prefix or cwd is required")
     if deliver_as == "abort":
         content = ""
+    model = (params.get("model") or "").strip()
+    out: dict[str, Any] = {"ok": True}
     try:
+        if model:
+            out["model"] = _send_set_model(id_prefix, cwd_flag, model)
+            if not content.strip() and deliver_as != "abort":
+                return out
         _send_one(id_prefix, cwd_flag, content, deliver_as)
     except (ValueError, OSError) as e:
         raise fir_ext.ToolError(str(e)) from e
-    return {"ok": True, "deliver_as": deliver_as or "prompt"}
+    out["deliver_as"] = deliver_as or "prompt"
+    return out
 
 
 @fir_ext.tool(
@@ -1831,7 +1917,7 @@ See `fir send --help` for the full sender interface.
 """
 
 _SEND_USAGE = """usage: fir send <id-prefix> [--steer | --follow | --abort] [--wait] [--timeout S]
-                [--cwd <path>] [message...]
+                [--model <provider/id>] [--cwd <path>] [message...]
 
   fir send <id> 'fix the bug'          send one message (all args joined with spaces)
   fir send <id> --wait 'fix the bug'   send, block until the turn finishes, print the
@@ -1845,6 +1931,8 @@ _SEND_USAGE = """usage: fir send <id-prefix> [--steer | --follow | --abort] [--w
   fir send <id> --follow ...           deliver as followUp (queue after the turn)
                                        (both start a normal turn if the agent is idle)
   fir send <id> --abort                cancel the current turn, then exit
+  fir send <id> --model prov/id        switch the session's provider+model (alone,
+                                       or before the message; bare id if unique)
   fir send --cwd . ...                 resolve session by current directory
 
 Driving a session on another host (no TTY needed):
@@ -2210,6 +2298,7 @@ class _SendOpts:
     message: str = ""  # positional message (args joined); "" = read stdin
     wait: bool = False
     timeout: float = 0.0
+    model: str = ""
     error: str | None = None
 
 
@@ -2248,6 +2337,12 @@ def _parse_send_args(argv: list[str]) -> _SendOpts:
                 o.error = "--cwd requires an argument"
                 return o
             o.cwd = v
+        elif a == "--model" or a.startswith("--model="):
+            v, i = _take_value(argv, i, "--model")
+            if not v:
+                o.error = "--model requires provider/model-id"
+                return o
+            o.model = v
         elif a in ("--help", "-h"):
             o.error = "__HELP__"
             return o
@@ -2442,6 +2537,16 @@ def cli_send(argv: list[str], host: fir_ext.Host) -> int:
         host.eprintln(f"session {sid8} has no input socket (bind failed at startup?)")
         return 1
 
+    if o.model:
+        try:
+            full = _send_set_model(o.id_prefix, o.cwd, o.model)
+        except (ValueError, OSError) as e:
+            host.eprintln(str(e))
+            return 1
+        host.eprintln(f"session {sid8} model → {full}")
+        if not o.message and o.deliver_as != "abort" and host.stdin_is_tty:
+            return 0  # model switch only; piped stdin may still carry a message
+
     # Collect the message(s) up front so --wait can mark the transcript
     # position right before the send.
     payloads: list[bytes] = []
@@ -2466,6 +2571,8 @@ def cli_send(argv: list[str], host: fir_ext.Host) -> int:
         if _verb_stop.is_set():
             return 130  # interrupted mid-read: don't send a truncated brief
         p = _encode_send("".join(chunks).rstrip("\n"), o.deliver_as)
+        if p is None and o.model:
+            return 0  # model switch only
         if p is None:
             host.eprintln("no message on stdin")
             return 1
