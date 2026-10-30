@@ -2,8 +2,11 @@
 
 ## [Unreleased]
 
+## [1.45.2] - 2026-10-30
+
 ### Changed
 - **provider-usage reports only the account in use.** Status bar, prompt section and quota warnings follow the session's provider slot: the default Anthropic account, an extra account (`anthropic#<id>`, with its own cache, header feed and warnings), or Poe. Other providers get nothing. Re-checked every cycle, so a model switch takes effect.
+- **Model catalog regenerated**: 6 models with changed pricing/limits.
 
 ## [1.45.1] - 2026-10-30
 
