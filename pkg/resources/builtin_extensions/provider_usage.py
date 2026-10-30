@@ -365,10 +365,30 @@ def _cached_fetch(cache_name: str, fetch_fn, key: str = "") -> CacheResult:
 # ---------------------------------------------------------------------------
 
 
-def _find_anthropic_token() -> str | None:
-    """Find an OAuth bearer token for the Anthropic usage API."""
-    if tok := _search_configs("auth.json", "anthropic", "access"):
+DEFAULT_SLOT = "anthropic"
+
+
+def _is_anthropic_slot(provider: str) -> bool:
+    """True for the default Anthropic account and for extra accounts
+    ("anthropic#<id>"). Each slot is its own account with its own quota."""
+    return provider == DEFAULT_SLOT or provider.startswith(DEFAULT_SLOT + "#")
+
+
+def _cache_name(slot: str = DEFAULT_SLOT) -> str:
+    """Per-account cache stem. The default account keeps the historic
+    ``anthropic-usage`` name (other extensions read it)."""
+    if slot == DEFAULT_SLOT:
+        return "anthropic-usage"
+    ident = re.sub(r"[^A-Za-z0-9_.-]", "_", slot.split("#", 1)[1])
+    return f"anthropic-usage-{ident}"
+
+
+def _find_anthropic_token(slot: str = DEFAULT_SLOT) -> str | None:
+    """Find the OAuth bearer token of one account slot for the usage API."""
+    if tok := _search_configs("auth.json", slot, "access"):
         return tok
+    if slot != DEFAULT_SLOT:
+        return None  # Claude Code's credential is the default account only
     creds = _read_json(Path("~/.claude/.credentials.json").expanduser())
     return _get_nested(creds, "claudeAiOauthToken") or _get_nested(creds, "access_token")
 
@@ -426,10 +446,10 @@ def _fetch_anthropic_usage(token: str) -> str | None:
     return _format_anthropic_status(_fetch_anthropic_result(token))
 
 
-def _fetch_anthropic_result(token: str) -> CacheResult:
+def _fetch_anthropic_result(token: str, slot: str = DEFAULT_SLOT) -> CacheResult:
     key = hashlib.sha256(token.encode()).hexdigest()[:16]
     return _cached_fetch(
-        "anthropic-usage",
+        _cache_name(slot),
         lambda: _http_get_json(
             "https://api.anthropic.com/api/oauth/usage",
             {
@@ -554,21 +574,27 @@ def _parse_anthropic_unified(headers: dict) -> tuple[str, dict, dict] | None:
     return "anthropic-usage", windows, extra
 
 
-# provider id -> parser. Exact ids only: an extra account's slot
-# ("anthropic#<account>") must not feed the default account's cache.
+# provider base id -> parser. An extra account's slot ("anthropic#<account>")
+# uses the same parser but feeds its own cache (see _cache_name).
 HEADER_PARSERS = {"anthropic": _parse_anthropic_unified}
 
 
 def _parse_headers(provider: str, headers: object) -> tuple[str, dict, dict] | None:
     if not isinstance(headers, dict) or not headers:
         return None
-    parser = HEADER_PARSERS.get(provider or "")
+    provider = provider or ""
+    parser = HEADER_PARSERS.get(provider.split("#", 1)[0])
     if parser is None:
         return None
     try:
-        return parser(headers)
+        found = parser(headers)
     except Exception:
         return None
+    if found is None:
+        return None
+    # Each account slot feeds its own cache: quotas are per account.
+    _name, windows, extra = found
+    return _cache_name(provider), windows, extra
 
 
 def _atomic_write_json(path: Path, obj: object) -> None:
@@ -709,7 +735,7 @@ def on_message_end(params: fir_ext.MessageEndParams, ctx: fir_ext.Context) -> No
 # unless one of them yields a plausible instant.
 
 
-def _cached_usage_windows() -> dict[str, dict]:
+def _cached_usage_windows(slot: str = DEFAULT_SLOT) -> dict[str, dict]:
     """Read the cached oauth/usage windows — a local file read, never a fetch.
 
     Deliberately bypasses :func:`_cached_fetch`: that refreshes on expiry,
@@ -717,7 +743,7 @@ def _cached_usage_windows() -> dict[str, dict]:
     refresh loop keeps this file within its TTL anyway, and a window's
     ``resets_at`` does not move while the window is open.
     """
-    cached = _read_json(_cache_dir() / "anthropic-usage-cache.json") or {}
+    cached = _read_json(_cache_dir() / f"{_cache_name(slot)}-cache.json") or {}
     data = cached.get(_K_DATA)
     if not isinstance(data, dict):
         return {}
@@ -808,14 +834,15 @@ def on_provider_error(params: fir_ext.ProviderErrorParams, ctx: fir_ext.Context)
     _ingest_headers(params.get("provider") or "", params.get("response_headers"), time.time())
     if params.get("kind") != "rate_limit":
         return
-    if "anthropic" not in (params.get("provider") or "").lower():
+    slot = params.get("provider") or ""
+    if not _is_anthropic_slot(slot):
         return
     # OAuth/subscription path only: an API-key account has no oauth/usage
     # windows and no token here. Only the presence of a token is consulted —
     # its value is never read into a message or a log.
-    if not _find_anthropic_token():
+    if not _find_anthropic_token(slot):
         return
-    if notice := _rate_limit_notice(params, _cached_usage_windows(), time.time()):
+    if notice := _rate_limit_notice(params, _cached_usage_windows(slot), time.time()):
         with contextlib.suppress(Exception):
             ctx.notify(notice, level="warning")
 
@@ -862,7 +889,10 @@ def _warning_text(
 
 
 def _claim_crossings(
-    warnings: list[tuple[str, float, float, str]], now: float, alerts: list | None = None
+    warnings: list[tuple[str, float, float, str]],
+    now: float,
+    alerts: list | None = None,
+    slot: str = DEFAULT_SLOT,
 ) -> list:
     """Atomically record (window, level, reset) crossings and health-alert
     tags not yet announced by any session; return the warnings and alerts
@@ -881,12 +911,15 @@ def _claim_crossings(
                 key, util, reset, _label = w
                 level = max(lv for lv in WARN_LEVELS if util >= lv)
                 tag = f"{key}:{level:.0f}:{int(reset) // 60}"
+                if slot != DEFAULT_SLOT:
+                    tag = f"{slot}|{tag}"
                 if tag not in state:
                     state[tag] = reset
                     fresh.append(w)
             for a in alerts or []:
-                if a[0] not in state:
-                    state[a[0]] = a[1]
+                atag = a[0] if slot == DEFAULT_SLOT else f"{slot}|{a[0]}"
+                if atag not in state:
+                    state[atag] = a[1]
                     fresh.append(a)
             tmp_fd, tmp_path = tempfile.mkstemp(dir=str(cd), suffix=".tmp")
             try:
@@ -910,7 +943,11 @@ def _active_mode(ctx: fir_ext.Context) -> str:
 
 
 def _publish_warnings(
-    ctx: fir_ext.Context, data: dict | None, mode: str, alerts: list | None = None
+    ctx: fir_ext.Context,
+    data: dict | None,
+    mode: str,
+    alerts: list | None = None,
+    slot: str = DEFAULT_SLOT,
 ) -> None:
     now = time.time()
     warnings = _usage_warnings(data, now)
@@ -931,7 +968,7 @@ def _publish_warnings(
             + " Tell the user about this when relevant; do not start heavy work without saying so."
         )
     try:
-        fresh = _claim_crossings(warnings, now, alerts)
+        fresh = _claim_crossings(warnings, now, alerts, slot)
     except Exception:
         return
     if not fresh:
@@ -1058,10 +1095,10 @@ def _login_first_seen(account: str, now: float) -> float:
         return now
 
 
-def _anthropic_credential() -> dict | None:
+def _anthropic_credential(slot: str = DEFAULT_SLOT) -> dict | None:
     for base in _config_search_paths():
         auth = _read_json(Path(f"{base}/auth.json").expanduser())
-        cred = auth.get("anthropic") if isinstance(auth, dict) else None
+        cred = auth.get(slot) if isinstance(auth, dict) else None
         if isinstance(cred, dict) and cred.get("access"):
             return cred
     return None
@@ -1096,36 +1133,54 @@ def _apply_config(cfg: dict | None) -> bool:
 # ---------------------------------------------------------------------------
 
 
+def _active_provider(ctx: fir_ext.Context) -> str:
+    """Provider id of the model the session is on now ("" if unknown)."""
+    try:
+        model = ctx.agent_info().get("model") or {}
+        return str(model.get("provider") or "") if isinstance(model, dict) else ""
+    except Exception:
+        return ""
+
+
+def _refresh_once(ctx: fir_ext.Context, poe_key, mode: str) -> None:
+    """One cycle: report only the budget of the account the session uses.
+
+    Quotas are per account. A session on another provider or on another
+    Anthropic account slot ("anthropic#<id>") spends nothing from this
+    account, so it gets no status, no prompt section and no warnings for it.
+    Checked every cycle because the model can be switched mid-session.
+    """
+    slot = _active_provider(ctx)
+    parts = []
+    token = _find_anthropic_token(slot) if _is_anthropic_slot(slot) else None
+    if token:
+        result = _fetch_anthropic_result(token, slot)
+        if s := _format_anthropic_status(result):
+            parts.append(s)
+        now = time.time()
+        name = _cache_name(slot)
+        alerts = (
+            _usage_health(_read_json(_cache_dir() / f"{name}-cache.json"), now)
+            + _credential_health(_anthropic_credential(slot), now)
+            + _burst_alerts(_read_series(name), now)
+        )
+        _publish_warnings(ctx, result.data, mode, alerts, slot)
+    else:
+        with contextlib.suppress(Exception):
+            ctx.clear_section()
+    if poe_key and slot == "poe" and (s := _fetch_poe_usage(poe_key)):
+        parts.append(s)
+    with contextlib.suppress(Exception):
+        ctx.set_status(" │ ".join(parts))
+
+
 def _refresh_loop(ctx: fir_ext.Context) -> None:
     """Periodically fetch usage and update the status bar."""
-    anthropic_token = _find_anthropic_token()
-    poe_key = _find_poe_key()
-
-    if not anthropic_token and not poe_key:
-        return
-
     mode = _active_mode(ctx)
     while not _stop_event.is_set():
-        # Re-read every cycle: fir refreshes the access token every few
-        # hours, and a token captured once at startup would go 401 forever.
-        anthropic_token = _find_anthropic_token() or anthropic_token
-        parts = []
-        if anthropic_token:
-            result = _fetch_anthropic_result(anthropic_token)
-            if s := _format_anthropic_status(result):
-                parts.append(s)
-            now = time.time()
-            alerts = (
-                _usage_health(_read_json(_cache_dir() / "anthropic-usage-cache.json"), now)
-                + _credential_health(_anthropic_credential(), now)
-                + _burst_alerts(_read_series(), now)
-            )
-            _publish_warnings(ctx, result.data, mode, alerts)
-        if poe_key and (s := _fetch_poe_usage(poe_key)):
-            parts.append(s)
-        if parts:
-            with contextlib.suppress(Exception):
-                ctx.set_status(" │ ".join(parts))
+        # Tokens are re-read every cycle (inside _refresh_once): fir refreshes
+        # them every few hours, and the session may switch account.
+        _refresh_once(ctx, _find_poe_key(), mode)
         _stop_event.wait(REFRESH_INTERVAL_SECONDS)
 
 

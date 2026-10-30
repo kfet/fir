@@ -577,8 +577,11 @@ class HeaderFeedTest(unittest.TestCase):
 
     def test_parse_ignores_other_providers_and_junk(self):
         self.assertIsNone(self.mod._parse_headers("openai", _unified()))
-        # An extra account's slot must not feed the default account's cache.
-        self.assertIsNone(self.mod._parse_headers("anthropic#acct2", _unified()))
+        # An extra account's slot feeds its own cache, never the default one.
+        self.assertEqual(
+            self.mod._parse_headers("anthropic#acct2", _unified())[0], "anthropic-usage-acct2"
+        )
+        self.assertEqual(self.mod._parse_headers("anthropic", _unified())[0], "anthropic-usage")
         self.assertIsNotNone(self.mod._parse_headers("anthropic", _unified()))
         self.assertIsNone(self.mod._parse_headers("anthropic", {"content-type": "x"}))
         self.assertIsNone(self.mod._parse_headers("anthropic", None))
@@ -760,6 +763,76 @@ class BurstTest(unittest.TestCase):
         self.assertTrue(self.mod._apply_config({"burst_points": 10, "burst_window_seconds": 60}))
         self.assertEqual(self.mod.BURST_POINTS, 10.0)
         self.assertEqual(self.mod.BURST_WINDOW_SECONDS, 60.0)
+
+
+class ProviderGateTest(unittest.TestCase):
+    """Status and warnings appear only for the account the session is on."""
+
+    def setUp(self):
+        self.mod, _ = _load()
+        self.addCleanup(mock.patch.stopall)
+        tokens = {"anthropic": "tok-default", "anthropic#acct2": "tok-2"}
+        mock.patch.object(
+            self.mod, "_find_anthropic_token", side_effect=lambda slot="anthropic": tokens.get(slot)
+        ).start()
+        mock.patch.object(self.mod, "_find_poe_key", return_value="poe-key").start()
+        self.fetch = mock.patch.object(self.mod, "_fetch_anthropic_result").start()
+        self.fetch.return_value = self.mod.CacheResult({"five_hour": {"utilization": 90}})
+        self.poe = mock.patch.object(self.mod, "_fetch_poe_usage", return_value="🅿 1k").start()
+        self.pub = mock.patch.object(self.mod, "_publish_warnings").start()
+        for name in ("_usage_health", "_credential_health", "_burst_alerts"):
+            mock.patch.object(self.mod, name, return_value=[]).start()
+        self.series = mock.patch.object(self.mod, "_read_series", return_value=[]).start()
+
+    def _run(self, provider):
+        ctx = mock.Mock()
+        ctx.agent_info.return_value = {"model": {"provider": provider}}
+        self.mod._refresh_once(ctx, "poe-key", "acp")
+        return ctx
+
+    def test_default_account_reports_its_own_quota(self):
+        ctx = self._run("anthropic")
+        self.fetch.assert_called_once_with("tok-default", "anthropic")
+        self.assertEqual(self.pub.call_args[0][4], "anthropic")
+        self.series.assert_called_once_with("anthropic-usage")
+        self.poe.assert_not_called()
+        self.assertIn("5h", ctx.set_status.call_args[0][0])
+
+    def test_extra_account_reports_its_own_quota(self):
+        self._run("anthropic#acct2")
+        self.fetch.assert_called_once_with("tok-2", "anthropic#acct2")
+        self.assertEqual(self.pub.call_args[0][4], "anthropic#acct2")
+        self.series.assert_called_once_with("anthropic-usage-acct2")
+
+    def test_account_without_token_reports_nothing(self):
+        ctx = self._run("anthropic#nologin")
+        self.fetch.assert_not_called()
+        ctx.clear_section.assert_called_once()
+
+    def test_poe_session_reports_poe_only(self):
+        ctx = self._run("poe")
+        self.fetch.assert_not_called()
+        self.pub.assert_not_called()
+        ctx.clear_section.assert_called_once()
+        ctx.set_status.assert_called_once_with("🅿 1k")
+
+    def test_other_provider_reports_nothing(self):
+        for provider in ("openai", ""):
+            ctx = self._run(provider)
+            ctx.set_status.assert_called_once_with("")
+            ctx.clear_section.assert_called_once()
+        self.fetch.assert_not_called()
+        self.poe.assert_not_called()
+        self.pub.assert_not_called()
+
+    def test_crossings_are_claimed_per_account(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        mock.patch.object(self.mod, "_cache_dir", return_value=pathlib.Path(tmp.name)).start()
+        w = [("five_hour", 85.0, time.time() + 3600, "5h")]
+        self.assertTrue(self.mod._claim_crossings(w, time.time(), slot="anthropic"))
+        self.assertTrue(self.mod._claim_crossings(w, time.time(), slot="anthropic#acct2"))
+        self.assertFalse(self.mod._claim_crossings(w, time.time(), slot="anthropic#acct2"))
 
 
 if __name__ == "__main__":
