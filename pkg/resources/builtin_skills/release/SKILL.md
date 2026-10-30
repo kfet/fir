@@ -108,6 +108,8 @@ are assertions about a tree that no longer exists.
 
 ## Post-publish: Track All GitHub Actions
 
+**A red workflow is a broken release, period.** Every workflow on the release commit — `ci` included, not only `release` — must be green. Do not report "released" with a red `ci`, and do not excuse it as pre-existing: a failure that was already red on earlier commits is still a broken release. Fix it (new patch release if needed) before you call the release done.
+
 After `make publish` succeeds, poll GitHub Actions until every triggered workflow finishes:
 
 ```bash

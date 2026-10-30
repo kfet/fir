@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- **CI tree-clean check**: `zfsgen` no longer rewrites an embedded archive whose content is unchanged, so a different Go version's gzip bytes no longer dirty the tree.
+
 ## [1.45.2] - 2026-10-30
 
 ### Changed

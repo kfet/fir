@@ -25,7 +25,10 @@ func main() {
 		fmt.Fprintln(os.Stderr, "zfsgen:", err)
 		os.Exit(1)
 	}
-	if old, err := os.ReadFile(*out); err == nil && bytes.Equal(old, buf.Bytes()) {
+	// Compare decoded content, not bytes: gzip output differs across Go
+	// versions, and rewriting an unchanged archive dirties the tree in CI.
+	if old, err := os.ReadFile(*out); err == nil &&
+		(bytes.Equal(old, buf.Bytes()) || zfs.Diff(old, *root, flag.Args()) == nil) {
 		return
 	}
 	if err := os.WriteFile(*out, buf.Bytes(), 0o644); err != nil {
