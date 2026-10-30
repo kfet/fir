@@ -2,8 +2,13 @@
 
 ## [Unreleased]
 
+## [1.45.1] - 2026-10-30
+
 ### Fixed
 - **Builtin extensions no longer write into project repos.** `ctx` (`ctx-state.json`) and `poe_auth` (memo) wrote to `<cwd>/.fir/`, creating the dir in repos; they now use the new SDK `fir_ext.state_path()` (global dir). `aside` config writes use new `fir_ext.config_write_path()`: the existing file's tier, else global — never a new project `.fir/`.
+
+### Changed
+- **Model catalog regenerated**: added `mistral/mistral-large-4-0-8` (+1 on aggregators); removed 1 aggregator model; 21 models with changed pricing/limits.
 
 ## [1.45.0] - 2026-10-29
 
