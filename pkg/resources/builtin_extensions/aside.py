@@ -217,9 +217,9 @@ _DYNAMIC_ADVISOR_CHAIN_LEN = 3
 
 
 def _config_path() -> Path | None:
-    """Highest-priority path for reading/writing aside.json. None when the
+    """Path to persist aside.json: the existing file (any tier) or global. None when the
     SDK has no config dirs (e.g. tests that haven't seeded any)."""
-    p = fir_ext.config_path(_CONFIG_FILENAME)
+    p = fir_ext.config_write_path(_CONFIG_FILENAME)
     return Path(p) if p else None
 
 

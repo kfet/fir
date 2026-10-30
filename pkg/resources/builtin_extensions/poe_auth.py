@@ -158,7 +158,7 @@ _empty_ids_cache: set[str] | None = None  # model IDs whose supported_endpoints 
 
 
 def _memo_path() -> str | None:
-    return fir_ext.config_path(_MEMO_FILENAME)
+    return fir_ext.state_path(_MEMO_FILENAME)
 
 
 def _load_memo() -> dict:

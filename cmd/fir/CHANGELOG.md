@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- **Builtin extensions no longer write into project repos.** `ctx` (`ctx-state.json`) and `poe_auth` (memo) wrote to `<cwd>/.fir/`, creating the dir in repos; they now use the new SDK `fir_ext.state_path()` (global dir). `aside` config writes use new `fir_ext.config_write_path()`: the existing file's tier, else global — never a new project `.fir/`.
+
 ## [1.45.0] - 2026-10-29
 
 ### Added

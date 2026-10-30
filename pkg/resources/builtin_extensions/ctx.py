@@ -299,7 +299,7 @@ def settings() -> tuple[int, list[str]]:
 
 
 def state_path() -> str | None:
-    return fir_ext.config_path("ctx-state.json")
+    return fir_ext.state_path("ctx-state.json")
 
 
 def load_state() -> dict[str, Any]:

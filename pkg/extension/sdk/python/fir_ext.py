@@ -1660,6 +1660,38 @@ def config_path(filename: str | None = None) -> str | None:
     return os.path.join(config_dirs[0], name)
 
 
+def state_path(filename: str | None = None) -> str | None:
+    """Return the path for this extension's machine-local runtime state.
+
+    Always points at the GLOBAL config dir (``config_dirs[-1]``), never the
+    project ``.fir/`` dir: caches, counters and memos must not be written into
+    a user's repo. ``filename`` defaults to ``f"{ext_name}-state.json"``.
+    Returns ``None`` when no config dirs were advertised.
+    """
+    name = filename or (f"{ext_name}-state.json" if ext_name else None)
+    if not name or not config_dirs:
+        return None
+    return os.path.join(config_dirs[-1], name)
+
+
+def config_write_path(filename: str | None = None) -> str | None:
+    """Return where to persist a user-config change for this extension.
+
+    Writes back to the highest-priority dir that already HAS the file (so a
+    hand-made project override stays in the project and project keys never
+    leak into the global file). When no file exists anywhere, returns the
+    global dir (``config_dirs[-1]``) — fir never creates a project ``.fir/``.
+    """
+    name = filename or (f"{ext_name}.json" if ext_name else None)
+    if not name or not config_dirs:
+        return None
+    for d in config_dirs:
+        p = os.path.join(d, name)
+        if os.path.isfile(p):
+            return p
+    return os.path.join(config_dirs[-1], name)
+
+
 # ---------------------------------------------------------------------------
 # Decorators
 # ---------------------------------------------------------------------------

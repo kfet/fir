@@ -1109,3 +1109,47 @@ class TestDefaultSideQueryTimeout(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestWritePathsNeverCreateProjectDir(unittest.TestCase):
+    """Runtime state and config writes must never land in a project .fir/."""
+
+    def setUp(self):
+        import tempfile
+
+        self.tmp = tempfile.mkdtemp()
+        self.proj = os.path.join(self.tmp, "repo", ".fir")
+        self.glob = os.path.join(self.tmp, "global")
+        os.makedirs(self.glob)
+        self._saved = fir_ext.config_dirs
+        fir_ext.config_dirs = [self.proj, self.glob]
+
+    def tearDown(self):
+        import shutil
+
+        fir_ext.config_dirs = self._saved
+        shutil.rmtree(self.tmp)
+
+    def test_state_path_is_global(self):
+        self.assertEqual(
+            fir_ext.state_path("ctx-state.json"),
+            os.path.join(self.glob, "ctx-state.json"),
+        )
+
+    def test_config_write_path_defaults_global(self):
+        self.assertEqual(
+            fir_ext.config_write_path("aside.json"),
+            os.path.join(self.glob, "aside.json"),
+        )
+
+    def test_config_write_path_keeps_existing_project_file(self):
+        os.makedirs(self.proj)
+        p = os.path.join(self.proj, "aside.json")
+        with open(p, "w") as f:
+            f.write("{}")
+        self.assertEqual(fir_ext.config_write_path("aside.json"), p)
+
+    def test_no_project_dir_created(self):
+        fir_ext.state_path("x.json")
+        fir_ext.config_write_path("y.json")
+        self.assertFalse(os.path.exists(self.proj))
