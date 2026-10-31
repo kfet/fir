@@ -239,6 +239,14 @@ func (pa *firAgent) Prompt(ctx context.Context, params acpsdk.PromptRequest) (ac
 	// approach) would be lost.
 	pa.runPendingHandoffs(string(params.SessionId), entry)
 
+	// A non-retryable provider rejection (401/402/403) is a turn failure,
+	// not answer text: return it as a prompt error so ACP clients take
+	// their error path.
+	if rej := entry.lastProviderRejection(); rej != "" {
+		entry.plan.clear()
+		return acpsdk.PromptResponse{}, providerRejectionError(rej)
+	}
+
 	// Clear plan at end of turn so the next turn starts fresh.
 	entry.plan.clear()
 
@@ -1028,8 +1036,42 @@ func (pa *firAgent) handleEvent(sessionID string, entry *firSession, event sessi
 		if msg.StopReason == ai.StopReasonAborted || strings.Contains(errText, "context canceled") {
 			return
 		}
+		// Prompt returns provider rejections as a turn failure.
+		if ai.ProviderRejectionStatus(errText) != 0 {
+			return
+		}
 		pa.sendAgentMessage(sessionID, fmt.Sprintf("⚠️ %s", errText))
 	}
+}
+
+// lastProviderRejection returns the error text when the turn's final
+// assistant message is a provider rejection (HTTP 401/402/403), else "".
+func (s *firSession) lastProviderRejection() string {
+	if s.session == nil || s.session.Agent == nil {
+		return ""
+	}
+	msgs := s.session.Agent.State().Messages
+	if len(msgs) == 0 {
+		return ""
+	}
+	last := msgs[len(msgs)-1].AsAssistant()
+	if last == nil || last.StopReason != ai.StopReasonError || ai.ProviderRejectionStatus(last.ErrorMessage) == 0 {
+		return ""
+	}
+	return last.ErrorMessage
+}
+
+// providerRejectionError maps a provider rejection to a JSON-RPC error
+// carrying the provider text: 401 → AUTH_REQUIRED (client shows login),
+// 402/403 → internal error with the text as its message.
+func providerRejectionError(errText string) *acpsdk.RequestError {
+	data := map[string]any{"error": errText}
+	if ai.ProviderRejectionStatus(errText) == 401 {
+		return acpsdk.NewAuthRequired(data)
+	}
+	e := acpsdk.NewInternalError(data)
+	e.Message = errText
+	return e
 }
 
 // isValidSessionPath checks whether sessionPath is within any known sessions
