@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- **CI on release commits**: the distkit asset-parity test skips while the new release has no assets yet, instead of failing during the upload window.
+
 ## [1.46.0] - 2026-10-31
 
 ### Added

@@ -52,6 +52,11 @@ func TestDistkitAssetNameParity(t *testing.T) {
 		t.Skipf("cannot reach %s/%s releases API: %v", repoOwner, repoName, err)
 	}
 	t.Logf("%s/%s latest = %s, assets = %v", repoOwner, repoName, tag, assets)
+	if len(assets) == 0 {
+		// A release is created before its assets upload; CI for the release
+		// commit runs during that window. Nothing to compare yet.
+		t.Skipf("%s/%s %s has no assets yet (upload in progress)", repoOwner, repoName, tag)
+	}
 
 	published := make(map[string]bool, len(assets))
 	for _, a := range assets {
