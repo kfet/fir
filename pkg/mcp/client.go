@@ -627,7 +627,7 @@ func (m *Manager) createTransport(name string, cfg ServerConfig) (sdk.Transport,
 		if err != nil {
 			return nil, err
 		}
-		return &sdk.SSEClientTransport{Endpoint: cfg.URL, HTTPClient: authHTTPClient(sa)}, nil
+		return &sdk.SSEClientTransport{Endpoint: cfg.URL, HTTPClient: withHeaders(authHTTPClient(sa), cfg)}, nil
 	case "streamable":
 		if cfg.URL == "" {
 			return nil, fmt.Errorf("url is required for streamable transport")
@@ -636,7 +636,7 @@ func (m *Manager) createTransport(name string, cfg ServerConfig) (sdk.Transport,
 		if err != nil {
 			return nil, err
 		}
-		return &sdk.StreamableClientTransport{Endpoint: cfg.URL, HTTPClient: authHTTPClient(sa)}, nil
+		return &sdk.StreamableClientTransport{Endpoint: cfg.URL, HTTPClient: withHeaders(authHTTPClient(sa), cfg)}, nil
 	default: // "stdio" or ""
 		if cfg.Transport != "" && cfg.Transport != "stdio" {
 			return nil, fmt.Errorf("unsupported transport %q; valid values: stdio, sse, streamable", cfg.Transport)
@@ -651,6 +651,7 @@ func commandTransport(cfg ServerConfig) (sdk.Transport, error) {
 		return nil, fmt.Errorf("command is required")
 	}
 	cmd := exec.Command(cfg.Command, cfg.Args...) // #nosec G204 — command from user config
+	cmd.Dir = cfg.Cwd
 	// Inherit the current process environment so the subprocess has PATH, HOME, etc.
 	// then overlay any user-specified overrides.
 	cmd.Env = os.Environ()

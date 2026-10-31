@@ -1,0 +1,34 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "probe": {
+      "type": "stdio",
+      "command": "./bin/server",
+      "args": ["--root=${PLUGIN_ROOT}", "--data=${PLUGIN_DATA}/x", "${HOME}", "$PLUGIN_ROOT", "${PLUGIN_ROOT"],
+      "env": {"AP_TEST_SERVER": "1", "PROBE_CONFIG": "${PLUGIN_ROOT}/config.json", "PROBE_LITERAL": "${OTHER}"}
+    },
+    "probe-cwd": {
+      "type": "stdio",
+      "command": "./bin/server",
+      "env": {"AP_TEST_SERVER": "1"},
+      "cwd": "${PLUGIN_DATA}/work"
+    },
+    "remote": {
+      "type": "streamable-http",
+      "url": "https://mcp.example.com/mcp",
+      "headers": {"X-Tenant": "public-tenant"}
+    },
+    "legacy": {
+      "type": "sse",
+      "url": "http://127.0.0.1:9/sse"
+    },
+    "websocket": {
+      "type": "websocket",
+      "url": "wss://mcp.example.com/ws"
+    },
+    "escape": {
+      "type": "stdio",
+      "command": "../outside"
+    }
+  }
+}

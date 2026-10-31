@@ -30,6 +30,15 @@ type ServerConfig struct {
 	Args []string `json:"args,omitempty"`
 	// Env holds extra environment variables for the launched subprocess.
 	Env map[string]string `json:"env,omitempty"`
+	// Cwd is the working directory for the "stdio" subprocess. When empty
+	// the subprocess inherits fir's working directory. Servers loaded from an
+	// Agent Plugin default to the plugin root.
+	Cwd string `json:"cwd,omitempty"`
+	// Headers are fixed HTTP headers sent with every request to the "sse" or
+	// "streamable" endpoint's origin. Headers fir generates itself (MCP,
+	// authorization) take precedence over a configured header of the same
+	// name, and configured headers are never sent to a different origin.
+	Headers map[string]string `json:"headers,omitempty"`
 	// Roots is an optional list of file:// URIs that fir will advertise to the
 	// MCP server as filesystem roots. When empty, the process working directory
 	// is used as the single default root. Entries are sent verbatim, so they

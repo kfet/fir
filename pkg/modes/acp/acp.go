@@ -476,7 +476,7 @@ func loadProjectMCPConfigs(cwd, extraConfigPath string) map[string]mcp.ServerCon
 	cfg, err := mcp.LoadDefaultConfigs(cwd)
 	if err != nil {
 		// Partial load: the broken files are skipped, the rest still start.
-		fmt.Fprintf(os.Stderr, "fir: warning: skipped broken MCP config: %v\n", err)
+		fmt.Fprintf(os.Stderr, "fir: warning: MCP config warnings: %v\n", err)
 		firlog.Warn("acp: skipped broken MCP config", "err", err)
 	}
 	if extraConfigPath != "" {

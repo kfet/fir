@@ -61,6 +61,8 @@ a remote MCP server over HTTP. No `command` is needed — only `url`.
 | `command`   | string            | for `stdio` | Executable to launch (looked up on `PATH`) |
 | `args`      | array of strings  | no       | Command-line arguments passed to a stdio server |
 | `env`       | map string→string | no       | Environment variable overrides for a stdio subprocess; the parent process environment is always inherited first |
+| `cwd`       | string            | no       | Working directory for a stdio subprocess; defaults to fir's working directory |
+| `headers`   | map string→string | no       | Fixed HTTP headers for `sse`/`streamable` servers. Sent only to the configured URL's origin; headers fir generates (MCP, auth) win over a configured header of the same name |
 | `roots`     | array of strings  | no       | `file://` URIs advertised to the server as filesystem roots; defaults to the working directory |
 | `auth`      | object            | no       | Authentication overrides for `sse`/`streamable` servers; see [Authentication](#authentication-oauth). Absent by default — a spec-compliant server needs none |
 
@@ -250,6 +252,12 @@ is left in place, so putting the old issuer back recovers the credential without
 ```
 
 ---
+
+## Servers from Agent Plugins
+
+Installed [Agent Plugins](agent-plugins.md) contribute the servers in their
+`mcp.json` as the lowest-precedence layer, below `~/.config/fir/mcp.json`.
+A user or project entry with the same name overrides the plugin's (fir warns).
 
 ## Drop-in configs (`mcp.d/`)
 

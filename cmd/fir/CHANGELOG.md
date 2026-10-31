@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+- **Agent Plugins v1.0.0 support.** `fir install <path|git>` on a package with `plugin.json` loads it as an [Agent Plugin](https://agent-plugins.org/specification): validated manifest, `skills/*/SKILL.md` skills, and `mcp.json` MCP servers (stdio, streamable-http, sse) as the lowest MCP config layer, with `PLUGIN_ROOT`/`PLUGIN_DATA`, path containment and per-component failure isolation. Meets the client conformance checklist. Guide: `docs/agent-plugins.md`.
+- **MCP config: `cwd` and `headers`.** Stdio servers can set a working directory; HTTP servers can send fixed headers (same origin only; fir-generated headers win).
+
 ## [1.45.3] - 2026-10-31
 
 ### Fixed

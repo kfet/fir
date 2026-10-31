@@ -151,7 +151,7 @@ func setupSession(args *Args, deferExtensions bool) (*sessionSetup, error) {
 	if !args.NoMCP {
 		mcpCfg, mcpErr := mcp.LoadDefaultConfigs(cwd)
 		if mcpErr != nil {
-			fmt.Fprintf(os.Stderr, "Warning: skipped broken MCP config: %v\n", mcpErr)
+			fmt.Fprintf(os.Stderr, "Warning: MCP config warnings: %v\n", mcpErr)
 		}
 		if args.MCPConfig != "" {
 			extra, extraErr := mcp.LoadConfigFile(args.MCPConfig)

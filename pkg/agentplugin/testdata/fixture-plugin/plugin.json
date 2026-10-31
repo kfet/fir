@@ -1,0 +1,15 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "fixture-plugin",
+  "version": "1.0.0",
+  "description": "Conformance fixture: skills plus a stdio MCP server.",
+  "author": {"name": "Example Author", "email": "author@example.com", "url": "https://example.com"},
+  "homepage": "https://example.com/fixture",
+  "repository": "https://example.com/fixture.git",
+  "license": "MIT",
+  "keywords": ["fixture", "conformance"],
+  "extensions": {
+    "com.example.client": {"anything": ["is", {"not": "validated"}]},
+    "dev.fir": {}
+  }
+}

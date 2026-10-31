@@ -657,3 +657,37 @@ func addSkillsFromRoot(add func(LoadSkillsResult), cwd string, r SkillRoot) {
 		}
 	}
 }
+
+// ValidateSkillFile checks a SKILL.md strictly against the Agent Skills
+// specification (https://agentskills.io/specification): YAML frontmatter with
+// a non-empty name that satisfies the naming rules and matches the parent
+// directory, and a non-empty description of at most 1024 characters. It
+// returns one message per violation; nil means the skill conforms.
+//
+// The regular skill loader is deliberately more lenient (it warns about name
+// problems and loads the skill anyway). Agent Plugins requires clients to
+// skip non-conforming skills, so plugin discovery uses this instead.
+func ValidateSkillFile(filePath string) []string {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return []string{err.Error()}
+	}
+	content := string(data)
+	if !strings.HasPrefix(content, "---") || !strings.Contains(content[3:], "\n---") {
+		return []string{"missing YAML frontmatter"}
+	}
+	fm := parseFrontmatterSimple(content)
+	var errs []string
+	if fm.Name == "" {
+		errs = append(errs, "name is required")
+	} else {
+		errs = append(errs, validateSkillName(fm.Name, filepath.Base(filepath.Dir(filePath)))...)
+	}
+	switch {
+	case fm.Description == "":
+		errs = append(errs, "description is required")
+	case len([]rune(fm.Description)) > MaxSkillDescriptionLength:
+		errs = append(errs, "description exceeds max length")
+	}
+	return errs
+}

@@ -540,6 +540,8 @@ fir packages update [source]                # pull latest for one or all package
 
 Packages are stored in `settings.json` under `"packages"`. Each entry is a string (`"github.com/user/repo"`) or an object with `"source"` and optional per-type filters. Installed package skills, extensions, and themes are automatically loaded.
 
+**Agent Plugins.** A package whose root has `plugin.json` is loaded as an [Agent Plugin](https://agent-plugins.org/specification) (v1.0.0) instead: `plugin.json` is validated (invalid → the whole plugin contributes nothing), skills come only from `skills/*/SKILL.md` (invalid ones skipped), and `<plugin>/mcp.json` servers join MCP config as the lowest layer (user/project entries of the same name win, with a warning). Stdio servers run with cwd = plugin root and get `PLUGIN_ROOT` and `PLUGIN_DATA` (`<agent-dir>/plugin-data/<name>-<source-hash>/`, or `.fir/plugin-data/…` for `--local`; created only for plugins with stdio servers; kept across updates). `fir.json` and auto-discovery are ignored for plugins. Diagnostics print at `fir install` and in startup MCP warnings. fir reserves the client namespace `dev.fir` (no contents defined). User guide: `docs/agent-plugins.md`. Code: `pkg/agentplugin/`.
+
 ## Resource Lookup Paths
 
 Skills and themes are discovered from multiple locations. Each

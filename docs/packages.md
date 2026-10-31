@@ -5,6 +5,9 @@
 Add the ability to install external packages (extensions + skills) from git repositories
 or local paths. Similar to pi-mono's `PackageManager` but simpler and Go-native.
 
+> Packages with a `plugin.json` at the root are loaded as Agent Plugins
+> instead of with the rules below — see [agent-plugins.md](agent-plugins.md).
+
 ## Package Sources
 
 | Format | Example | Notes |

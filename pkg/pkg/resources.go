@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/kfet/fir/pkg/agentplugin"
 	"github.com/kfet/fir/pkg/extension/sdk"
 )
 
@@ -23,12 +24,25 @@ type PackageResources struct {
 	Extensions []string
 	Skills     []string
 	Themes     []string
+	// Plugin is set when the package is an Agent Plugin (has plugin.json)
+	// and its manifest is valid.
+	Plugin *agentplugin.Plugin
+	// Diagnostics reports non-fatal problems found while scanning an Agent
+	// Plugin: a rejected manifest, ignored fields, skipped skills.
+	Diagnostics []agentplugin.Diagnostic
 }
 
 // ScanPackageResources reads or auto-discovers resources in dir.
 // If fir.json is present its glob patterns are expanded; otherwise
 // auto-discovery rules apply.
+//
+// A package whose root has plugin.json is an Agent Plugin instead: only its
+// skills/*/SKILL.md skills are discovered (MCP servers are loaded separately
+// through the MCP plugin layer), and fir.json is ignored.
 func ScanPackageResources(dir string) (*PackageResources, error) {
+	if agentplugin.IsPlugin(dir) {
+		return scanAgentPlugin(dir), nil
+	}
 	manifestPath := filepath.Join(dir, "fir.json")
 	data, err := os.ReadFile(manifestPath)
 	if err == nil {
@@ -313,4 +327,18 @@ func sdkCacheRoot() (string, error) {
 		return "", err
 	}
 	return filepath.Dir(filepath.Clean(base)), nil
+}
+
+// scanAgentPlugin discovers the resources of an Agent Plugin. A rejected
+// plugin contributes nothing; the reason is in Diagnostics.
+func scanAgentPlugin(dir string) *PackageResources {
+	p, diags := agentplugin.Load(dir)
+	res := &PackageResources{Plugin: p, Diagnostics: diags}
+	if p == nil {
+		return res
+	}
+	skills, sdiags := p.Skills()
+	res.Skills = skills
+	res.Diagnostics = append(res.Diagnostics, sdiags...)
+	return res
 }

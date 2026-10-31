@@ -12,7 +12,30 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 )
+
+// PluginLayerFunc returns the MCP servers contributed by installed Agent
+// Plugins, the plugin mcp.json each one came from, and a joined error of
+// non-fatal diagnostics (skipped entries, rejected plugins). agentDir is the
+// global fir config directory; projectDir is the project working directory.
+type PluginLayerFunc func(agentDir, projectDir string) (servers map[string]ServerConfig, sources map[string]string, err error)
+
+var pluginLayer atomic.Pointer[PluginLayerFunc]
+
+// PluginLayerRegistered reports whether a plugin layer provider is installed.
+func PluginLayerRegistered() bool { return pluginLayer.Load() != nil }
+
+// RegisterPluginLayer installs the provider for the plugin MCP layer, the
+// lowest-precedence layer read by LoadDefaultConfigsReport. The package
+// manager registers it; mcp itself knows nothing about packages.
+func RegisterPluginLayer(f PluginLayerFunc) {
+	if f == nil {
+		pluginLayer.Store(nil)
+		return
+	}
+	pluginLayer.Store(&f)
+}
 
 // ResolveMode returns the effective AuthMode for a config, applying the
 // "Token set implies bearer" inference. A nil config resolves to AuthModeAuto.
@@ -325,6 +348,7 @@ func LoadDefaultConfigs(projectDir string) (*ConfigFile, error) {
 // collisions detected during merging. The collision list records when a server
 // name from a later config file shadows one from an earlier file. Precedence
 // (low → high):
+//  0. <plugin>/mcp.json                (installed Agent Plugins)
 //  1. ~/.config/fir/mcp.json           (user base)
 //  2. ~/.config/fir/mcp.d/*.json       (user drop-ins, lexically sorted)
 //  3. <projectDir>/.fir/mcp.json       (project base)
@@ -368,6 +392,28 @@ func loadDefaultConfigs(projectDir string) (*ConfigFile, []Collision, map[string
 		}
 	}
 
+	// 0. Installed Agent Plugins (lowest precedence). A user or project
+	// entry of the same name wins; that is reported, since the plugin
+	// author's server silently disappearing would be confusing.
+	pluginSources := map[string]string{}
+	if f := pluginLayer.Load(); f != nil {
+		servers, sources, err := (*f)(configDir, projectDir)
+		if err != nil {
+			errs = append(errs, err)
+		}
+		for name, cfg := range servers {
+			merged.MCPServers[name] = cfg
+			serverSource[name] = sources[name]
+			pluginSources[name] = sources[name]
+		}
+	}
+	shadowPlugin := func(name, file string) {
+		if src, ok := pluginSources[name]; ok && serverSource[name] == src {
+			addCollision(name, file, src)
+			errs = append(errs, fmt.Errorf("MCP server %q from plugin %s is overridden by %s", name, src, file))
+		}
+	}
+
 	// 1. Load user base config.
 	if userPath != "" {
 		userCfg, err := LoadConfigFile(userPath)
@@ -376,6 +422,7 @@ func loadDefaultConfigs(projectDir string) (*ConfigFile, []Collision, map[string
 			userCfg = &ConfigFile{}
 		}
 		for name, cfg := range userCfg.MCPServers {
+			shadowPlugin(name, userPath)
 			merged.MCPServers[name] = cfg
 			serverSource[name] = userPath
 		}
@@ -393,7 +440,9 @@ func loadDefaultConfigs(projectDir string) (*ConfigFile, []Collision, map[string
 
 	// Merge drop-ins into our tracking, detecting collisions with base config.
 	for name, cfg := range dirCfg.MCPServers {
-		if prevFile, exists := serverSource[name]; exists {
+		if _, fromPlugin := pluginSources[name]; fromPlugin && serverSource[name] == pluginSources[name] {
+			shadowPlugin(name, dirSources[name])
+		} else if prevFile, exists := serverSource[name]; exists {
 			// Drop-in shadows the base config.
 			addCollision(name, dirSources[name], prevFile)
 		}
@@ -425,6 +474,7 @@ func loadDefaultConfigs(projectDir string) (*ConfigFile, []Collision, map[string
 			projCfg = &ConfigFile{}
 		}
 		for name, cfg := range projCfg.MCPServers {
+			shadowPlugin(name, projectPath)
 			merged.MCPServers[name] = cfg
 			serverSource[name] = projectPath
 		}

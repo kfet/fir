@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/kfet/fir/pkg/agentplugin"
+	firlog "github.com/kfet/fir/pkg/log"
 	"github.com/kfet/fir/pkg/resources"
 )
 
@@ -92,17 +94,36 @@ func (m *Manager) Install(source string, local bool) error {
 	// Generate runtime wrappers for any JS/TS ("pi-style") extensions so they
 	// become discoverable. Done in core (not the install extension) so every
 	// install path produces a loadable package. Best-effort: a failure here
-	// must not abort an otherwise-successful install.
-	if n, werr := GenerateJSWrappers(installPath); werr != nil {
-		fmt.Printf("Warning: JS/TS wrapper generation: %v\n", werr)
-	} else if n > 0 {
-		fmt.Printf("Created %d runtime wrapper(s) for JS/TS extension(s).\n", n)
+	// must not abort an otherwise-successful install. Agent Plugins carry no
+	// fir extensions, so fir never writes into them.
+	if !agentplugin.IsPlugin(installPath) {
+		if n, werr := GenerateJSWrappers(installPath); werr != nil {
+			fmt.Printf("Warning: JS/TS wrapper generation: %v\n", werr)
+		} else if n > 0 {
+			fmt.Printf("Created %d runtime wrapper(s) for JS/TS extension(s).\n", n)
+		}
 	}
 
 	// Print discovered resources.
 	res, err := ScanPackageResources(installPath)
 	if err != nil {
 		return fmt.Errorf("scanning package at %s: %w", installPath, err)
+	}
+	for _, d := range res.Diagnostics {
+		fmt.Printf("Warning: %s\n", d)
+	}
+	if res.Plugin != nil {
+		servers, mdiags := res.Plugin.MCPServers(m.pluginDataDir(res.Plugin.Manifest.Name, src.Raw, local))
+		for _, d := range mdiags {
+			fmt.Printf("Warning: %s\n", d)
+		}
+		fmt.Printf("Agent Plugin %q: %d skill(s), %d MCP server(s)\n",
+			res.Plugin.Manifest.Name, len(res.Skills), len(servers))
+		return nil
+	}
+	if agentplugin.IsPlugin(installPath) {
+		fmt.Printf("Warning: %s is an Agent Plugin but its plugin.json is invalid; it stays installed but contributes nothing until fixed\n", source)
+		return nil
 	}
 	fmt.Printf("Discovered: %d skill(s), %d extension(s), %d theme(s)\n",
 		len(res.Skills), len(res.Extensions), len(res.Themes))
@@ -519,6 +540,11 @@ func (m *Manager) resolveEntry(entry any, scope string) (InstalledPackage, error
 	var resources *PackageResources
 	if _, err := os.Stat(installPath); err == nil {
 		resources, _ = ScanPackageResources(installPath)
+		if resources != nil {
+			for _, d := range resources.Diagnostics {
+				firlog.Warn("agent plugin", "package", rawSource, "diagnostic", d.String())
+			}
+		}
 	}
 
 	return InstalledPackage{
