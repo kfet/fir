@@ -278,8 +278,9 @@ func (r *ModelRegistry) fetchLiveModels(ctx context.Context, provider string, li
 	// Resolve full metadata using built-in models and synthesis fallback.
 	models := r.synthesiseForLiveIDs(provider, ids)
 
-	state.set(ids, models)
+	// Persist before set: done then also means the cache write finished.
 	r.saveLiveCache(cacheDir, provider, ids, models)
+	state.set(ids, models)
 	firlog.Debug("live model list for %s: %d models", provider, len(models))
 }
 

@@ -351,9 +351,16 @@ func TestStartLiveModelFetch_UsesListerForAPIKeyProvider(t *testing.T) {
 	reg := NewModelRegistry(authStore, "")
 	reg.StartLiveModelFetch(context.Background(), t.TempDir(), nil)
 
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) && lister.called.Load() == 0 {
-		time.Sleep(10 * time.Millisecond)
+	reg.liveModelsMu.Lock()
+	state := reg.liveModels[prov]
+	reg.liveModelsMu.Unlock()
+	if state == nil {
+		t.Fatal("no live fetch started for api-key provider")
+	}
+	select {
+	case <-state.done:
+	case <-time.After(20 * time.Second):
+		t.Fatal("live fetch never completed")
 	}
 	if lister.called.Load() == 0 {
 		t.Fatal("api-key provider should use the API-key lister; lister was not called")

@@ -2,9 +2,14 @@
 
 ## [Unreleased]
 
+## [1.46.1] - 2026-10-31
+
+### Changed
+- **Model catalog regenerated**: 5 models with changed pricing/limits (openrouter: glm-5.3-flash, deepseek-flash-latest, deepseek-v4-flash-latest, kimi-latest, glm-flash-latest).
+
 ### Fixed
-- **CI on release commits**: the distkit asset-parity test skips while the new release has no assets yet, instead of failing during the upload window.
 - ACP: a non-retryable provider rejection (HTTP 401/402/403, e.g. "402 Budget exceeded") now fails the `session/prompt` with a JSON-RPC error (401 → AUTH_REQUIRED) instead of ending the turn with the error as answer text.
+- **CI on release commits**: the distkit asset-parity test skips while the new release has no assets yet, instead of failing during the upload window.
 
 ## [1.46.0] - 2026-10-31
 
