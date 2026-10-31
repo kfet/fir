@@ -2,8 +2,13 @@
 
 ## [Unreleased]
 
+## [1.46.2] - 2026-10-31
+
 ### Fixed
 - **OAuth login from another fir process no longer 401s a running session ("invalid x-api-key").** The model registry now rebuilds when auth.json's credential set changes on disk (new default credential or new account slot), and each prompt re-resolves the session model, so the OAuth token is sent as `Authorization: Bearer` instead of `x-api-key`.
+
+### Changed
+- **Model catalog regenerated**: removed 4 aggregator models (openrouter: poolside laguna-s-2.1, laguna-xs-2.1 and their :free variants); 13 models with changed pricing/limits (openrouter: deepseek-flash-latest, deepseek-pro-latest, deepseek-v4-flash-latest, deepseek-v4-pro-0813, minimax-m3.1-flash, kimi-latest, qwen3.8-27b, hy3, hy4-preview, glm-4.7, +3 more).
 
 ## [1.46.1] - 2026-10-31
 
