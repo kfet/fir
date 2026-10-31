@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- **OAuth login from another fir process no longer 401s a running session ("invalid x-api-key").** The model registry now rebuilds when auth.json's credential set changes on disk (new default credential or new account slot), and each prompt re-resolves the session model, so the OAuth token is sent as `Authorization: Bearer` instead of `x-api-key`.
+
 ## [1.46.1] - 2026-10-31
 
 ### Changed

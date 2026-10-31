@@ -462,6 +462,11 @@ type ModelRegistry struct {
 	// rebuild deliberately runs without mu held (see Refresh).
 	refreshMu sync.Mutex
 
+	// authShape is auth.AuthStorage.CredentialShape() as seen by the build
+	// that produced models. SyncAuth compares it against the live shape to
+	// spot a login/logout made by another process.
+	authShape string
+
 	// catalogRaw is the exact bytes of the catalog overlay the current models
 	// were built from (fir-dist document merged above built-ins and below
 	// user config), used to detect a changed document after a fetch.
@@ -535,7 +540,39 @@ func (r *ModelRegistry) Refresh() {
 	// which build started with the fresher state.
 	r.refreshMu.Lock()
 	defer r.refreshMu.Unlock()
+	r.refreshLocked()
+}
 
+// SyncAuth rebuilds the registry when the credential set in auth.json changed
+// since the last build — typically an OAuth login made by another fir process.
+// Models carry per-credential state stamped at build time (an OAuth provider's
+// ModifyModels marks its models with OAuth headers, and named accounts get
+// their own cloned models), so a registry built while a provider held an API
+// key would otherwise send the new OAuth token as an x-api-key and 401.
+//
+// Cheap when nothing changed: one stat of auth.json and a string compare. A
+// rebuild already in flight (including a re-entrant call from a ModifyModels
+// callback) is not waited for. Reports whether this call rebuilt.
+//
+// A ReloadIfStale racing a concurrent build can leave that build with a mixed
+// view of auth.json; the shape then still mismatches, so the next SyncAuth
+// rebuilds again and the registry self-heals.
+func (r *ModelRegistry) SyncAuth() bool {
+	r.authStorage.ReloadIfStale()
+	shape := r.authStorage.CredentialShape()
+	r.mu.RLock()
+	same := shape == r.authShape
+	r.mu.RUnlock()
+	if same || !r.refreshMu.TryLock() {
+		return false
+	}
+	defer r.refreshMu.Unlock()
+	r.refreshLocked()
+	return true
+}
+
+// refreshLocked is Refresh's body. Caller holds r.refreshMu.
+func (r *ModelRegistry) refreshLocked() {
 	// Re-read provider credentials from the shared auth storage before
 	// rebuilding. A provider authenticated after this session started (via
 	// `fir login`, a sibling fir session, or another tool writing the same
@@ -571,6 +608,7 @@ type modelSnapshot struct {
 	catalogRaw       []byte
 	clientVersions   *CatalogClientVersions
 	loadError        string
+	authShape        string
 }
 
 // applySnapshot installs a snapshot. Caller holds r.mu (or holds the only
@@ -583,6 +621,7 @@ func (r *ModelRegistry) applySnapshot(s modelSnapshot) {
 	r.catalogRaw = s.catalogRaw
 	r.clientVersions = s.clientVersions
 	r.loadError = s.loadError
+	r.authShape = s.authShape
 }
 
 // GetError returns any error from loading models.json (empty string if no error).
@@ -717,6 +756,9 @@ func logClientVersions(overlay *CatalogClientVersions) {
 // buildModels computes the whole registry state. It must NOT be called with
 // r.mu held: it runs OAuth ModifyModels callbacks which may block on I/O.
 func (r *ModelRegistry) buildModels() modelSnapshot {
+	// Capture the credential shape FIRST: if auth.json is reloaded while this
+	// build runs, the recorded shape is the older one and SyncAuth rebuilds.
+	authShape := r.authStorage.CredentialShape()
 	overlay, overlayRaw := r.loadCatalogOverlay()
 
 	result := r.loadCustomModels(r.modelsJsonPath, overlay)
@@ -768,6 +810,7 @@ func (r *ModelRegistry) buildModels() modelSnapshot {
 		catalogRaw:       overlayRaw,
 		clientVersions:   clientVersions,
 		loadError:        result.Error, // built-ins are kept even if custom models failed
+		authShape:        authShape,
 	}
 }
 
@@ -1349,6 +1392,7 @@ func (r *ModelRegistry) GetAll() []*ai.Model {
 // surfaces live-list IDs that aren't in the built-in registry, with metadata
 // synthesised from sibling models.
 func (r *ModelRegistry) GetAvailable() []*ai.Model {
+	r.SyncAuth()
 	// Built-in models confirmed live.
 	r.mu.RLock()
 	var result []*ai.Model
@@ -1386,6 +1430,7 @@ func (r *ModelRegistry) GetAvailable() []*ai.Model {
 //     mistyped ID against an authed provider returns nil rather than a
 //     phantom model.
 func (r *ModelRegistry) Find(provider, modelID string) *ai.Model {
+	r.SyncAuth()
 	r.mu.RLock()
 	for _, m := range r.models {
 		if m.Provider == provider && m.ID == modelID {

@@ -11,8 +11,8 @@ import (
 
 // TestRefresh_PicksUpProviderAuthenticatedAfterStartup covers the /reload case:
 // a provider gains credentials in the shared auth storage *after* the session
-// started (fir login, a sibling session, another tool). Refresh must re-read
-// auth.json so the provider's models become available without a restart.
+// started (fir login, a sibling session, another tool). The registry must
+// pick it up from auth.json without a restart, both on its own and on Refresh.
 func TestRefresh_PicksUpProviderAuthenticatedAfterStartup(t *testing.T) {
 	const provider = "test-provider-lateauth"
 	const modelID = "test-lateauth-model"
@@ -42,12 +42,13 @@ func TestRefresh_PicksUpProviderAuthenticatedAfterStartup(t *testing.T) {
 	// Another process writes credentials for the provider.
 	writeAuthFile(t, authPath, `{"`+provider+`":{"type":"api_key","key":"sk-test-late"}}`)
 
-	// Without a reload the running session still sees the startup state.
-	if hasModel(registry.GetAvailable(), modelID) {
-		t.Fatalf("model %q became available without a refresh — test no longer exercises the cache", modelID)
+	// The running registry notices the changed credential set on its own
+	// (SyncAuth): no /reload needed.
+	if !hasModel(registry.GetAvailable(), modelID) {
+		t.Fatalf("model %q not available after an external login; registry did not resync auth", modelID)
 	}
 
-	// /reload -> ModelRegistry.Refresh().
+	// An explicit /reload -> ModelRegistry.Refresh() keeps it available.
 	registry.Refresh()
 
 	if !hasModel(registry.GetAvailable(), modelID) {

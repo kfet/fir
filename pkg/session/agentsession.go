@@ -271,6 +271,12 @@ type AgentSession struct {
 	// already read them.
 	hooks atomic.Pointer[AgentSessionHooks]
 
+	// registryModel is the unadjusted registry model the current model was
+	// resolved from; resyncModelAuth compares against it to spot a rebuild.
+	registryModel atomic.Pointer[ai.Model]
+	// modelMu serialises model swaps (SetModel vs resyncModelAuth).
+	modelMu sync.Mutex
+
 	// Usage tracking (optional; nil disables tracking)
 	usageTracker UsageTracker
 
@@ -651,6 +657,8 @@ func (s *AgentSession) Prompt(text string, opts ...*PromptOptions) error {
 	if s.extReady != nil {
 		<-s.extReady
 	}
+
+	s.resyncModelAuth()
 
 	// If a fully-completed plan was left over from a previous turn, clear it
 	// immediately — there's no value showing a stale "done" plan. For
@@ -1180,30 +1188,80 @@ func (s *AgentSession) GetCompactionStats() *CompactionInfo {
 // Model management
 // ============================================================================
 
+// resyncModelAuth re-resolves the current model from the registry when the
+// credential set changed on disk since it was selected (see
+// ModelRegistry.SyncAuth). The model object carries credential-specific state
+// stamped at registry build time — OAuth providers tag their models with
+// OAuth headers — so a model picked before another process logged the
+// provider in via OAuth would send the new OAuth token as an API key. Only
+// the in-memory model is swapped; the session log is untouched because the
+// provider/model id is unchanged.
+func (s *AgentSession) resyncModelAuth() {
+	cur := s.Model()
+	if s.modelRegistry == nil || cur == nil {
+		return
+	}
+	// Find syncs the registry with auth.json. Registry models are only
+	// replaced by a rebuild, so an unchanged pointer means nothing to do.
+	fresh := s.modelRegistry.Find(cur.Provider, cur.ID)
+	if fresh == nil || fresh == s.registryModel.Load() {
+		return
+	}
+	adjusted, callable := s.adjustModelEndpoint(fresh)
+	s.modelMu.Lock()
+	defer s.modelMu.Unlock()
+	// Don't clobber a model switch that landed while the hook ran.
+	if !callable || s.Model() != cur {
+		return
+	}
+	s.registryModel.Store(fresh)
+	firlog.Debug("model re-resolved from rebuilt registry", "provider", cur.Provider, "id", cur.ID)
+	s.Agent.SetModel(adjusted)
+}
+
+// adjustModelEndpoint consults the ResolveModelEndpoint hook and applies its
+// base URL / API correction. It returns the (possibly copied) model and
+// whether the hook marked it as not callable.
+func (s *AgentSession) adjustModelEndpoint(model *ai.Model) (*ai.Model, bool) {
+	h := s.hooks.Load()
+	if h == nil || h.ResolveModelEndpoint == nil {
+		return model, true
+	}
+	corr := h.ResolveModelEndpoint(model)
+	if corr == nil {
+		return model, true
+	}
+	if corr.Callable != nil && !*corr.Callable {
+		return model, false
+	}
+	if corr.BaseURL == "" && corr.API == "" {
+		return model, true
+	}
+	adjusted := *model
+	if corr.BaseURL != "" {
+		adjusted.BaseURL = corr.BaseURL
+	}
+	if corr.API != "" {
+		adjusted.API = ai.Api(corr.API)
+	}
+	return &adjusted, true
+}
+
 // SetModel changes the current model. When a ResolveModelEndpoint hook is
 // installed it is consulted once here (this is the "selected for inference"
 // point) so a provider extension can correct the model's endpoint on-demand or
 // veto it — returning an error that callers surface cleanly instead of the
 // selection failing mid-stream later.
 func (s *AgentSession) SetModel(model *ai.Model) error {
-	if h := s.hooks.Load(); h != nil && h.ResolveModelEndpoint != nil {
-		if corr := h.ResolveModelEndpoint(model); corr != nil {
-			if corr.Callable != nil && !*corr.Callable {
-				return fmt.Errorf("model %s is not enabled on %s", model.ID, model.Provider)
-			}
-			if corr.BaseURL != "" || corr.API != "" {
-				adjusted := *model
-				if corr.BaseURL != "" {
-					adjusted.BaseURL = corr.BaseURL
-				}
-				if corr.API != "" {
-					adjusted.API = ai.Api(corr.API)
-				}
-				model = &adjusted
-			}
-		}
+	adjusted, callable := s.adjustModelEndpoint(model)
+	if !callable {
+		return fmt.Errorf("model %s is not enabled on %s", model.ID, model.Provider)
 	}
+	s.modelMu.Lock()
+	s.registryModel.Store(model)
+	model = adjusted
 	s.Agent.SetModel(model)
+	s.modelMu.Unlock()
 	s.SessionStore.AppendModelChange(model.Provider, model.ID)
 	s.UpdateSessionState(func(st *SessionState) { st.Conversation.Model = model.Provider + "/" + model.ID })
 	s.statusModelChanged()

@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -236,7 +237,7 @@ type AuthStorage struct {
 	lastKeyErrors    map[string]error // per-provider last key resolution error
 	audit            *auditWriter     // append-only mutation log; nil for in-memory
 	// lastStamp is the backend fingerprint (see externallyMutableBackend) as
-	// of the last load. Used by reloadIfStale to detect an out-of-process
+	// of the last load. Used by ReloadIfStale to detect an out-of-process
 	// rewrite of auth.json — e.g. `fir auth refresh` rotating tokens from
 	// cron while this session is live.
 	lastStamp string
@@ -368,8 +369,8 @@ func (s *AuthStorage) backendStamp() string {
 	return ""
 }
 
-// reloadIfStale re-reads auth.json when it has changed on disk since this
-// AuthStorage last loaded it.
+// ReloadIfStale re-reads auth.json when it has changed on disk since this
+// AuthStorage last loaded it, and reports whether it did.
 //
 // This is what keeps a long-running session honest about credential rotation.
 // OAuth refresh tokens rotate on every grant, and at least one provider
@@ -379,15 +380,31 @@ func (s *AuthStorage) backendStamp() string {
 // auth.json on disk is perfectly healthy. Without this check the session would
 // 401 forever, because nothing in the expiry-driven refresh path ever looks at
 // the file again. See RefreshApiKey for the post-401 belt-and-braces.
-func (s *AuthStorage) reloadIfStale() {
+func (s *AuthStorage) ReloadIfStale() bool {
 	s.mu.RLock()
 	last := s.lastStamp
 	stamp := s.backendStamp()
 	s.mu.RUnlock()
 	if stamp == "" || stamp == last {
-		return
+		return false
 	}
 	s.Reload()
+	return true
+}
+
+// CredentialShape returns a fingerprint of which slots hold which kind of
+// credential (slot key, type and label) — everything a model registry build
+// depends on, and nothing that rotates on a token refresh. Two calls return
+// the same string iff a registry rebuild would see the same credential set.
+func (s *AuthStorage) CredentialShape() string {
+	s.mu.RLock()
+	keys := make([]string, 0, len(s.data))
+	for k, c := range s.data {
+		keys = append(keys, k+"\x00"+string(c.Type)+"\x00"+c.Label)
+	}
+	s.mu.RUnlock()
+	sort.Strings(keys)
+	return strings.Join(keys, "\x01")
 }
 
 // RefreshApiKey re-reads auth.json from disk and then resolves the provider's
@@ -568,7 +585,7 @@ func (s *AuthStorage) GetApiKeyError(provider string) error {
 func (s *AuthStorage) GetApiKey(provider string) string {
 	// Pick up an out-of-process credential rotation before resolving. Cheap
 	// (a stat) in the common case where nothing changed.
-	s.reloadIfStale()
+	s.ReloadIfStale()
 
 	s.mu.RLock()
 

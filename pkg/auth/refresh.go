@@ -70,7 +70,7 @@ func (r RefreshResult) ExpiresAt() time.Time {
 func (s *AuthStorage) RefreshAccounts(ctx context.Context, providerID string, window time.Duration, force bool) []RefreshResult {
 	// Enumerate against the file as it is now, not as this process last saw
 	// it: another writer may have added, removed or rotated a slot since.
-	s.reloadIfStale()
+	s.ReloadIfStale()
 	accounts := s.AccountsForProvider(providerID)
 	results := make([]RefreshResult, 0, len(accounts))
 	for _, acct := range accounts {
