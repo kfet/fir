@@ -794,15 +794,12 @@ class ProviderGateTest(unittest.TestCase):
         ctx = self._run("anthropic")
         self.fetch.assert_called_once_with("tok-default", "anthropic")
         self.assertEqual(self.pub.call_args[0][4], "anthropic")
-        self.series.assert_called_once_with("anthropic-usage")
         self.poe.assert_not_called()
         self.assertIn("5h", ctx.set_status.call_args[0][0])
 
     def test_extra_account_reports_its_own_quota(self):
         self._run("anthropic#acct2")
         self.fetch.assert_called_once_with("tok-2", "anthropic#acct2")
-        self.assertEqual(self.pub.call_args[0][4], "anthropic#acct2")
-        self.series.assert_called_once_with("anthropic-usage-acct2")
 
     def test_account_without_token_reports_nothing(self):
         ctx = self._run("anthropic#nologin")

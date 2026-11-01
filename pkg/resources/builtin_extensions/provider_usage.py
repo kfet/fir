@@ -710,7 +710,7 @@ def _burst_alerts(entries: list[dict], now: float) -> list:
             f"Anthropic usage burst: account-wide 5-hour utilization rose "
             f"≥{BURST_POINTS:g} points within {BURST_WINDOW_SECONDS / 60:g} min "
             f"(since {_fmt_clock(bucket)}) — likely many sessions resuming at once "
-            "(cold prompt caches); avoid starting heavy parallel work.",
+            "(cold prompt caches); informational only.",
         )
     ]
 
@@ -963,10 +963,7 @@ def _publish_warnings(
     if warnings:
         section.insert(0, _warning_text(warnings, now, countdown=False))
     with contextlib.suppress(Exception):
-        ctx.set_section(
-            " ".join(section)
-            + " Tell the user about this when relevant; do not start heavy work without saying so."
-        )
+        ctx.set_section(" ".join(section))
     try:
         fresh = _claim_crossings(warnings, now, alerts, slot)
     except Exception:
@@ -1159,11 +1156,9 @@ def _refresh_once(ctx: fir_ext.Context, poe_key, mode: str) -> None:
             parts.append(s)
         now = time.time()
         name = _cache_name(slot)
-        alerts = (
-            _usage_health(_read_json(_cache_dir() / f"{name}-cache.json"), now)
-            + _credential_health(_anthropic_credential(slot), now)
-            + _burst_alerts(_read_series(name), now)
-        )
+        alerts = _usage_health(
+            _read_json(_cache_dir() / f"{name}-cache.json"), now
+        ) + _credential_health(_anthropic_credential(slot), now)
         _publish_warnings(ctx, result.data, mode, alerts, slot)
     else:
         with contextlib.suppress(Exception):

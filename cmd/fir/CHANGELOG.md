@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [1.46.4] - 2026-11-01
+
+### Changed
+- **provider-usage: no more prompt pressure.** The section no longer tells the agent to "not start heavy work"; burst alerts are dropped from the prompt (they stalled subagents).
+
 ## [1.46.3] - 2026-11-01
 
 ### Changed
