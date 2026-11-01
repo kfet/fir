@@ -1,7 +1,7 @@
 ---
 builtin: true
 name: recall
-description: Recall what earlier fir sessions learned — search bookmarks (then transcripts) of prior sessions on this repo, worktrees included. Use before exploring a repo you were spawned into, when the user says "we did this before", "what did we decide about X", or when you need context a past session likely had. Always reports exactly what was searched.
+description: Recall what earlier fir sessions built or decided — search bookmarks, transcripts and sibling repo docs. Use BEFORE you say you lack a tool or capability or do not know how; when the user says "we did/patched/added/built X", "don't you have/know X", "can't you X", "what did we decide about X"; and before exploring a repo you were spawned into. Always reports exactly what was searched.
 ---
 
 # recall — cross-session memory via ls + rg + read
@@ -72,6 +72,16 @@ or `rg -i -C0` — pull the verbatim slice, not a paraphrase.
 A bookmark is an entry point; `store_path` is the whole record. If a hit
 lacks the why/how, `rg -n -i 'term' <store_path> | head` and read around the
 match. Refine terms, widen the tier, iterate — a few rounds, not dozens.
+
+## 3b. Capability question? Grep the repo that would hold it
+
+Sessions record work; repos record what shipped. Pick the likely repo beside this one
+(e.g. "patched zulip" → `$SRC/zulip*`) and search its docs and log:
+
+```bash
+SRC=$(dirname "${REPO:-$PWD}")   # the dir holding your repos
+for d in "$SRC"/*term*/; do git -C "$d" grep -iEl 'term1|term2' -- '*.md'; git -C "$d" log --oneline -i -E --grep 'term1|term2' | head -5; done
+```
 
 ## 4. ALWAYS report the searched set
 

@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Changed
+- Recall skill now triggers before the agent denies a capability ("we patched X", "can't you X") and greps ~/src repo docs; default system prompt tells agents to run recall first.
+
 ## [1.46.2] - 2026-10-31
 
 ### Fixed

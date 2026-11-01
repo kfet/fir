@@ -134,6 +134,7 @@ func buildDefaultPrompt(opts BuildSystemPromptOptions, promptCwd, date, host, ap
 
 	guidelines = append(guidelines, "Be concise in your responses")
 	guidelines = append(guidelines, "Show file paths clearly when working with files")
+	guidelines = append(guidelines, "Before you say a capability, tool or past change does not exist, run the recall skill: past sessions may have built it")
 	if toolSet["plan"] {
 		guidelines = append(guidelines, "For non-trivial tasks, use the plan tool to break work into steps and track progress")
 	}

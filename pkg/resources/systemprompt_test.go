@@ -215,3 +215,10 @@ func TestBuildSystemPrompt_HostOmittedOnError(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildSystemPrompt_RecallBeforeDenying(t *testing.T) {
+	prompt := BuildSystemPrompt(BuildSystemPromptOptions{Cwd: "/x"})
+	if !strings.Contains(prompt, "Before you say a capability, tool or past change does not exist, run the recall skill") {
+		t.Error("default prompt must tell the agent to run recall before denying a capability")
+	}
+}
