@@ -2,8 +2,11 @@
 
 ## [Unreleased]
 
+## [1.46.3] - 2026-11-01
+
 ### Changed
-- Recall skill now triggers before the agent denies a capability ("we patched X", "can't you X") and greps ~/src repo docs; default system prompt tells agents to run recall first.
+- **Model catalog regenerated**: 8 models with changed pricing/limits (openrouter: gpt-oss-120b, gpt-oss-20b, qwen3.8-27b, glm-5.3, glm-5.3-flash, deepseek-flash-latest, deepseek-v4-flash-latest, glm-flash-latest).
+- Recall skill now triggers before the agent denies a capability ("we patched X", "can't you X") and greps sibling repo docs; default system prompt tells agents to run recall first.
 
 ## [1.46.2] - 2026-10-31
 
