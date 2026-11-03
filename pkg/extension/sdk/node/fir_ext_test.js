@@ -3,7 +3,7 @@
  *
  * Drives fir_ext.run() with in-memory streams (mirroring the Python SDK's
  * fake-stdio tests) and asserts the init handshake payload plus provider/*
- * RPC dispatch. Run with: node fir_ext_test.js
+ * RPC dispatch. Run with: bun fir_ext_test.js (or node)
  */
 
 "use strict";

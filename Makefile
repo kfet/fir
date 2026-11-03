@@ -374,10 +374,11 @@ test-python: test-python-sdk test-python-ext test-python-schedule test-python-tm
 test-python-sdk: check-uv
 	$(call RUN,test python (sdk),PYTHONPATH=pkg/extension/sdk/python python3 -m unittest discover -s pkg/extension/sdk/python -p '*_test.py')
 
-# Node SDK tests (provider surface + pi-mono compat mapping). Skips cleanly
-# when node isn't installed, so the build still works on node-less hosts.
+# Node SDK tests (provider surface + pi-mono compat mapping). Runs under bun,
+# falling back to node; skips cleanly when neither is installed, so the build
+# still works on hosts without them.
 test-node-sdk:
-	$(call RUN,test node (sdk),if command -v node >/dev/null 2>&1; then node pkg/extension/sdk/node/fir_ext_test.js; else echo "node not found — skipping node SDK tests"; fi)
+	$(call RUN,test node (sdk),if command -v bun >/dev/null 2>&1; then bun pkg/extension/sdk/node/fir_ext_test.js; elif command -v node >/dev/null 2>&1; then node pkg/extension/sdk/node/fir_ext_test.js; else echo "bun/node not found — skipping node SDK tests"; fi)
 
 # Go SDK (firext) build + tests. The Go SDK is a nested module with no
 # dependencies — it is NOT embedded in the fir binary; extension authors

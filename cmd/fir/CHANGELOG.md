@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Changed
+- **Node SDK tests run under bun.** `make test-node-sdk` prefers bun and falls back to node; CI now installs bun.
+
 ## [1.47.1] - 2026-11-02
 
 ### Fixed
