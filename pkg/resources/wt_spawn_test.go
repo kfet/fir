@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // wtTmux is an isolated tmux server: TMUX_TMPDIR points at a private dir so
@@ -127,5 +128,24 @@ func TestWTSpawnSessionCollision(t *testing.T) {
 	}
 	if _, statErr := os.Stat(repo + "-wt-dup"); statErr == nil {
 		t.Error("worktree created despite collision")
+	}
+}
+
+// The agent's session must close when the agent exits — no idle shell left
+// behind for tmux-resurrect to restore.
+func TestWTSpawnSessionClosesWhenAgentExits(t *testing.T) {
+	m := newWTTmux(t)
+	repo := wtRepo(t, m)
+	m.env = append(m.env, "WT_FIR_CMD=sleep 1; true")
+	out, err := m.run(repo, "bash", spawnScript(t), "done.x", "task")
+	if err != nil {
+		t.Fatalf("spawn: %v\n%s", err, out)
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for m.hasSession("done_x") {
+		if time.Now().After(deadline) {
+			t.Fatal("session still open after the agent exited")
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 }

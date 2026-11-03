@@ -5,8 +5,10 @@
 #   (default is a dry run: it prints what it would do and changes nothing)
 #
 # A wt agent lives in a tmux window on its own worktree. When it finishes —
-# ship-it merges and removes the worktree — the window stays behind holding a
-# dead shell in a directory that no longer exists. Those accumulate.
+# ship-it merges and removes the worktree — its tmux session now closes with
+# it. This script sweeps what is still left: windows from agents spawned by
+# older spawn.sh versions (which ended in `exec $SHELL`), and shells a human
+# opened in a wt window. Those would otherwise accumulate.
 #
 # Everything needed to classify a window is already in tmux. No bookkeeping.
 #
@@ -24,8 +26,9 @@
 #
 # "Is an agent running here" is answered from the pane's process tree, NOT
 # from #{pane_current_command}. tmux reports the pane's immediate command,
-# and spawn.sh starts the agent as `fir ...; exec $SHELL` — so a pane with a
-# perfectly live agent reports `zsh`. Trusting that field would let this
+# and spawn.sh runs the agent as `<shell> -c "fir ...; rm -f ..."` (older
+# versions also chained `exec $SHELL`) — so a pane with a perfectly live
+# agent can report `sh` or `zsh`. Trusting that field would let this
 # script kill running agents. A window is judged by ALL of its panes: one
 # live agent in any pane protects the whole window.
 
@@ -38,7 +41,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --reap) REAP=1; shift ;;
     --idle-days) IDLE_DAYS="${2:-}"; shift 2 ;;
-    -h|--help) sed -n '2,26p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,33p' "$0"; exit 0 ;;
     *) echo "gc.sh: unknown argument: $1" >&2; exit 2 ;;
   esac
 done

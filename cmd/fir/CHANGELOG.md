@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Fixed
+- **`wt` agent sessions close when the agent exits.** `spawn.sh` no longer chains `exec $SHELL` after fir, so finished agents stop leaving idle shell sessions that pile up (and that tmux-resurrect restored). `gc.sh` still sweeps windows left by older spawns.
+
+### Added
+- **`wt/scripts/reap-idle.sh`** closes every tmux session whose panes are all idle shells — leftovers from before the fix above, and sessions tmux-resurrect restored. Dry run by default, `--reap` to act; never closes an attached session or its own.
+
 ## [1.46.4] - 2026-11-01
 
 ### Changed

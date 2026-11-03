@@ -32,9 +32,10 @@ Delegate all to a new agent!
    bash "$SKILL_DIR/scripts/spawn.sh" <feature-name> "<task text with pin>"
    ```
 
-4. Sweep up after earlier agents. A finished wt agent leaves its tmux
-   window behind, holding a dead shell in a worktree that ship-it has
-   already removed. Always run the sweep once the spawn succeeded:
+4. Sweep up after earlier agents. A wt agent's tmux session closes when
+   the agent exits, but windows can still be left behind: from agents
+   spawned by older versions of this skill, or shells someone opened by
+   hand. Always run the sweep once the spawn succeeded:
 
    ```bash
    bash "$SKILL_DIR/scripts/gc.sh" --reap
@@ -57,6 +58,22 @@ Delegate all to a new agent!
    `tmux attach -t …` outside). It fails if that session already exists.
 
 5. Report back what the spawn script returned, then every `REPORT` line.
+
+Closing idle sessions: `scripts/reap-idle.sh` closes every tmux session
+whose panes are all idle shells. These are sessions left by agents from
+before spawn.sh stopped chaining `exec $SHELL`, and sessions that
+tmux-resurrect restored as empty shells. It covers every session on the
+tmux server, not only wt ones, so do not run it as part of a spawn. Run it
+when the user asks to clean up idle or restored sessions:
+
+```bash
+bash "$SKILL_DIR/scripts/reap-idle.sh"          # dry run: REAP / KEEP per session
+bash "$SKILL_DIR/scripts/reap-idle.sh" --reap   # close the REAP sessions
+```
+
+A session is closed only if every pane is dead or is a shell with no
+child process. It never closes an attached session or the session it runs
+in. Tell the user which sessions were closed.
 
 Checking in later: the agent's session is named `<feature-name>`, so talk
 to it through fir, not its tmux screen:

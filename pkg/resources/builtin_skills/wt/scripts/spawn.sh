@@ -42,14 +42,18 @@ git worktree add "$WORKTREE" -b "$BRANCH" >/dev/null
 TASK_FILE="$(mktemp -t firtask.XXXXXX)"
 printf '%s\n' "$TASK_TEXT" > "$TASK_FILE"
 
+# The session runs fir directly and ends when fir exits: no trailing shell,
+# so finished agents do not leave idle sessions behind (which tmux-resurrect
+# would then restore). The task file is removed by the same command line.
+#
 # Capture the new window's id (tmux's stable `@N` handle) so verification is
 # immune to spacing in the default list-windows output AND to cross-session
 # name collisions (e.g. a stale window with the same FEATURE name in another
 # session would otherwise produce a false-positive).
 WIN_ID="$(tmux new-session -d -s "$NAME" -n "$FEATURE" -c "$WORKTREE" -P -F '#{window_id}' \
-  "$FIR_CMD --session-name $FEATURE \"\$(cat $TASK_FILE)\"; rm -f $TASK_FILE; exec \$SHELL")"
+  "$FIR_CMD --session-name $FEATURE \"\$(cat $TASK_FILE)\"; rm -f $TASK_FILE")"
 
-# tmux returns success as soon as the shell launches; verify the window is
+# tmux returns success as soon as the command launches; verify the window is
 # still alive (fir could fail to start and the window die before our check).
 # Short retry handles fresh-server edge cases.
 found=
