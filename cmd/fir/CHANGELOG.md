@@ -2,12 +2,15 @@
 
 ## [Unreleased]
 
+## [1.48.0] - 2026-11-03
+
 ### Added
 - **Read-only session stores (`sessionStores`).** Global `settings.json` `"sessionStores": [{"path": "~/fir-traces/zbox", "label": "zbox"}]` (or `FIR_SESSION_STORES=label=path,...`) adds other hosts' synced session archives. `/resume`, `fir --resume`, ACP `session/list`/`resume`, `observe_session all=true` and the `recall` skill now see them, labelled; resuming one forks it into the local store and nothing is ever written inside an archive.
 - **`fir sessions list|dirs|search`** — line-oriented (TSV or `--json`) listing of sessions across all stores, the store set, and a regexp search over bookmarks then transcripts, newest first.
 - Extensions get `FIR_BIN` (the running fir binary) so they can call back into the CLI.
 
 ### Changed
+- **Model catalog regenerated**: added 2 aggregator model(s); removed 1 aggregator model(s); 13 model(s) with changed pricing/limits (openrouter: deepseek/deepseek-v4.1-flash, google/gemma-4-26b-a4b-it, minimax/minimax-m3.1-flash, openai/gpt-oss-20b, qwen/qwen3-235b-a22b-2507, tencent/hy3, tencent/hy4-preview, z-ai/glm-5.3-flash; opencode-go: deepseek-v4-pro; vercel-ai-gateway: inclusionai/ling-3.1-flash-1019; +3 more).
 - `fir sessions list` prints tab-separated records (`store modified id msgs path cwd name first_message`) instead of a table; it covers every store.
 
 ### Fixed
