@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.47.3] - 2026-11-02
+
 ### Fixed
 
 - Plans no longer go stale in long runs: `plan-nudger` again counts turns since the last `plan` call and, every 3 turns with the plan unfinished, injects `Plan N/M, stale K turns. Update it now.` mid-run (no side query). Wording picked by a behaviour benchmark: stale-plan score 50% → 100% on claude-haiku-4-5.
@@ -9,6 +11,7 @@
 ### Changed
 
 - kfet/agent v0.6.2: the plan tool description and result no longer promise reminders or stagnation tracking (`next_update_in`, `progress_metric`); the extension owns its own wording.
+- **Model catalog regenerated**: 3 model(s) with changed pricing/limits (openrouter: google/gemma-4-26b-a4b-it, openai/gpt-oss-120b, ~moonshotai/kimi-latest).
 
 ## [1.47.2] - 2026-11-02
 
