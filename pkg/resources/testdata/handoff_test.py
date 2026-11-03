@@ -213,16 +213,59 @@ class TestSelfHandoffHandler(unittest.TestCase):
     def test_happy_path_passes_briefing_via_prepend_context(self) -> None:
         ctx = _StubContext()
         good = _good_content()
-        result = self.handoff.self_handoff({"content": good}, ctx)
+        result = self.handoff.self_handoff({"content": good, "next_step": "run make all"}, ctx)
         self.assertFalse(result.get("is_error"), result)
         self.assertEqual(len(ctx.restart_calls), 1)
         prompt, prepend = ctx.restart_calls[0]
-        # Prompt is short and natural.
-        self.assertTrue(0 < len(prompt) < 160, f"unexpected prompt: {prompt!r}")
         self.assertIn("handoff", prompt.lower())
         # Briefing travels in prepend_context, modulo trailing-newline
         # normalisation done by _validate_content.
         self.assertIn(good.rstrip("\n"), prepend)
+
+    def test_missing_next_step_returns_error_no_restart(self) -> None:
+        ctx = _StubContext()
+        for params in (
+            {"content": _good_content()},
+            {"content": _good_content(), "next_step": "  "},
+        ):
+            result = self.handoff.self_handoff(params, ctx)
+            self.assertTrue(result.get("is_error"))
+            self.assertIn("next_step", result["content"][0]["text"])
+        self.assertEqual(ctx.restart_calls, [])
+
+    def test_too_long_next_step_returns_error(self) -> None:
+        ctx = _StubContext()
+        step = "x" * (self.handoff.MAX_NEXT_STEP_LEN + 1)
+        result = self.handoff.self_handoff({"content": _good_content(), "next_step": step}, ctx)
+        self.assertTrue(result.get("is_error"))
+        self.assertEqual(ctx.restart_calls, [])
+
+    def test_next_step_tells_child_to_resume_without_asking(self) -> None:
+        """Regression: after a handoff mid-work, the child stopped to ask the
+        user which next step to do first. The prompt must carry the parent's
+        next step and say to start it without asking."""
+        ctx = _StubContext()
+        step = "Fix the failing test in foo_test.go, then run make all."
+        self.handoff.self_handoff({"content": _good_content(), "next_step": step}, ctx)
+        prompt, _ = ctx.restart_calls[0]
+        self.assertIn(step, prompt)
+        self.assertIn("Resume now", prompt)
+        self.assertIn("Do not ask the user", prompt)
+        self.assertIn("not a user message", prompt.lower())
+
+    def test_wait_next_step_tells_child_to_wait(self) -> None:
+        for step in ("wait", "WAIT", "`wait`", " wait. "):
+            ctx = _StubContext()
+            self.handoff.self_handoff({"content": _good_content(), "next_step": step}, ctx)
+            prompt, _ = ctx.restart_calls[0]
+            self.assertIn("waiting for the user", prompt, step)
+            self.assertIn("Do not start", prompt)
+            self.assertIn("say you are ready", prompt)
+            self.assertNotIn("Resume now", prompt)
+            self.assertIn("not a user message", prompt.lower())
+
+    def test_schema_requires_next_step(self) -> None:
+        self.assertEqual(self.handoff._TOOL_PARAMS["required"], ["content", "next_step"])
 
     def test_briefing_is_labelled_as_agent_written_not_user(self) -> None:
         """Regression: children called a parent agent's rule a "user order".
@@ -233,7 +276,7 @@ class TestSelfHandoffHandler(unittest.TestCase):
         """
         ctx = _StubContext()
         good = _good_content()
-        self.handoff.self_handoff({"content": good}, ctx)
+        self.handoff.self_handoff({"content": good, "next_step": "run make all"}, ctx)
         prompt, prepend = ctx.restart_calls[0]
         header = prepend[: prepend.index(good.rstrip("\n"))]
         self.assertIn("previous agent", header)
@@ -244,7 +287,7 @@ class TestSelfHandoffHandler(unittest.TestCase):
     def test_no_filesystem_artifact_written(self) -> None:
         """Handoff must not create .fir/ or any file in the cwd."""
         ctx = _StubContext()
-        self.handoff.self_handoff({"content": _good_content()}, ctx)
+        self.handoff.self_handoff({"content": _good_content(), "next_step": "run make all"}, ctx)
         # No .fir directory should be created by the handoff.
         self.assertFalse(
             os.path.exists(os.path.join(self.tmp, ".fir")),
@@ -255,7 +298,9 @@ class TestSelfHandoffHandler(unittest.TestCase):
 
     def test_restart_failure_surfaces_as_tool_error(self) -> None:
         ctx = _StubContext(raise_on_restart=True)
-        result = self.handoff.self_handoff({"content": _good_content()}, ctx)
+        result = self.handoff.self_handoff(
+            {"content": _good_content(), "next_step": "run make all"}, ctx
+        )
         self.assertTrue(result.get("is_error"))
         text = result["content"][0]["text"]
         self.assertIn("requires session-restart support", text)
@@ -531,14 +576,14 @@ class TestSelfHandoffPointerStub(unittest.TestCase):
 
     def test_no_bookmarks_file_no_pointer(self) -> None:
         ctx = _StubContext(session_file=self.session_file, session_id="sid")
-        self.handoff.self_handoff({"content": self._good()}, ctx)
+        self.handoff.self_handoff({"content": self._good(), "next_step": "run make all"}, ctx)
         prepend = ctx.restart_calls[0][1]
         self.assertNotIn("Bookmarks from parent session", prepend)
 
     def test_empty_file_no_pointer(self) -> None:
         open(self.bookmarks, "wb").close()
         ctx = _StubContext(session_file=self.session_file, session_id="sid")
-        self.handoff.self_handoff({"content": self._good()}, ctx)
+        self.handoff.self_handoff({"content": self._good(), "next_step": "run make all"}, ctx)
         prepend = ctx.restart_calls[0][1]
         self.assertNotIn("Bookmarks from parent session", prepend)
 
@@ -556,7 +601,7 @@ class TestSelfHandoffPointerStub(unittest.TestCase):
             ],
         )
         ctx = _StubContext(session_file=self.session_file, session_id="sid")
-        self.handoff.self_handoff({"content": self._good()}, ctx)
+        self.handoff.self_handoff({"content": self._good(), "next_step": "run make all"}, ctx)
         prepend = ctx.restart_calls[0][1]
         self.assertIn("Bookmarks from parent session", prepend)
         self.assertIn(self.bookmarks, prepend)
@@ -584,7 +629,7 @@ class TestSelfHandoffPointerStub(unittest.TestCase):
             ],
         )
         ctx = _StubContext(session_file=self.session_file, session_id="sid")
-        self.handoff.self_handoff({"content": self._good()}, ctx)
+        self.handoff.self_handoff({"content": self._good(), "next_step": "run make all"}, ctx)
         prepend = ctx.restart_calls[0][1]
         self.assertIn("- 11:05 (UTC) first note", prepend)
         self.assertIn("- 12:30 (UTC) second note", prepend)
@@ -607,7 +652,7 @@ class TestSelfHandoffPointerStub(unittest.TestCase):
             ],
         )
         ctx = _StubContext(session_file=self.session_file, session_id="sid")
-        self.handoff.self_handoff({"content": self._good()}, ctx)
+        self.handoff.self_handoff({"content": self._good(), "next_step": "run make all"}, ctx)
         prepend = ctx.restart_calls[0][1]
         self.assertIn("(+5 earlier)", prepend)
         self.assertNotIn("note-004", prepend)

@@ -2,7 +2,7 @@
 
 ## Motivation
 
-`self_handoff(content)` and `/handoff` restart the session with a curated
+`self_handoff(content, next_step)` and `/handoff` restart the session with a curated
 briefing prepended. The briefing is lossy: the model has to re-author
 what mattered from the entire prior context, exactly when it is most
 overloaded. Worse, the briefing is *one shot* — anything the model

@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Changed
+- `self_handoff` now requires `next_step`: the first concrete action, or `wait`. With an action, the new session is told to resume at once and not ask the user for a go-ahead; with `wait`, it restates the open question and stops. Before, a bare "continue" made new sessions stop and ask which step to do first.
+
 ## [1.48.0] - 2026-11-03
 
 ### Added

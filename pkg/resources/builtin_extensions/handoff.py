@@ -9,7 +9,7 @@
 
 Two tools and one slash command:
 
-* ``self_handoff(content)`` — abort the in-flight turn and restart with
+* ``self_handoff(content, next_step)`` — abort the in-flight turn and restart with
   a clean LLM context, briefing carried in-context. When bookmarks
   exist, a digest of their notes plus a pointer line to the bookmarks
   file is appended to the briefing so the child agent can pull the high-fidelity highlight
@@ -74,6 +74,7 @@ import fir_ext
 MIN_CONTENT_LEN = 200  # chars after strip — below this is junk
 MAX_CONTENT_LEN = 64 * 1024  # chars — above this is an accidental dump
 MIN_NON_BLANK_LINES = 3  # a briefing has structure
+MAX_NEXT_STEP_LEN = 2000  # chars — a next step, not a second briefing
 
 # ---------------------------------------------------------------------------
 # Bookmark constants
@@ -146,8 +147,13 @@ _TOOL_DESCRIPTION = """Hand off to a fresh fir session with a clean LLM context.
 
 Atomically: validates the handoff doc, aborts the current turn, and \
 starts a new session whose conversation begins with your briefing as \
-an authoritative [SYS_EXT] message followed by a short prompt telling \
-the new agent to continue.
+an authoritative [SYS_EXT] message followed by a short prompt built from \
+`next_step`.
+
+`next_step` decides whether the new agent keeps working. If you would \
+have kept working, write the first concrete action; the new agent starts \
+it at once and does not ask the user first. Write `wait` only when your \
+last message asked the user something they have not answered yet.
 
 Use when:
   - context window is filling up (>60-70% used)
@@ -194,8 +200,21 @@ _TOOL_PARAMS: dict[str, Any] = {
                 "running services/state, and concrete next steps."
             ),
         },
+        "next_step": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": MAX_NEXT_STEP_LEN,
+            "description": (
+                "What the new agent does first. If you would have kept "
+                "working, give the concrete action (e.g. 'run make all in "
+                "~/src/x, then fix the failing test in foo_test.go'); the "
+                "new agent does it without asking the user. Write `wait` "
+                "only when your last message asked the user something "
+                "they have not answered."
+            ),
+        },
     },
-    "required": ["content"],
+    "required": ["content", "next_step"],
     "additionalProperties": False,
 }
 
@@ -1022,10 +1041,51 @@ mark your own choices as yours.
 
 """
 
-_CONTINUE_PROMPT = (
-    "[fir: session restarted by self_handoff. This is not a user message.] "
-    "Continue from the handoff briefing above."
+_RESTART_TAG = "[fir: session restarted by self_handoff. This is not a user message.]"
+
+# The child reads this prompt, not the parent's intent. A bare "continue"
+# made children stop and ask the user which next step to take first, so
+# the parent must say whether work goes on, and the prompt says it plainly.
+_RESUME_PROMPT = (
+    _RESTART_TAG + " The previous agent was still working and handed off "
+    "only to clear its context. Resume now. Start with this step:\n\n"
+    "{step}\n\n"
+    "Do not ask the user for a go-ahead or which item to do first. Stop "
+    "to ask only when a step needs a choice that the user must make."
 )
+
+_WAIT_PROMPT = (
+    _RESTART_TAG + " The previous agent was waiting for the user. Do not "
+    "start the briefing's next steps. If the briefing names an open question "
+    "that no later message answers, restate it in one sentence; otherwise "
+    "say you are ready. Then stop."
+)
+
+
+def _validate_next_step(raw: Any) -> tuple[str | None, str]:
+    """Return (error_or_None, stripped next_step)."""
+    if not isinstance(raw, str) or not raw.strip():
+        return (
+            "self_handoff: `next_step` is required. Give the first concrete "
+            "action if work should go on, or `wait` if your last message "
+            "asked the user a question they have not answered.",
+            "",
+        )
+    step = raw.strip()
+    if len(step) > MAX_NEXT_STEP_LEN:
+        return (
+            f"self_handoff: `next_step` is too long ({len(step)} chars, max "
+            f"{MAX_NEXT_STEP_LEN}). Put detail in `content`.",
+            "",
+        )
+    return (None, step)
+
+
+def _continue_prompt(step: str) -> str:
+    """Build the restart prompt: resume with ``step``, or wait for the user."""
+    if step.strip("`'\". ").lower() == "wait":
+        return _WAIT_PROMPT
+    return _RESUME_PROMPT.format(step=step)
 
 
 @fir_ext.tool(
@@ -1035,6 +1095,9 @@ _CONTINUE_PROMPT = (
 )
 def self_handoff(params: dict, ctx: fir_ext.Context) -> dict:
     err, normalised = _validate_content(params.get("content"))
+    if err is not None:
+        return _err(err)
+    err, step = _validate_next_step(params.get("next_step"))
     if err is not None:
         return _err(err)
 
@@ -1053,7 +1116,7 @@ def self_handoff(params: dict, ctx: fir_ext.Context) -> dict:
 
     try:
         ctx.restart_session(
-            _CONTINUE_PROMPT,
+            _continue_prompt(step),
             prepend_context=normalised,
         )
     except Exception as exc:
@@ -1100,7 +1163,10 @@ def cmd_handoff(args: list[str], ctx: fir_ext.Context) -> dict:
         "asked; label the rest as your own decision. Never call your own rule "
         "a user order.",
         "",
-        "Then call the `self_handoff` tool with that briefing as `content`.",
+        "Then call the `self_handoff` tool with that briefing as `content`. "
+        "Set `next_step` to the first concrete action if work should go on "
+        "(the new agent starts it without asking), or `wait` if your last "
+        "message asked the user a question they have not answered.",
         "Do not emit any further explanatory text after the tool call — the "
         "current turn will be aborted and a fresh session will take over.",
     ]

@@ -97,7 +97,7 @@ On top of that primitive, ship a builtin extension `handoff.py` that
 registers exactly one tool:
 
 ```
-self_handoff(content: str)
+self_handoff(content: str, next_step: str)  # next_step: first action, or "wait"
 ```
 
 Behaviour (the final shape, after the iterations captured in the

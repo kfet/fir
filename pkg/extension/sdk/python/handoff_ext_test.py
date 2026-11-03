@@ -305,7 +305,7 @@ class _BookmarkBase(unittest.TestCase):
             {
                 "tool_call_id": tool_call_id,
                 "name": "self_handoff",
-                "params": {"content": content},
+                "params": {"content": content, "next_step": "run make all"},
             },
         )
         return r["result"]
