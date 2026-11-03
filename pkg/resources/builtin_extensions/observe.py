@@ -858,11 +858,62 @@ def _render_status(st: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+# Archived sessions: read-only session stores (settings.json
+# "sessionStores" / FIR_SESSION_STORES) hold other hosts' transcripts. They
+# have no sidecar; fir's own catalog lists them (`fir sessions list`).
+ARCHIVED = "archived"
+_ARCHIVE_LIST_LIMIT = 20
+
+
+def _fir_bin() -> str:
+    """The fir binary to call back into: FIR_BIN, which the fir host sets for
+    every extension and CLI verb. No PATH fallback: a different fir build
+    (or none, under tests) must not answer for this host."""
+    return os.environ.get("FIR_BIN", "")
+
+
+def _archived_sessions(limit: int = 0) -> list[dict[str, Any]]:
+    """Sessions from the read-only session stores as pseudo-sidecars
+    (status ``archived``), newest first. Empty when no store is configured
+    or fir cannot be run."""
+    fir = _fir_bin()
+    if not fir:
+        return []
+    cmd = [fir, "sessions", "list", "--all", "--read-only", "--json"]
+    if limit > 0:
+        cmd += ["--limit", str(limit)]
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=60, check=False).stdout
+    except (OSError, subprocess.SubprocessError):
+        return []
+    rows: list[dict[str, Any]] = []
+    for line in out.splitlines():
+        try:
+            e = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(e, dict):
+            continue
+        rows.append(
+            {
+                "session_id": e.get("id", "") or "",
+                "session_name": e.get("name", "") or "",
+                "cwd": e.get("cwd", "") or "",
+                "store_path": e.get("path", "") or "",
+                "store": e.get("store", "") or "",
+                "status": ARCHIVED,
+                "started_at": e.get("created", "") or "",
+            }
+        )
+    return rows
+
+
 def _resolve_sidecar(id_prefix: str, cwd_flag: str) -> dict[str, Any]:
     """Find the sidecar matching id_prefix or cwd_flag. Raises ValueError on
-    miss/ambiguity."""
+    miss/ambiguity. An id prefix or name that matches no sidecar is looked
+    up in the read-only session stores (archived sessions, transcript only)."""
     all_sidecars = _read_sidecars()
-    if not all_sidecars:
+    if not all_sidecars and (cwd_flag or not id_prefix):
         raise ValueError(f"no fir sessions found (no sidecars in {_state_dir()})")
 
     if cwd_flag:
@@ -889,6 +940,25 @@ def _resolve_sidecar(id_prefix: str, cwd_flag: str) -> dict[str, Any]:
         ):
             matches.append(s)
     if not matches:
+        # Archives: id or name only (a cwd basename would match thousands).
+        # "<store>:<id>" picks one store when the same id is in two.
+        label, _, frag = id_prefix.rpartition(":")
+        if frag:
+            matches = [
+                s
+                for s in _archived_sessions()
+                if (not label or s["store"] == label)
+                and (
+                    s["session_id"].startswith(frag)
+                    or (s["session_name"] and s["session_name"].startswith(frag))
+                )
+            ]
+        exact = [s for s in matches if s["session_id"] == frag]
+        if len(exact) == 1:
+            matches = exact
+        if len(matches) > 1:
+            raise ValueError(_ambiguity_message(matches))
+    if not matches:
         raise ValueError(f"no session matching {id_prefix!r}")
     return _pick_match(matches)
 
@@ -909,11 +979,22 @@ def _pick_match(matches: list[dict[str, Any]]) -> dict[str, Any]:
     return matches[0]
 
 
+_AMBIGUITY_SHOWN = 20
+
+
 def _ambiguity_message(matches: list[dict[str, Any]]) -> str:
     lines = ["ambiguous match — candidates:"]
-    for s in matches:
-        sid = (s.get("session_id") or "")[:8]
-        lines.append(f"  {sid}  {s.get('session_name', '')}  cwd={s.get('cwd', '')}")
+    for s in matches[:_AMBIGUITY_SHOWN]:
+        sid = s.get("session_id") or ""
+        store = ""
+        if s.get("store"):
+            # Archived: the full id, so "<store>:<id>" can pick one.
+            store = f"  store={s['store']}"
+        else:
+            sid = sid[:8]
+        lines.append(f"  {sid}  {s.get('session_name', '')}  cwd={s.get('cwd', '')}{store}")
+    if len(matches) > _AMBIGUITY_SHOWN:
+        lines.append(f"  … {len(matches) - _AMBIGUITY_SHOWN} more")
     return "\n".join(lines)
 
 
@@ -1162,11 +1243,15 @@ def _snapshot_session_list(include_all: bool = False) -> str:
     """Return a formatted table of sessions (or empty notice).
 
     Default lists only **live** (running/idle) sessions. With
-    ``include_all=True`` includes ``ended`` and ``crashed`` rows too.
+    ``include_all=True`` includes ``ended`` and ``crashed`` rows too, plus
+    the newest archived sessions of the read-only session stores (status
+    ``archived:<store>``).
     """
     all_sidecars = _read_sidecars(include_all=True)
+    archived: list[dict[str, Any]] = []
     if include_all:
-        sidecars = all_sidecars
+        archived = _archived_sessions(limit=_ARCHIVE_LIST_LIMIT)
+        sidecars = all_sidecars + archived
         hidden = 0
     else:
         sidecars = [s for s in all_sidecars if _is_live(s)]
@@ -1198,11 +1283,18 @@ def _snapshot_session_list(include_all: bool = False) -> str:
         status = s.get("status", "") or ""
         age = _age_string(s.get("started_at", "") or "", now)
         pid_val = s.get("host_pid") or s.get("pid") or 0
+        if status == ARCHIVED:
+            status = f"{ARCHIVED}:{s.get('store', '')}"
+            pid_val = "-"
         lines.append(
             f"{sid:<{id_w}}  {pid_val:>{pid_w}}  {name:<{name_w}}  {cwd:<{cwd_w}}  {status:<9}  {age}"
         )
     if hidden:
         lines.append(f"({hidden} ended/crashed hidden — use --all to show)")
+    if len(archived) >= _ARCHIVE_LIST_LIMIT:
+        lines.append(
+            f"(newest {_ARCHIVE_LIST_LIMIT} archived shown — `fir sessions list --all --read-only` lists every one)"
+        )
     return "\n".join(lines)
 
 
@@ -1715,7 +1807,7 @@ def cmd_send(args: list[str], ctx: fir_ext.Context) -> dict[str, Any]:
             },
             "all": {
                 "type": "boolean",
-                "description": "When listing (no id_prefix/cwd), include ended/crashed sessions. Default false (live only).",
+                "description": "When listing (no id_prefix/cwd), include ended/crashed sessions and the newest archived sessions from read-only session stores (status archived:<store>). Default false (live only).",
                 "default": False,
             },
             "start": {

@@ -158,6 +158,11 @@ type SessionListInfo struct {
 	Modified          time.Time
 	MessageCount      int
 	FirstMessage      string
+	// Store is the label of the store the session was listed from: ""
+	// for listings that do not track stores, DefaultStoreLabel for fir's
+	// own store, a sessionStores label for a read-only extra store.
+	Store    string
+	ReadOnly bool
 }
 
 // --- NewSessionOptions ---
@@ -184,7 +189,10 @@ type SessionStore struct {
 	labelsById  map[string]string
 	leafID      string       // empty = before first entry
 	lock        *sessionLock // flock on .meta.json; nil if in-memory or lock failed
-	resumed     bool         // true iff opened an existing session file (header loaded from disk)
+	// forkedFromStore is the label of the read-only store this session was
+	// forked out of at open ("" when it was not).
+	forkedFromStore string
+	resumed         bool // true iff opened an existing session file (header loaded from disk)
 
 	// observables is the session-scoped sidecar of cards exposed to
 	// extensions and observers. Bound to <sessionFile>.cards (or
@@ -204,7 +212,11 @@ func NewSessionStore(cwd, sessionDir string) *SessionStore {
 		labelsById: make(map[string]string),
 	}
 	if sessionDir != "" {
-		os.MkdirAll(sessionDir, 0755)
+		if checkWritable(sessionDir) != nil {
+			ss.persist = false
+		} else {
+			os.MkdirAll(sessionDir, 0755)
+		}
 	}
 	ss.newSession(nil)
 	return ss
@@ -277,6 +289,7 @@ func (ss *SessionStore) SetSessionFile(filePath string) bool {
 // Returns true if the session was forked.
 func (ss *SessionStore) setSessionFile(filePath string) bool {
 	absPath, _ := filepath.Abs(filePath)
+	ss.forkedFromStore = ""
 
 	// Release any previously held lock before switching files.
 	if ss.lock != nil {
@@ -284,9 +297,26 @@ func (ss *SessionStore) setSessionFile(filePath string) bool {
 		ss.lock = nil
 	}
 
-	// Try to acquire the flock. If locked by another process, fork.
+	// A transcript in a read-only store is never locked or written: fork
+	// it into the default store. (tryLockSession would create its
+	// .meta.json.)
 	forked := false
-	if ss.persist {
+	if ro, ok := ReadOnlyStoreFor(absPath); ok && ss.persist {
+		if forkPath, err := ss.forkOutOfReadOnly(absPath); err == nil {
+			absPath = forkPath
+			forked = true
+			ss.forkedFromStore = ro.Label
+			firlog.Info("session forked out of read-only store", "store", ro.Label, "original", filePath, "forked", absPath)
+			if lock, ok := tryLockSession(absPath); ok {
+				ss.lock = lock
+			}
+		} else {
+			// Never write into the archive: open it in memory instead.
+			firlog.Warn("cannot fork session out of read-only store; opening in memory", "store", ro.Label, "err", err)
+			ss.persist = false
+			ss.forkedFromStore = ro.Label
+		}
+	} else if ss.persist {
 		lock, ok := tryLockSession(absPath)
 		if ok {
 			ss.lock = lock
@@ -349,6 +379,53 @@ func (ss *SessionStore) setSessionFile(filePath string) bool {
 	// /reexec story.
 	ss.observables = NewObservableStore(CardsPath(ss.sessionFile))
 	return forked
+}
+
+// forkOutOfReadOnly copies the read-only transcript at src into a writable
+// directory and returns the copy's path. The copy goes to ss.sessionDir
+// unless that is itself read-only (OpenSessionStore without a sessionDir
+// defaults it to the transcript's own directory); then to the default
+// store's directory for the cwd. The cwd is ss.cwd when set, else the one
+// recorded in the transcript.
+func (ss *SessionStore) forkOutOfReadOnly(src string) (string, error) {
+	cwd := ss.cwd
+	if cwd == "" {
+		if h, _ := loadEntriesFromFile(src); h != nil {
+			cwd = h.Cwd
+		}
+	}
+	dir := ss.sessionDir
+	if dir == "" || checkWritable(dir) != nil {
+		dir = writableSessionDir(cwd)
+		if dir == "" {
+			return "", fmt.Errorf("no writable session store configured")
+		}
+		ss.sessionDir = dir
+	}
+	fork, err := ForkFrom(src, cwd, dir)
+	if err != nil {
+		return "", err
+	}
+	path := fork.GetSessionFile()
+	fork.Close()
+	return path, nil
+}
+
+// ForkNotice is the user-facing sentence explaining why opening a session
+// produced a fork: it lives in a read-only store, or another process holds it.
+func (ss *SessionStore) ForkNotice() string {
+	if label := ss.ForkedFromStore(); label != "" {
+		return fmt.Sprintf("Session is in read-only store %q — forked into the local store with history preserved.", label)
+	}
+	return "Session is active in another window — branched with history preserved."
+}
+
+// ForkedFromStore returns the label of the read-only store this session was
+// forked out of when it was opened, or "" when it was not.
+func (ss *SessionStore) ForkedFromStore() string {
+	ss.mu.RLock()
+	defer ss.mu.RUnlock()
+	return ss.forkedFromStore
 }
 
 // NewSession starts a new session. Returns the session file path (empty if in-memory).
@@ -444,7 +521,7 @@ func (ss *SessionStore) generateID() string {
 // creating it. Used at session creation so observers can tail from byte 0.
 // After this call, persistEntry will use the append path (ss.flushed=true).
 func (ss *SessionStore) writeHeaderOnly() {
-	if !ss.persist || ss.sessionFile == "" || ss.header == nil {
+	if !ss.persist || ss.sessionFile == "" || ss.header == nil || checkWritable(ss.sessionFile) != nil {
 		return
 	}
 	data, err := json.Marshal(ss.header)
@@ -474,6 +551,10 @@ func (ss *SessionStore) writeHeaderOnly() {
 
 func (ss *SessionStore) rewriteFile() {
 	if !ss.persist || ss.sessionFile == "" {
+		return
+	}
+	if err := checkWritable(ss.sessionFile); err != nil {
+		fmt.Fprintf(os.Stderr, "session: %v\n", err)
 		return
 	}
 	var lines []string
@@ -570,6 +651,10 @@ func (ss *SessionStore) ForceFlush() {
 
 func (ss *SessionStore) persistEntry(entry *SessionEntry) {
 	if !ss.persist || ss.sessionFile == "" {
+		return
+	}
+	if err := checkWritable(ss.sessionFile); err != nil {
+		fmt.Fprintf(os.Stderr, "session: %v\n", err)
 		return
 	}
 
@@ -1088,6 +1173,9 @@ func (ss *SessionStore) CreateBranchedSession(leafId string) (string, error) {
 	if ss.persist && ss.sessionDir != "" {
 		fileTs := strings.NewReplacer(":", "-", ".", "-").Replace(ts)
 		newSessionFile := filepath.Join(ss.sessionDir, fmt.Sprintf("%s_%s.jsonl", fileTs, newSessionID))
+		if err := checkWritable(newSessionFile); err != nil {
+			return "", err
+		}
 
 		// Write header + entries + labels
 		var lines []string
@@ -1330,6 +1418,9 @@ func BuildSessionContextFromEntries(entries []*SessionEntry, leafID string, byID
 // rather than being truncated away — the bytes may be forensically useful and
 // destroying them buys nothing.
 func repairTrailingNewline(filePath string) {
+	if checkWritable(filePath) != nil {
+		return
+	}
 	f, err := os.OpenFile(filePath, os.O_RDWR, 0600)
 	if err != nil {
 		return
@@ -1433,7 +1524,7 @@ func findMostRecentSession(sessionDir string) string {
 	var files []fileInfo
 
 	for _, de := range dirEntries {
-		if !strings.HasSuffix(de.Name(), ".jsonl") {
+		if !IsTranscriptName(de.Name()) {
 			continue
 		}
 		path := filepath.Join(sessionDir, de.Name())
@@ -1508,7 +1599,7 @@ func ListSessions(_ /* cwd */, sessionDir string) ([]SessionListInfo, error) {
 	const maxSessions = 200
 	var paths []string
 	for _, de := range dirEntries {
-		if strings.HasSuffix(de.Name(), ".jsonl") {
+		if IsTranscriptName(de.Name()) {
 			paths = append(paths, filepath.Join(sessionDir, de.Name()))
 		}
 	}
@@ -1669,7 +1760,9 @@ func extractTextFromAny(content any) string {
 // DefaultSessionDir computes the default session directory for a cwd.
 func DefaultSessionDir(agentDir, cwd string) string {
 	dir := SessionDirForCwd(agentDir, cwd)
-	os.MkdirAll(dir, 0755)
+	if checkWritable(dir) == nil {
+		os.MkdirAll(dir, 0755)
+	}
 	return dir
 }
 
@@ -1677,9 +1770,7 @@ func DefaultSessionDir(agentDir, cwd string) string {
 // creating it. Use this when you only need the path for listing/checking
 // (e.g. legacy directory lookups) and don't want the mkdir side effect.
 func SessionDirForCwd(agentDir, cwd string) string {
-	safePath := "--" + strings.TrimLeft(cwd, "/\\")
-	safePath = strings.NewReplacer("/", "-", "\\", "-", ":", "-").Replace(safePath) + "--"
-	return filepath.Join(agentDir, "sessions", safePath)
+	return filepath.Join(agentDir, "sessions", encodeCwd(cwd))
 }
 
 // ForkFrom creates a new session from a source session file, copying all entries.
@@ -1692,6 +1783,9 @@ func ForkFrom(sourcePath, targetCwd, sessionDir string) (*SessionStore, error) {
 
 	if sessionDir == "" {
 		return nil, fmt.Errorf("sessionDir is required for ForkFrom")
+	}
+	if err := checkWritable(sessionDir); err != nil {
+		return nil, err
 	}
 
 	if err := os.MkdirAll(sessionDir, 0755); err != nil {
@@ -1770,13 +1864,20 @@ func MergeSessions(a, b []SessionListInfo) []SessionListInfo {
 // ListAllSessions lists sessions across all project directories, sorted by modified time.
 // Additional agent dirs (e.g. ~/.pi/agent) can be passed to merge sessions from multiple sources.
 func ListAllSessions(agentDir string, extraAgentDirs ...string) ([]SessionListInfo, error) {
-	dirs := append([]string{agentDir}, extraAgentDirs...)
+	var roots []string
+	for _, dir := range append([]string{agentDir}, extraAgentDirs...) {
+		roots = append(roots, SessionsDir(dir))
+	}
+	return listRoots(roots), nil
+}
 
+// listRoots lists sessions under each sessions root (one project directory
+// per subdirectory), deduplicated by resolved path, newest first.
+func listRoots(roots []string) []SessionListInfo {
 	// Collect all subdirectories to scan.
 	type subDir struct{ path string }
 	var subDirs []subDir
-	for _, dir := range dirs {
-		sessionsDir := SessionsDir(dir)
+	for _, sessionsDir := range roots {
 		dirEntries, err := os.ReadDir(sessionsDir)
 		if err != nil {
 			continue
@@ -1827,5 +1928,5 @@ func ListAllSessions(agentDir string, extraAgentDirs ...string) ([]SessionListIn
 		return all[i].Modified.After(all[j].Modified)
 	})
 
-	return all, nil
+	return all
 }

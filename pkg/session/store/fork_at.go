@@ -31,6 +31,9 @@ func ForkAt(sourcePath, entryID, cwd, sessionDir string) (*SessionStore, error) 
 	if sessionDir == "" {
 		return nil, fmt.Errorf("sessionDir is required for ForkAt")
 	}
+	if err := checkWritable(sessionDir); err != nil {
+		return nil, err
+	}
 	if err := os.MkdirAll(sessionDir, 0755); err != nil {
 		return nil, fmt.Errorf("cannot create session directory: %w", err)
 	}
@@ -84,8 +87,11 @@ func danglingToolUse(ctx SessionContext) bool {
 
 // ResolveSessionRef finds a session file from a user-supplied reference: an
 // existing path, a file name inside sessionDir, or a session id (or unique
-// id fragment) matched against file names in sessionDir and then in every
-// project directory under sessionsRoot. Returns "" if nothing matches.
+// id fragment) matched against file names in sessionDir, then in every
+// project directory under sessionsRoot, then under each extra (read-only)
+// store. A "<label>:<id>" ref searches only the store with that label.
+// Returns "" if nothing matches. Opening a match inside a read-only store
+// forks it into the default store (see OpenSessionStore).
 func ResolveSessionRef(ref, sessionDir, sessionsRoot string) string {
 	if ref == "" {
 		return ""
@@ -100,10 +106,31 @@ func ResolveSessionRef(ref, sessionDir, sessionsRoot string) string {
 	if p := matchSessionFile(sessionDir, ref); p != "" {
 		return p
 	}
-	dirs, _ := os.ReadDir(sessionsRoot)
+	if label, frag, ok := strings.Cut(ref, ":"); ok && frag != "" {
+		for _, st := range Stores() {
+			if st.Label == label {
+				return matchUnderRoot(st.Path, frag)
+			}
+		}
+	}
+	if p := matchUnderRoot(sessionsRoot, ref); p != "" {
+		return p
+	}
+	for _, st := range ExtraStores() {
+		if p := matchUnderRoot(st.Path, ref); p != "" {
+			return p
+		}
+	}
+	return ""
+}
+
+// matchUnderRoot runs matchSessionFile on every project directory of a
+// sessions root and returns the first match.
+func matchUnderRoot(root, frag string) string {
+	dirs, _ := os.ReadDir(root)
 	for _, d := range dirs {
 		if d.IsDir() {
-			if p := matchSessionFile(filepath.Join(sessionsRoot, d.Name()), ref); p != "" {
+			if p := matchSessionFile(filepath.Join(root, d.Name()), frag); p != "" {
 				return p
 			}
 		}
@@ -125,7 +152,7 @@ func matchSessionFile(dir, frag string) string {
 	}
 	found := ""
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".jsonl") || !strings.Contains(e.Name(), frag) {
+		if e.IsDir() || !IsTranscriptName(e.Name()) || !strings.Contains(e.Name(), frag) {
 			continue
 		}
 		if found != "" {

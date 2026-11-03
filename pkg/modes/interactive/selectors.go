@@ -267,6 +267,12 @@ func (m *InteractiveMode) showSessionSelector() {
 				}
 			}
 		}
+		// Read-only stores (sessionStores): this project's archived sessions.
+		if cwd != "" {
+			if extra := store.Catalog(store.CatalogOptions{Cwd: cwd, ExtrasOnly: true}); len(extra) > 0 {
+				sessions = store.MergeSessions(sessions, extra)
+			}
+		}
 		selector := components.NewSessionSelectorComponent(
 			sessions,
 			components.SessionScopeCurrent,
@@ -307,7 +313,7 @@ func (m *InteractiveMode) handleResumeSession(sessionPath string) {
 		return
 	}
 	if forked {
-		m.showStatus("Session is active in another window — branched with history preserved")
+		m.showStatus(m.session.SessionStore.ForkNotice())
 	}
 
 	// Rebuild the chat display
@@ -390,9 +396,14 @@ func (m *InteractiveMode) handleTreeNavigation(entryID string) {
 
 // loadAllSessionsForSelector lists every session across this fir agent's
 // session root (honouring --agent-dir / FIR_AGENT_DIR via m.agentDir, which
-// NewInteractiveMode resolves once) plus the legacy pi agent dir.
+// NewInteractiveMode resolves once) plus the legacy pi agent dir and every
+// read-only sessionStores entry (labelled; resuming one forks it).
 func (m *InteractiveMode) loadAllSessionsForSelector() ([]store.SessionListInfo, error) {
-	return store.ListAllSessions(m.agentDir, session.PiAgentDir())
+	sessions, err := store.ListAllSessions(m.agentDir, session.PiAgentDir())
+	if err != nil {
+		return nil, err
+	}
+	return store.MergeSessions(sessions, store.Catalog(store.CatalogOptions{ExtrasOnly: true})), nil
 }
 
 // oauthLoginCallbacks builds the TUI OAuth login UI: an in-editor prompt for

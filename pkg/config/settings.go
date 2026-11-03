@@ -128,6 +128,10 @@ type Settings struct {
 	ServerCompaction       *ServerCompactionSettings `json:"serverCompaction,omitempty"`
 	DebugLog               *DebugLogSettings         `json:"debugLog,omitempty"`
 	MCP                    *MCPSettings              `json:"mcp,omitempty"`
+	// SessionStores lists extra read-only session stores. Global-only:
+	// deepMergeSettings never takes it from project settings. Read it with
+	// LoadSessionStores.
+	SessionStores []SessionStoreSettings `json:"sessionStores,omitempty"`
 }
 
 // deepMergeSettings merges overrides into base, with nested objects merged recursively.
@@ -1020,27 +1024,21 @@ func (sm *SettingsManager) GetEnabledExtensions() []string {
 func (sm *SettingsManager) GetThemePaths() []string {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
-	out := make([]string, len(sm.settings.Themes))
-	copy(out, sm.settings.Themes)
-	return out
+	return expandAll(sm.settings.Themes)
 }
 
 // GetExtensionPaths returns extra extension search directories from settings.
 func (sm *SettingsManager) GetExtensionPaths() []string {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
-	out := make([]string, len(sm.settings.ExtensionPaths))
-	copy(out, sm.settings.ExtensionPaths)
-	return out
+	return expandAll(sm.settings.ExtensionPaths)
 }
 
 // GetSkillPaths returns extra skill directories/files from settings.
 func (sm *SettingsManager) GetSkillPaths() []string {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
-	out := make([]string, len(sm.settings.Skills))
-	copy(out, sm.settings.Skills)
-	return out
+	return expandAll(sm.settings.Skills)
 }
 
 func (sm *SettingsManager) GetEnableSkillCommands() bool {

@@ -2012,5 +2012,95 @@ class TestRemoteDriving(unittest.TestCase):
         self.assertIn("no model selected", h.stderr)
 
 
+class TestArchivedSessions(unittest.TestCase):
+    """Read-only session stores reach observe through `$FIR_BIN sessions list`."""
+
+    def setUp(self) -> None:
+        self.tmpdir = tempfile.mkdtemp(prefix="obs-arch-")
+        _reset_observe_state(self.tmpdir, self.tmpdir)
+        self.store = os.path.join(self.tmpdir, "arch.jsonl")
+        with open(self.store, "w") as f:
+            f.write(json.dumps({"type": "session", "version": 3, "id": "abcd1234-arch"}) + "\n")
+        rows = [
+            {
+                "store": "zbox",
+                "read_only": True,
+                "id": f"abcd1234-arch{i}" if i else "abcd1234-arch",
+                "path": self.store,
+                "cwd": "/home/u/proj",
+                "name": "archived-name" if i == 0 else "",
+                "created": "2026-09-01T10:00:00Z",
+            }
+            for i in range(2)
+        ]
+        self.argv_log = os.path.join(self.tmpdir, "argv")
+        fake = os.path.join(self.tmpdir, "fakefir")
+        with open(fake, "w") as f:
+            f.write("#!/bin/sh\n")
+            f.write(f'echo "$@" >> {self.argv_log}\n')
+            f.write("cat <<'EOF'\n" + "\n".join(json.dumps(r) for r in rows) + "\nEOF\n")
+        os.chmod(fake, 0o700)
+        self._old_bin = os.environ.get("FIR_BIN")
+        os.environ["FIR_BIN"] = fake
+
+    def tearDown(self) -> None:
+        if self._old_bin is None:
+            os.environ.pop("FIR_BIN", None)
+        else:
+            os.environ["FIR_BIN"] = self._old_bin
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_list_all_includes_archived(self) -> None:
+        out = observe._snapshot_session_list(include_all=True)
+        self.assertIn("archived:zbox", out)
+        self.assertIn("archived-name", out)
+        with open(self.argv_log) as f:
+            argv = f.read()
+        self.assertIn("sessions list --all --read-only --json --limit 20", argv)
+
+    def test_live_list_never_calls_fir(self) -> None:
+        observe._snapshot_session_list(include_all=False)
+        self.assertFalse(os.path.exists(self.argv_log))
+
+    def test_resolve_falls_back_to_archive(self) -> None:
+        s = observe._resolve_sidecar("archived-name", "")
+        self.assertEqual(s["status"], observe.ARCHIVED)
+        self.assertEqual(s["store_path"], self.store)
+        # Two archived ids share the prefix: ambiguous, listed with store.
+        with self.assertRaises(ValueError) as cm:
+            observe._resolve_sidecar("abcd1234", "")
+        self.assertIn("store=zbox", str(cm.exception))
+        # "<store>:<id>" narrows; an unknown store matches nothing.
+        self.assertEqual(
+            observe._resolve_sidecar("zbox:abcd1234-arch1", "")["session_id"], "abcd1234-arch1"
+        )
+        with self.assertRaises(ValueError):
+            observe._resolve_sidecar("other:abcd1234-arch1", "")
+
+    def test_resolve_archive_exact_id_wins(self) -> None:
+        # "abcd1234-arch" is also a prefix of "abcd1234-arch1".
+        s = observe._resolve_sidecar("zbox:abcd1234-arch", "")
+        self.assertEqual(s["session_id"], "abcd1234-arch")
+
+    def test_resolve_archive_empty_id_matches_nothing(self) -> None:
+        with self.assertRaises(ValueError) as cm:
+            observe._resolve_sidecar("zbox:", "")
+        self.assertIn("no session matching", str(cm.exception))
+
+    def test_archive_ambiguity_shows_full_ids_capped(self) -> None:
+        many = [
+            {"session_id": f"abcd1234-{i:04d}", "session_name": "", "cwd": "/p", "store": "zbox"}
+            for i in range(50)
+        ]
+        msg = observe._ambiguity_message(many)
+        self.assertIn("abcd1234-0000", msg)
+        self.assertLess(len(msg.splitlines()), 30)
+        self.assertIn("30 more", msg)
+
+    def test_no_fir_bin_means_no_archive(self) -> None:
+        os.environ.pop("FIR_BIN", None)
+        self.assertEqual(observe._archived_sessions(), [])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -224,7 +224,7 @@ func (s *ObservableStore) flush() {
 		cards = append(cards, c)
 	}
 	s.mu.RUnlock()
-	if path == "" {
+	if path == "" || checkWritable(path) != nil {
 		return
 	}
 	data, err := json.MarshalIndent(cards, "", "  ")

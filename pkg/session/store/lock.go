@@ -17,6 +17,9 @@ type sessionLock struct {
 // .meta.json file. Returns (lock, true) on success, (nil, false) if already
 // locked by another process.
 func tryLockSession(sessionPath string) (*sessionLock, bool) {
+	if checkWritable(sessionPath) != nil {
+		return nil, false
+	}
 	mp := metaPath(sessionPath)
 	f, err := os.OpenFile(mp, os.O_CREATE|os.O_RDWR, 0644)
 	if err != nil {

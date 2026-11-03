@@ -302,6 +302,10 @@ func (sl *sessionList) Render(width int) []string {
 
 		dateStr := t.Fg("dim", formatSessionDate(s.Modified))
 		countStr := t.Fg("dim", fmt.Sprintf("[%d msgs]", s.MessageCount))
+		if s.ReadOnly && s.Store != "" {
+			// Archive session: label it; resuming forks into the local store.
+			name = t.Fg("muted", "["+strings.Map(sanitizeForTUI, s.Store)+"] ") + name
+		}
 
 		line := fmt.Sprintf("%s%s%s %s %s", cursor, prefix, name, dateStr, countStr)
 		lines = append(lines, tui.TruncateToWidth(line, width, "…", false))

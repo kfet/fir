@@ -68,7 +68,11 @@ var subcommands = []subcommand{
 	{
 		Name: "sessions",
 		Run:  runSessions,
-		Help: [][2]string{{"fir sessions [list]", "List sessions associated with the current directory"}},
+		Help: [][2]string{
+			{"fir sessions [list] [--all] [--json]", "List sessions of this directory (--all: every project) across all stores"},
+			{"fir sessions dirs", "List session stores (local + read-only sessionStores)"},
+			{"fir sessions search <regexp>", "Grep bookmarks then transcripts in all stores, newest first"},
+		},
 	},
 	{
 		Name: "login",

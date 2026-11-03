@@ -195,11 +195,19 @@ func cmdCompact(ctx *commandContext, args string) {
 	}
 }
 
+// resumeCandidates lists this project's sessions for /resume: the local
+// store plus read-only sessionStores archives, newest first.
+func resumeCandidates(agentDir, cwd string) []store.SessionListInfo {
+	sessions, _ := store.ListSessions(cwd, store.DefaultSessionDir(agentDir, cwd))
+	sessions = store.MergeSessions(sessions, store.Catalog(store.CatalogOptions{Cwd: cwd, ExtrasOnly: true}))
+	sort.SliceStable(sessions, func(i, j int) bool { return sessions[i].Modified.After(sessions[j].Modified) })
+	return sessions
+}
+
 func cmdResume(ctx *commandContext, args string) {
 	if args == "" {
 		entry := ctx.entry
-		sessionDir := store.DefaultSessionDir(entry.agentDir, entry.cwd)
-		sessions, _ := store.ListSessions(entry.cwd, sessionDir)
+		sessions := resumeCandidates(entry.agentDir, entry.cwd)
 		if len(sessions) > 10 {
 			sessions = sessions[:10]
 		}
@@ -214,6 +222,9 @@ func cmdResume(ctx *commandContext, args string) {
 			}
 			if name == "" {
 				name = "(unnamed)"
+			}
+			if s.ReadOnly {
+				name = "[" + s.Store + "] " + name
 			}
 			lines = append(lines, fmt.Sprintf("%d. %s (%s)", i+1, name, s.Path))
 		}
@@ -242,7 +253,7 @@ func cmdContinue(ctx *commandContext, _ string) {
 		return
 	}
 	if forked {
-		ctx.sendMessage("Session is active in another window — branched with history preserved.")
+		ctx.sendMessage(entry.session.SessionStore.ForkNotice())
 	}
 	name := sessions[0].Name
 	if name == "" {
@@ -452,7 +463,7 @@ func (pa *firAgent) handleResumeArg(sessionID string, entry *firSession, args st
 		pa.sendAgentMessage(sessionID, fmt.Sprintf("Failed to resume session: %v", err))
 	} else {
 		if forked {
-			pa.sendAgentMessage(sessionID, "Session is active in another window — branched with history preserved.")
+			pa.sendAgentMessage(sessionID, entry.session.SessionStore.ForkNotice())
 		}
 		pa.sendAgentMessage(sessionID, fmt.Sprintf("Resumed session: %s", sessionPath))
 		pa.replaySessionHistory(sessionID, entry)

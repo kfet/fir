@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Added
+- **Read-only session stores (`sessionStores`).** Global `settings.json` `"sessionStores": [{"path": "~/fir-traces/zbox", "label": "zbox"}]` (or `FIR_SESSION_STORES=label=path,...`) adds other hosts' synced session archives. `/resume`, `fir --resume`, ACP `session/list`/`resume`, `observe_session all=true` and the `recall` skill now see them, labelled; resuming one forks it into the local store and nothing is ever written inside an archive.
+- **`fir sessions list|dirs|search`** — line-oriented (TSV or `--json`) listing of sessions across all stores, the store set, and a regexp search over bookmarks then transcripts, newest first.
+- Extensions get `FIR_BIN` (the running fir binary) so they can call back into the CLI.
+
+### Changed
+- `fir sessions list` prints tab-separated records (`store modified id msgs path cwd name first_message`) instead of a table; it covers every store.
+
+### Fixed
+- `~/` paths in the `skills`, `extensionPaths` and `themes` settings arrays are expanded; they were silently ignored.
+- Session lookups by id no longer treat `bookmarks-<id>.jsonl` / `<id>.jsonl.state.jsonl` as transcripts (an id could resolve as ambiguous).
+
 ## [1.47.3] - 2026-11-02
 
 ### Fixed

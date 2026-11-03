@@ -486,6 +486,8 @@ func waitMCPReady(mgr *mcp.Manager) {
 
 // run is the main application logic.
 func run() error {
+	configureSessionStores()
+
 	// Standalone subcommands — registry-driven (see subcommands.go).
 	if len(os.Args) >= 2 {
 		if h := dispatchSubcommand(os.Args[1]); h != nil {
@@ -966,7 +968,7 @@ func createSessionStore(args *Args, cwd, agentDir string) (*store.SessionStore, 
 	if args.Session != "" {
 		sm, forked := store.OpenSessionStore(filepath.Join(sessionDir, args.Session))
 		if forked {
-			fmt.Fprintln(os.Stderr, "fir: session is active in another window — branched with history preserved")
+			fmt.Fprintln(os.Stderr, forkNotice(sm))
 		}
 		return sm, sm.WasResumed()
 	}
@@ -974,7 +976,7 @@ func createSessionStore(args *Args, cwd, agentDir string) (*store.SessionStore, 
 		if src := store.ResolveSessionRef(args.ResumeRef, sessionDir, store.SessionsDir(agentDir)); src != "" {
 			sm, forked := store.OpenSessionStore(src)
 			if forked {
-				fmt.Fprintln(os.Stderr, "fir: session is active in another window — branched with history preserved")
+				fmt.Fprintln(os.Stderr, forkNotice(sm))
 			}
 			return sm, sm.WasResumed()
 		}
@@ -992,6 +994,11 @@ func createSessionStore(args *Args, cwd, agentDir string) (*store.SessionStore, 
 		return sm, sm.WasResumed()
 	}
 	return store.NewSessionStore(cwd, sessionDir), false
+}
+
+// forkNotice explains why opening a session produced a fork.
+func forkNotice(sm *store.SessionStore) string {
+	return "fir: " + sm.ForkNotice()
 }
 
 // forkSessionStoreAt implements `--resume <session> --at <entry-id>` (or

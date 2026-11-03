@@ -79,6 +79,9 @@ func readHistory(sessionFile string) ([]StateRecord, int) {
 // migrateLegacyState turns an old single-snapshot .state.json into the first
 // history line and removes it. It is a no-op once the history exists.
 func migrateLegacyState(sessionFile string) {
+	if checkWritable(sessionFile) != nil {
+		return
+	}
 	legacy := legacyStatePath(sessionFile)
 	data, err := os.ReadFile(legacy)
 	if err != nil {
@@ -155,6 +158,9 @@ func appendRecord(path string, state json.RawMessage, ts time.Time, reason strin
 	if err != nil {
 		return err
 	}
+	if err := checkWritable(path); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
@@ -212,6 +218,9 @@ func compactHistory(path string, keep int) error {
 // WriteFileAtomic writes data to path via a temp file and rename, so readers
 // never see a partial file. The file is created with perm.
 func WriteFileAtomic(path string, data []byte, perm os.FileMode) error {
+	if err := checkWritable(path); err != nil {
+		return err
+	}
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err

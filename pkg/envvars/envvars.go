@@ -19,6 +19,7 @@ type Var struct {
 // Registry is the canonical list. Keep it sorted by name.
 var Registry = []Var{
 	{Name: "FIR_AGENT_DIR", Description: "Override config/session directory (default: ~/.config/fir; CLI --agent-dir wins)"},
+	{Name: "FIR_BIN", Description: "Path of the running fir binary; set by fir for its extensions so they can call `$FIR_BIN <verb>` (an inherited value is kept)"},
 	{Name: "FIR_CACHE_RETENTION", Description: "Anthropic prompt cache retention (set to \"long\" for extended)"},
 	{Name: "FIR_DEBUG", Description: "Enable debug logging (set to 1)"},
 	{Name: "FIR_DEBUG_LOG", Description: "Debug log file path (default: <agent-dir>/debug.log)"},
@@ -30,6 +31,7 @@ var Registry = []Var{
 	{Name: "FIR_POE_REDIRECT_URI", Description: "Override Poe OAuth redirect URI (defaults to http://localhost:1456/auth/callback)"},
 	{Name: "FIR_PTY_SOCKET_DIR", Description: "Override directory for PTY socket files"},
 	{Name: "FIR_REEXEC_CONTINUE", Description: "Internal: signal that session is being re-exec'd", Internal: true},
+	{Name: "FIR_SESSION_STORES", Description: "Extra read-only session stores, label=path[,label=path]; replaces the sessionStores setting (empty = none)"},
 	{Name: "FIR_TIMING", Description: "Enable request timing logs (set to 1)"},
 }
 

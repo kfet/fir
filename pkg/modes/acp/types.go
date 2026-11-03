@@ -63,6 +63,10 @@ type SessionInfo struct {
 	Title *string `json:"title"`
 	// UpdatedAt is the ISO 8601 timestamp of the last modification.
 	UpdatedAt string `json:"updatedAt"`
+	// Meta carries fir extensions: "fir/store" (store label) and
+	// "fir/readOnly" for sessions listed from a read-only sessionStores
+	// entry. Resuming one forks it into the local store.
+	Meta map[string]any `json:"_meta,omitempty"`
 }
 
 // ListSessionsResponse is the response for session/list.

@@ -186,6 +186,24 @@ Status comes from the core-owned **`session/status` observable card** (`<transcr
 
 For multi-pane monitoring: run `fir observe <id> -f` in one tmux pane and `fir send <id>` in another.
 
+## Session stores — reading other hosts' sessions (`sessionStores`)
+
+fir writes sessions only to its own store, `<agent-dir>/sessions/` (label `local`). Extra **read-only** stores — directories laid out the same way, e.g. a Syncthing copy of another host's `~/.config/fir/sessions/` — are configured in the GLOBAL `settings.json` (a project `.fir/settings.json` cannot add stores; fir warns and ignores it):
+
+```json
+{ "sessionStores": [{ "path": "~/fir-traces/zbox", "label": "zbox" }] }
+```
+
+`path` must be absolute or `~/…`; `label` defaults to the directory name, must match `[A-Za-z0-9._-]+`, be unique and not `local`. Stores are always read-only (`readOnly: false` is ignored with a warning). A missing directory is skipped, not an error; a path that overlaps fir's own `<agent-dir>/sessions/` is dropped with a warning. `FIR_SESSION_STORES=zbox=~/fir-traces/zbox[,label=path]` replaces the setting for one run.
+
+What sees them:
+- `fir sessions list [--all|--cwd DIR] [--store L|--read-only] [--limit N] [--json]` — TSV `store modified id msgs path cwd name first_message`, newest first, no header (`--json`: one object per line). Archive sessions are listed from each transcript's `.meta.json` only (no `.meta.json`, or modified in the last minute = mid-sync, → skipped); a missing cwd is decoded from the directory name (lossy: `-` vs `/`).
+- `fir sessions dirs [--json]` — `store path readonly exists`.
+- `fir sessions search PATTERN [--kind bookmark|transcript] [--cwd DIR] [--store L] [--since 72h] [--limit 50] [--per-file 3] [-i] [--json]` — Go regexp, bookmarks first then transcripts, newest first (ctx-* logs excluded); hit = `store kind id path:line snippet`. Bookmarks are fast; a whole archive's transcripts take tens of seconds.
+- `/resume` picker (labelled `[zbox]`), `fir --resume <id|label:id>`, ACP `session/list` (title prefixed `[label]`, `_meta: {"fir/store": label, "fir/readOnly": true}`), ACP `session/resume`/`load` (paths inside a configured store are accepted; anything outside every store is still rejected), ACP `/resume`, and `observe_session all=true` / `fir observe --all` (newest 20 as `archived:<label>`; `fir observe <id|label:id>` snapshots an archived transcript).
+
+Resuming an archive session **forks** it into the local store (message: "Session is in read-only store … forked"); fir never locks, repairs, writes state, cards, sidecars or metadata inside a read-only store — the check lives in the session store itself. The `recall` skill searches every store through `fir sessions`.
+
 ## Driving a fir agent on another host
 
 `observe_session` / `send_session` / `stop_session` see only sessions on the local machine. For a session on another host, run the CLI there over ssh (`rexec`) — snapshots need no TTY and always exit:
@@ -888,6 +906,11 @@ All fields are optional. Nested objects merge recursively; arrays and primitives
     "checkEveryWrites": 1000,            // Stat the file at most once per N writes
     "checkEverySeconds": 30              // ...or once per this many seconds
   },
+
+  "sessionStores": [                     // Extra READ-ONLY session stores (global settings only;
+    { "path": "~/fir-traces/zbox",       //   see "Session stores"). env FIR_SESSION_STORES replaces it.
+      "label": "zbox" }                  //   label defaults to the dir name; "local" is reserved
+  ],
 
   "mcp": {                               // MCP (Model Context Protocol) behaviour
     "toolTimeoutSeconds": 120            // Default per-call timeout for model-dispatched MCP tools

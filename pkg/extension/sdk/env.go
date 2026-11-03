@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 )
 
 // SDKEnv returns environment variable entries that prepend the SDK paths
@@ -19,13 +20,37 @@ import (
 // records this as host_pid so `fir observe` and stop_session signal the real
 // binary. Callers of SDKEnv run in the host process, so os.Getpid() is the
 // host pid.
+//
+// FIR_BIN names the running fir binary so an extension can call back into
+// the CLI (e.g. `$FIR_BIN sessions list`) and get the same build and config
+// as its host. An inherited FIR_BIN is left alone, and none is set when the
+// host is a `go test` binary (calling it would re-run the test suite).
 func SDKEnv(basePath string) []string {
-	return []string{
+	env := []string{
 		prependEnv("PYTHONPATH", filepath.Join(basePath, "python")),
 		prependEnv("NODE_PATH", filepath.Join(basePath, "node")),
 		prependEnv("RUBYLIB", filepath.Join(basePath, "ruby")),
 		"FIR_HOST_PID=" + strconv.Itoa(os.Getpid()),
 	}
+	if bin := firBin(); bin != "" {
+		env = append(env, "FIR_BIN="+bin)
+	}
+	return env
+}
+
+// executable is os.Executable, swappable in tests.
+var executable = os.Executable
+
+// firBin returns the path FIR_BIN should carry, or "" to set none.
+func firBin() string {
+	if os.Getenv("FIR_BIN") != "" {
+		return ""
+	}
+	exe, err := executable()
+	if err != nil || strings.HasSuffix(exe, ".test") || strings.HasSuffix(exe, ".test.exe") {
+		return ""
+	}
+	return exe
 }
 
 func prependEnv(key, dir string) string {

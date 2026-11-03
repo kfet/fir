@@ -80,8 +80,9 @@ func TestEmbeddedHash(t *testing.T) {
 
 func TestSDKEnv(t *testing.T) {
 	env := SDKEnv("/base/path")
+	// Under `go test` the host is a .test binary, so no FIR_BIN is set.
 	if len(env) != 4 {
-		t.Fatalf("len = %d, want 4", len(env))
+		t.Fatalf("len = %d, want 4: %v", len(env), env)
 	}
 	want := []string{
 		"PYTHONPATH=/base/path/python",
@@ -97,5 +98,33 @@ func TestSDKEnv(t *testing.T) {
 	wantHostPid := "FIR_HOST_PID=" + strconv.Itoa(os.Getpid())
 	if env[3] != wantHostPid {
 		t.Errorf("env[3] = %q, want %q", env[3], wantHostPid)
+	}
+}
+
+func TestSDKEnvFirBin(t *testing.T) {
+	orig := executable
+	t.Cleanup(func() { executable = orig })
+	t.Setenv("FIR_BIN", "")
+
+	executable = func() (string, error) { return "/usr/local/bin/fir", nil }
+	env := SDKEnv("/b")
+	if got := env[len(env)-1]; got != "FIR_BIN=/usr/local/bin/fir" {
+		t.Errorf("last env = %q, want FIR_BIN", got)
+	}
+
+	executable = func() (string, error) { return "/tmp/go-build/sdk.test", nil }
+	if env := SDKEnv("/b"); len(env) != 4 {
+		t.Errorf("a .test host must not set FIR_BIN: %v", env)
+	}
+
+	executable = func() (string, error) { return "", os.ErrNotExist }
+	if env := SDKEnv("/b"); len(env) != 4 {
+		t.Errorf("unknown executable must not set FIR_BIN: %v", env)
+	}
+
+	t.Setenv("FIR_BIN", "/custom/fir")
+	executable = func() (string, error) { return "/usr/local/bin/fir", nil }
+	if env := SDKEnv("/b"); len(env) != 4 {
+		t.Errorf("inherited FIR_BIN must be left alone: %v", env)
 	}
 }

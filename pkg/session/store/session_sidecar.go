@@ -36,6 +36,9 @@ func WriteReexecSidecar(sessionFile string, sidecar *ReexecSidecar) error {
 		return err
 	}
 	path := ReexecSidecarPath(sessionFile)
+	if err := checkWritable(path); err != nil {
+		return err
+	}
 	return os.WriteFile(path, data, 0o644)
 }
 
@@ -51,7 +54,9 @@ func ReadReexecSidecar(sessionFile string) (*ReexecSidecar, error) {
 		return nil, err
 	}
 	// Remove before parsing so it's cleaned up even on bad JSON.
-	os.Remove(path)
+	if checkWritable(path) == nil {
+		os.Remove(path)
+	}
 	var sc ReexecSidecar
 	if err := json.Unmarshal(data, &sc); err != nil {
 		return nil, err
@@ -94,6 +99,9 @@ func readSidecar(jsonlPath string, jsonlMtime time.Time) *MetaSidecar {
 
 func writeSidecar(jsonlPath string, m *MetaSidecar) {
 	path := metaPath(jsonlPath)
+	if checkWritable(path) != nil {
+		return
+	}
 	data, err := json.Marshal(m)
 	if err != nil {
 		return

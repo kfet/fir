@@ -428,6 +428,9 @@ func (pa *firAgent) listSessionsLocal(_ context.Context, params ListSessionsRequ
 		}
 	}
 
+	// Read-only sessionStores (archives of other hosts), labelled in _meta.
+	allSessions = append(allSessions, store.Catalog(store.CatalogOptions{Cwd: params.Cwd, ExtrasOnly: true})...)
+
 	// Deduplicate sessions that appear in both new and legacy dirs.
 	seen := make(map[string]bool)
 	deduped := make([]store.SessionListInfo, 0, len(allSessions))
@@ -466,12 +469,21 @@ func (pa *firAgent) listSessionsLocal(_ context.Context, params ListSessionsRequ
 			}
 			title = &msg
 		}
-		infos = append(infos, SessionInfo{
+		info := SessionInfo{
 			SessionId: s.Path,
 			Cwd:       s.Cwd,
 			Title:     title,
 			UpdatedAt: s.Modified.UTC().Format("2006-01-02T15:04:05Z07:00"),
-		})
+		}
+		if s.ReadOnly {
+			// Most clients ignore _meta, so the title carries the label too.
+			if title != nil {
+				t := "[" + s.Store + "] " + *title
+				info.Title = &t
+			}
+			info.Meta = map[string]any{"fir/store": s.Store, "fir/readOnly": true}
+		}
+		infos = append(infos, info)
 	}
 	return ListSessionsResponse{Sessions: infos}, nil
 }
@@ -564,7 +576,7 @@ func (pa *firAgent) resumeSessionLocal(ctx context.Context, params ResumeSession
 		return ResumeSessionResponse{}, err
 	}
 	if forked {
-		pa.sendAgentMessage(sessionID, "Session is active in another window — branched with history preserved.")
+		pa.sendAgentMessage(sessionID, entry.session.SessionStore.ForkNotice())
 	}
 
 	var models interface{}
@@ -1075,9 +1087,15 @@ func providerRejectionError(errText string) *acpsdk.RequestError {
 }
 
 // isValidSessionPath checks whether sessionPath is within any known sessions
-// directory (primary + legacy). This prevents path-traversal while still
-// allowing resume of sessions created under legacy agent directories.
+// directory (primary + legacy + configured read-only sessionStores). This
+// prevents path-traversal while still allowing resume of sessions created
+// under legacy agent directories or archived from other hosts; a path
+// inside a read-only store is forked into the local store when opened.
+// Client-supplied paths outside all of them are always rejected.
 func isValidSessionPath(sessionPath, agentDir string) bool {
+	if store.IsWithinStore(sessionPath) {
+		return true
+	}
 	dirs := []string{agentDir}
 	if os.Getenv("FIR_AGENT_DIR") == "" {
 		dirs = append(dirs, session.PiAgentDir())
@@ -1126,6 +1144,25 @@ func resolveSessionByUUID(uuid, agentDir, cwd string) string {
 			}
 		}
 	}
+	// Last: read-only sessionStores (opening forks into the local store).
+	for _, st := range store.ExtraStores() {
+		if cwd != "" {
+			if path := findSessionFileByUUID(store.SessionDirForRoot(st.Path, cwd), uuid); path != "" {
+				return path
+			}
+		}
+		entries, err := os.ReadDir(st.Path)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			if entry.IsDir() {
+				if path := findSessionFileByUUID(filepath.Join(st.Path, entry.Name()), uuid); path != "" {
+					return path
+				}
+			}
+		}
+	}
 	return ""
 }
 
@@ -1136,7 +1173,7 @@ func findSessionFileByUUID(dir, uuid string) string {
 		return ""
 	}
 	for _, e := range entries {
-		if !e.IsDir() && strings.Contains(e.Name(), uuid) && strings.HasSuffix(e.Name(), ".jsonl") {
+		if !e.IsDir() && strings.Contains(e.Name(), uuid) && store.IsTranscriptName(e.Name()) {
 			return filepath.Join(dir, e.Name())
 		}
 	}
@@ -1163,6 +1200,7 @@ func (pa *firAgent) ListSessions(ctx context.Context, params acpsdk.ListSessions
 			SessionId: acpsdk.SessionId(s.SessionId),
 			Cwd:       s.Cwd,
 			Title:     s.Title,
+			Meta:      s.Meta,
 		}
 		if s.UpdatedAt != "" {
 			updated := s.UpdatedAt
