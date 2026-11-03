@@ -2,8 +2,11 @@
 
 ## [Unreleased]
 
+## [1.47.2] - 2026-11-02
+
 ### Changed
 - **Node SDK tests run under bun.** `make test-node-sdk` prefers bun and falls back to node; CI now installs bun.
+- **Model catalog regenerated**: 3 model(s) with changed pricing/limits.
 
 ## [1.47.1] - 2026-11-02
 
