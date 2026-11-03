@@ -2,8 +2,11 @@
 
 ## [Unreleased]
 
+## [1.48.1] - 2026-11-04
+
 ### Changed
-- `self_handoff` now requires `next_step`: the first concrete action, or `wait`. With an action, the new session is told to resume at once and not ask the user for a go-ahead; with `wait`, it restates the open question and stops. Before, a bare "continue" made new sessions stop and ask which step to do first.
+- `self_handoff` now requires `next_step`: the first concrete action, or `wait`. With an action, the new session is told to resume at once and not ask the user for a go-ahead; with `wait`, it waits for the user. Before, a bare "continue" made new sessions stop and ask which step to do first.
+- **Model catalog regenerated**: added `opencode/crouton-alpha-free` (+1 on aggregators); pricing/limits changed for openrouter: google/gemma-4-26b-a4b-it, moonshotai/kimi-k3, nvidia/nemotron-3.5-super-vl, openai/gpt-oss-120b, openai/gpt-oss-20b, ~moonshotai/kimi-latest.
 
 ## [1.48.0] - 2026-11-03
 
