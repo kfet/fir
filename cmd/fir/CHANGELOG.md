@@ -2,8 +2,13 @@
 
 ## [Unreleased]
 
+## [1.47.1] - 2026-11-02
+
 ### Fixed
 - **auto-namer no longer names sessions after a chat reply.** When the naming model answered the conversation instead of naming it, the sanitiser stripped the spaces and set the whole sentence as the session (and tmux window) name. Spaces now become hyphens, and replies that are questions, longer than 4 words or longer than 40 characters are rejected. The naming prompt is shorter and tells the model not to reply to the conversation.
+
+### Changed
+- **Model catalog regenerated**: 3 model(s) with changed pricing/limits (openrouter: google/gemma-4-26b-a4b-it, openai/gpt-oss-120b, ~moonshotai/kimi-latest).
 
 ## [1.47.0] - 2026-11-02
 
