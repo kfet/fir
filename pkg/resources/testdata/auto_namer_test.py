@@ -74,6 +74,29 @@ class TestToolExecutionStartNaming(unittest.TestCase):
         self.handlers["tool_execution_start"]({}, ctx)
         ctx.set_session_name.assert_called_once_with("fix-login-bug")
 
+    def test_spaces_become_hyphens(self):
+        ctx = mock.MagicMock()
+        ctx.side_query.return_value = "Fix tmux autoname"
+        self.handlers["tool_execution_start"]({}, ctx)
+        ctx.set_session_name.assert_called_once_with("fix-tmux-autoname")
+
+    def test_rejects_conversational_reply(self):
+        for reply in (
+            "What you pasted is fir's session-naming prompt but not what's "
+            "wrong with it, so I'm not sure what this is yet. What's the symptom?",
+            "what-is-the-symptom?",
+            "one-two-three-four-five",
+            "Here is a name:\nfix-bug",
+            "  \n ",
+        ):
+            with self.subTest(reply=reply):
+                _, handlers = _load_auto_namer()
+                handlers["session_start"]({}, mock.MagicMock())
+                ctx = mock.MagicMock()
+                ctx.side_query.return_value = reply
+                handlers["tool_execution_start"]({}, ctx)
+                ctx.set_session_name.assert_not_called()
+
     def test_handles_side_query_exception(self):
         ctx = mock.MagicMock()
         ctx.side_query.side_effect = RuntimeError("fail")

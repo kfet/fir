@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- **auto-namer no longer names sessions after a chat reply.** When the naming model answered the conversation instead of naming it, the sanitiser stripped the spaces and set the whole sentence as the session (and tmux window) name. Spaces now become hyphens, and replies that are questions, longer than 4 words or longer than 40 characters are rejected. The naming prompt is shorter and tells the model not to reply to the conversation.
+
 ## [1.47.0] - 2026-11-02
 
 ### Fixed

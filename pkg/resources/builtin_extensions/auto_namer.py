@@ -8,7 +8,7 @@
 
 On the first tool call or at the end of the first assistant turn (whichever
 comes first), if the session still has no name, this extension uses a
-side_query to distil the conversation into a three-word kebab-case slug
+side_query to distil the conversation into a 2-4 word kebab-case slug
 (e.g. "fix-login-bug", "add-search-api") and sets it as the session name.
 """
 
@@ -46,27 +46,35 @@ def _try_name(ctx):
 
     try:
         raw = ctx.side_query(
-            "Based on the conversation so far, generate a very short session "
-            "name in kebab-case (lowercase words separated by hyphens). "
-            "Use exactly 2 to 4 words that capture the main intent. "
-            "Examples: fix-login-bug, add-search-api, refactor-db-layer, "
-            "update-readme. Reply with ONLY the kebab-case name, nothing else."
+            "Stop the conversation here. Do not reply to it. Name this session "
+            "for a tmux window title: 2-4 lowercase words joined by hyphens, "
+            "like fix-login-bug or add-search-api. Output only the name."
         )
     except Exception:
         return
 
-    # Sanitise: keep only the first line, strip whitespace, enforce kebab-case.
-    lines = raw.strip().splitlines()
-    if not lines:
-        return
-    name = lines[0].strip().strip("`\"'").lower()
-    # Remove anything that isn't a lowercase letter, digit, or hyphen.
-    name = re.sub(r"[^a-z0-9-]", "", name)
-    # Collapse multiple hyphens and strip leading/trailing hyphens.
-    name = re.sub(r"-{2,}", "-", name).strip("-")
-
+    name = _sanitise(raw)
     if name:
         ctx.set_session_name(name)
+
+
+def _sanitise(raw):
+    """Return a kebab-case name from the reply, or None if it is not a name.
+
+    A conversational reply is rejected rather than squashed into a blob.
+    """
+    lines = [ln for ln in (raw or "").splitlines() if ln.strip()]
+    if not lines:
+        return None
+    s = lines[0].strip("`\"'* \t").lower()
+    if s.endswith(("?", ":")):
+        return None
+    s = re.sub(r"[\s_/]+", "-", s)
+    s = re.sub(r"[^a-z0-9-]", "", s)
+    s = re.sub(r"-{2,}", "-", s).strip("-")
+    if not s or len(s.split("-")) > 4 or len(s) > 40:
+        return None
+    return s
 
 
 @fir_ext.on("tool_execution_start")
