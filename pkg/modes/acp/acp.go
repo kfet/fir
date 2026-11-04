@@ -129,6 +129,10 @@ type firAgent struct {
 	// the pasted redirect URL back into the login flow.
 	pendingAuths map[string]*pendingAuth
 
+	// mcpLogin runs an mcp:<server> login; nil means defaultMCPLogin.
+	// Tests swap in a scripted flow.
+	mcpLogin mcpLoginFunc
+
 	// idleTTL is how long a session may sit idle before the reaper tears it
 	// down. Zero disables the reaper.
 	idleTTL time.Duration

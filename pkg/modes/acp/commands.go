@@ -82,14 +82,42 @@ func (c *commandContext) Auth() builtin.Auth {
 
 func (c *commandContext) MCP() builtin.MCP {
 	entry := c.entry
-	return builtin.ManagerMCP(
+	return acpMCP{builtin.ManagerMCP(
 		func() *mcp.Manager { return entry.mcpManager },
 		func(ctx context.Context) error {
 			err := session.ReloadMCP(ctx, &entry.mcpManager, entry.session, entry.cwd, c.agent.options.MCPConfig, nil)
 			entry.mcpStatus = mcp.StatusFunc(entry.mcpManager)
 			return err
 		},
-	)
+	)}
+}
+
+// acpMCP warns, on the URL message of a typed `/mcp login`, that the redirect
+// has to land on the agent host. A typed command has no paste-back channel
+// over ACP; the authenticate method mcp:<server> does
+// (docs/acp-interactive-auth.md).
+type acpMCP struct{ builtin.MCP }
+
+func (m acpMCP) Login(ctx context.Context, server string, cb pinoauth.LoginCallbacks) error {
+	if onAuth := cb.OnAuth; onAuth != nil {
+		cb.OnAuth = func(info pinoauth.AuthInfo) {
+			info.Instructions = strings.TrimSpace(info.Instructions + "\n\n" + mcpLoginLoopbackNote(server))
+			onAuth(info)
+		}
+	}
+	return m.MCP.Login(ctx, server, cb)
+}
+
+// mcpLoginLoopbackNote explains the loopback limit of a typed /mcp login.
+func mcpLoginLoopbackNote(server string) string {
+	where := "the agent host"
+	if host, err := os.Hostname(); err == nil && host != "" {
+		where += " (" + host + ")"
+	}
+	return fmt.Sprintf("Note: the login redirect goes to a loopback address on %s. "+
+		"It only completes if this browser runs on that machine — the page will fail to load anywhere else. "+
+		"From a chat relay, use its interactive login instead (e.g. `!mcp login %s`), which lets you paste the landing URL back.",
+		where, server)
 }
 
 // acpOnly adapts an ACP-specific handler to slashcmd.Handler.

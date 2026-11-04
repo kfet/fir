@@ -154,6 +154,12 @@ pointer from the 401 challenge (RFC 9728 §5.1) rather than having to guess the 
 Non-interactive contexts — ACP mode, `-p`, CI — take the same path as everything else and fail
 immediately with the message above rather than blocking on a browser that will never open.
 
+Over ACP, a client logs a server in with `authenticate` methodId `mcp:<server>` (two calls: the
+URL goes out, the pasted landing URL comes back), so a chat relay's `!mcp login` works when the
+browser is not on the agent host. See [acp-interactive-auth.md](acp-interactive-auth.md). A typed
+`/mcp login` over ACP has no paste-back channel and only completes if the redirect reaches the
+agent host's loopback listener.
+
 ### Transport security
 
 fir refuses to send credentials over plaintext. A `sse`/`streamable` server whose URL is not

@@ -187,6 +187,12 @@ func (pa *firAgent) handleAuthenticate(ctx context.Context, req acpsdk.Authentic
 	methodID := string(req.MethodId)
 	firlog.Info("acp authenticate", "methodId", methodID)
 
+	// mcp:<server> methods are dynamic (one per configured MCP server, per
+	// session) and never advertised in authMethods.
+	if server, ok := strings.CutPrefix(methodID, mcpAuthMethodPrefix); ok {
+		return pa.authenticateMCP(ctx, methodID, server, parseAuthMeta(req.Meta))
+	}
+
 	pa.mu.Lock()
 	authMethods := pa.authMethods
 	pa.mu.Unlock()
