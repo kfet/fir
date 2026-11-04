@@ -2,8 +2,11 @@
 
 ## [Unreleased]
 
+## [1.48.2] - 2026-11-04
+
 ### Changed
 - **Bash tool description says the shell is usually online and curl works when other fetch tools fail** (`github.com/kfet/agent` v0.6.3), so models fall back to curl instead of settling for search snippets.
+- **Model catalog regenerated**: 15 model(s) with changed pricing/limits — openrouter: deepseek/deepseek-v4-pro-0813, deepseek/deepseek-v4.1-flash, google/gemma-4-26b-a4b-it, ibm-granite/granite-4.2-8b, meta-llama/llama-3.3-70b-instruct, minimax/minimax-m3.1-flash, moonshotai/kimi-k3, openai/gpt-oss-120b, qwen/qwen3-235b-a22b-2507, tencent/hy3 +5 more; vercel-ai-gateway: tencent/hy3.
 
 ## [1.48.1] - 2026-11-04
 
