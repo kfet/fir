@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Changed
+- **Bash tool description says the shell is usually online and curl works when other fetch tools fail** (`github.com/kfet/agent` v0.6.3), so models fall back to curl instead of settling for search snippets.
+
 ## [1.48.1] - 2026-11-04
 
 ### Changed
