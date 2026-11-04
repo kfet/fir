@@ -2,10 +2,13 @@
 
 ## [Unreleased]
 
+## [1.49.0] - 2026-11-04
+
 ### Added
 - **Interactive MCP OAuth login over ACP.** `authenticate` with methodId `mcp:<server>` and `_meta.auth.{interactive, sessionId}` runs that session's MCP login through the two-call protocol provider logins use: call 1 returns the URL, call 2 takes the pasted landing URL (the loopback listener still races it), and the server reconnects with its tools on success. Lets a chat relay finish `!mcp login` when the browser is not on the agent host. Protocol: `docs/acp-interactive-auth.md`.
 
 ### Changed
+- **Model catalog regenerated**: added 2 aggregator model(s); removed 2 aggregator model(s); 25 model(s) with changed pricing/limits.
 - Typed `/mcp login` over ACP now says the redirect must land on the agent host and points at the relay's interactive `!mcp login`.
 
 ## [1.48.2] - 2026-11-04
