@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/assets/fir-logo-256.png" alt="fir logo" width="128"></p>
+
 # fir
 
 A fast, portable AI coding agent. Single binary, no runtime dependencies.
