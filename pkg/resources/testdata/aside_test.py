@@ -4505,6 +4505,43 @@ class TestAutoRouting(_ModeBase):
         self.assertEqual(log[-1]["model"], "anthropic/claude-fable-5:high")
 
 
+class TestSelfModeFraming(_ModeBase):
+    def test_self_question_has_role_and_cap(self):
+        self.add("u1", "user", "task")
+        self.escalate("Is the plan sound?", mode="self")
+        q = self.calls[0]["question"]
+        self.assertTrue(q.startswith(self.mod._SELF_ROLE))
+        self.assertIn("\n\nIs the plan sound?\n\n", q)
+        self.assertIn("Is the plan sound?\n\nReply in at most 120 words.", q)
+        self.assertNotIn("Verdict", q)
+        # The consult log never holds the wrapped prompt.
+        log = self.data[self.mod._CONSULT_LOG_KEY]
+        self.assertNotIn(self.mod._SELF_ROLE, log)
+        self.assertNotIn("120 words", log)
+
+    def test_strong_question_unframed(self):
+        self.add("u1", "user", "task")
+        self.escalate("Which design?", mode="strong")
+        q = self.calls[0]["question"]
+        self.assertNotIn(self.mod._SELF_ROLE, q)
+        self.assertNotIn("120 words", q)
+        self.assertIn("## Question\nWhich design?", q)
+
+    def test_delegate_and_plain_unframed(self):
+        self.add("u1", "user", "task")
+        self.mod._DELEGATE = {"provider": "anthropic", "model": "claude-haiku-x"}
+        self.mod._resolve_delegate_chain = lambda ctx: [
+            {"provider": "anthropic", "model": "claude-haiku-x"}
+        ]
+        self.mod._run_aside([], "summarise", self.ctx, delegate=True)
+        self.mod._run_aside([], "plain", self.ctx)
+        self.assertEqual(self.calls[0]["model"], "claude-haiku-x")
+        for call, q in zip(self.calls, ("summarise", "plain")):
+            self.assertTrue(call["question"].startswith(q))
+            self.assertNotIn(self.mod._SELF_ROLE, call["question"])
+            self.assertNotIn("120 words", call["question"])
+
+
 class TestStrongFallback(_ModeBase):
     def test_disabled_strong_falls_back_to_self_with_note(self):
         self.strong_cfg = None

@@ -105,8 +105,8 @@ Advisor modes: self vs strong
 
 Escalation has a ``mode`` (``auto`` | ``self`` | ``strong``, default auto):
 
-  * ``self`` — the advisor chain answers on the FULL session (unchanged
-    original behaviour).
+  * ``self`` — the advisor chain answers on the FULL session; the question
+    is wrapped in a short advisor role (``_SELF_ROLE``) and a 120-word cap.
   * ``strong`` — the model configured under ``"strong_advisor"`` in
     aside.json (e.g. ``"anthropic/claude-fable-5:high"``; a chain array also
     works; default: the strongest available advisor chain) answers on a BRIEF the tool composes from the session file: the
@@ -2720,6 +2720,22 @@ _STRONG_ROLE = (
     "than guessing. Be concise. Answer in text. You cannot call tools."
 )
 
+# Self mode: the advisor sees the full session, so it needs only a role and a
+# length cap. An eval cut padding to zero at 120 words with no quality loss; a
+# go/change/stop verdict template over-called "stop", so there is none.
+_SELF_ROLE = (
+    "You are now the advisor to the executor of this session. Answer its "
+    "question directly; if the plan is sound, say so plainly and do not "
+    "invent problems."
+)
+_SELF_CAP = "Reply in at most 120 words."
+
+
+def _frame_self_question(question: str) -> str:
+    """Wrap an executor question for the self-mode advisor."""
+    return f"{_SELF_ROLE}\n\n{question}\n\n{_SELF_CAP}"
+
+
 # The user asking for the strong advisor in their latest message. Kept narrow
 # on purpose: a false positive spends strong-model money on every escalation
 # of that turn.
@@ -3101,7 +3117,10 @@ def _escalate(
 
     if chosen == "self":
         text, err, used, note, usage = _run_side_query_chain(
-            ctx, question, chain=_resolve_advisor_chain(ctx), role_label="advisor"
+            ctx,
+            _frame_self_question(question),
+            chain=_resolve_advisor_chain(ctx),
+            role_label="advisor",
         )
         record.update(model=_format_advisor_spec(used) if used else "", ok=err is None)
         _log_consult(ctx, record)

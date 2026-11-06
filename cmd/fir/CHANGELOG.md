@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Changed
+- **`aside` self-mode escalation frames the question with a short advisor role and a 120-word cap**, cutting padded advisor answers (~476 → ~122 words in eval) without quality loss.
+
 ## [1.50.0] - 2026-11-10
 
 ### Added
