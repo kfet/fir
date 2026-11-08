@@ -183,7 +183,7 @@ func (t *sectionTracker) convert(messages []agent.AgentMessage, conv func([]agen
 func isSectionUpdate(m agent.AgentMessage) bool {
 	if u := m.Message.AsUser(); u != nil {
 		if text, ok := u.Content.(string); ok {
-			return strings.HasPrefix(text, sections.UpdatePrefix)
+			return sections.IsUpdate(text)
 		}
 	}
 	return false

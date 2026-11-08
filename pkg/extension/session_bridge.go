@@ -12,6 +12,7 @@ import (
 	"github.com/kfet/agent"
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/models"
+	"github.com/kfet/fir/pkg/sections"
 	"github.com/kfet/fir/pkg/session"
 	"github.com/kfet/fir/pkg/session/store"
 )
@@ -550,7 +551,7 @@ func unansweredUserMessages(msgs []agent.AgentMessage, skip string, carried map[
 		if m.Custom != nil || u == nil {
 			continue
 		}
-		if text, ok := u.Content.(string); ok && (strings.HasPrefix(text, "[SYS_EXT]") || (skip != "" && text == skip)) {
+		if text, ok := u.Content.(string); ok && (strings.HasPrefix(text, "[SYS_EXT]") || sections.IsUpdate(text) || (skip != "" && text == skip)) {
 			continue
 		}
 		if _, done := carried[carryKey(m)]; done {

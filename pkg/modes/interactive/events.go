@@ -5,6 +5,7 @@ package interactive
 import (
 	"fmt"
 	"os"
+	"strings"
 	"syscall"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/kfet/fir/pkg/modes/interactive/components"
 	itheme "github.com/kfet/fir/pkg/modes/interactive/theme"
 	"github.com/kfet/fir/pkg/resources"
+	"github.com/kfet/fir/pkg/sections"
 	"github.com/kfet/fir/pkg/session"
 	"github.com/kfet/fir/pkg/session/store"
 	tuicomp "github.com/kfet/fir/pkg/tui/components"
@@ -88,7 +90,7 @@ func (m *InteractiveMode) rebuildChatFromMessages() {
 
 	for _, agentMsg := range state.Messages {
 		if u := agentMsg.Message.AsUser(); u != nil {
-			if txt := userMsgText(u.Content); txt != "" {
+			if txt := userMsgText(u.Content); txt != "" && !sections.IsUpdate(txt) {
 				m.addUserMessageToChat(txt)
 			}
 		} else if a := agentMsg.Message.AsAssistant(); a != nil {
@@ -254,16 +256,25 @@ func (m *InteractiveMode) onMessageStart(ae *agent.AgentEvent) {
 	}
 
 	if u := ae.Message.AsUser(); u != nil {
-		// If this message was already shown preemptively (via AddUserMessage),
-		// skip it to avoid a duplicate — regardless of whether the text was
-		// template-expanded by session.Prompt before reaching the agent.
-		if m.pendingPreemptiveUserMsgs.Add(-1) >= 0 {
+		txt := userMsgText(u.Content)
+		// Section updates are prepended to the prompt for the model only.
+		if sections.IsUpdate(txt) {
 			return
 		}
-		// Counter went negative: no preemptive message was pending (e.g. the
-		// message came from an extension). Restore balance and render it.
-		m.pendingPreemptiveUserMsgs.Add(1)
-		if txt := userMsgText(u.Content); txt != "" {
+		// Injected [SYS_EXT] context is never the preemptively shown prompt;
+		// letting it take the prompt's slot would render the prompt twice.
+		if !strings.HasPrefix(txt, "[SYS_EXT]") {
+			// If this message was already shown preemptively (via AddUserMessage),
+			// skip it to avoid a duplicate — regardless of whether the text was
+			// template-expanded by session.Prompt before reaching the agent.
+			if m.pendingPreemptiveUserMsgs.Add(-1) >= 0 {
+				return
+			}
+			// Counter went negative: no preemptive message was pending (e.g. the
+			// message came from an extension). Restore balance and render it.
+			m.pendingPreemptiveUserMsgs.Add(1)
+		}
+		if txt != "" {
 			m.addUserMessageToChat(txt)
 		}
 		m.ui.RequestRender(false)

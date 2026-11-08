@@ -23,6 +23,7 @@ import (
 	itheme "github.com/kfet/fir/pkg/modes/interactive/theme"
 	"github.com/kfet/fir/pkg/resources"
 	"github.com/kfet/fir/pkg/resources/clipboard"
+	"github.com/kfet/fir/pkg/sections"
 	"github.com/kfet/fir/pkg/session"
 	"github.com/kfet/fir/pkg/session/store"
 	"github.com/kfet/fir/pkg/slashcmd"
@@ -2300,6 +2301,72 @@ func TestInteractiveMode_Init_PrePopulatesHistoryFromSession(t *testing.T) {
 	}
 }
 
+// TestRebuildChat_SkipsSectionUpdates: resuming a session must not render
+// in-session section updates as user bubbles.
+func TestRebuildChat_SkipsSectionUpdates(t *testing.T) {
+	cwd := t.TempDir()
+	agentDir := t.TempDir()
+
+	sm := store.NewSessionStore(cwd, agentDir+"/sessions")
+	settingsManager := config.NewSettingsManager(cwd, agentDir)
+
+	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{
+		Cwd:      cwd,
+		AgentDir: agentDir,
+	})
+	rl.Reload()
+
+	// Build an agent with one user and one assistant message already in state.
+	userMsg := agent.NewAgentMessage(ai.NewUserMsg("hello from history", 0))
+	assistantMsg := agent.NewAgentMessage(ai.NewAssistantMsg(ai.AssistantMessage{
+		Model:      "test-model",
+		StopReason: ai.StopReasonStop,
+		Content: []ai.AssistantContent{
+			{Text: &ai.TextContent{Type: ai.ContentTypeText, Text: "hello back"}},
+		},
+	}))
+
+	a := agent.NewAgent(agent.AgentOptions{
+		InitialState: &agent.AgentState{
+			SystemPrompt:  "test",
+			ThinkingLevel: ai.ThinkingOff,
+			Messages: []agent.AgentMessage{
+				agent.NewAgentMessage(ai.NewUserMsg(sections.RenderUpdate("provider-usage", "warn", 2, 1), 0)),
+				userMsg, assistantMsg,
+			},
+		},
+		ConvertToLLM: func(msgs []agent.AgentMessage) ([]ai.Message, error) {
+			return store.ConvertToLLM(msgs)
+		},
+	})
+
+	session := session.NewAgentSession(session.AgentSessionOptions{
+		Agent:           a,
+		SessionStore:    sm,
+		SettingsManager: settingsManager,
+		ResourceLoader:  rl,
+		ModelRegistry:   models.NewModelRegistry(auth.NewAuthStorage(agentDir+"/auth.json"), ""),
+		Cwd:             cwd,
+	})
+	t.Cleanup(func() { session.Close() })
+
+	keybindings := tui.NewKeybindingsManager("")
+	m := NewInteractiveMode(nil, keybindings, nil, InteractiveModeOptions{})
+	m.session = session
+	t.Cleanup(func() { m.Shutdown() })
+
+	// Init() should detect state.Messages is non-empty and call rebuildChatFromMessages().
+	if err := m.Init(); err != nil {
+		t.Fatalf("Init() returned error: %v", err)
+	}
+
+	// A section update is model-only machinery: exactly one user and one
+	// assistant bubble, no bubble for the [SYS_EXT section=…] message.
+	if n := len(m.messageContainer.ChildrenSnapshot()); n != 2 {
+		t.Errorf("expected 2 children (user+assistant), got %d", n)
+	}
+}
+
 // ============================================================================
 // SetUpdateChannel / startUpdateNoticeWatcher
 // ============================================================================
@@ -2837,5 +2904,52 @@ func TestInteractiveMode_SlashCommandArgsTrimmed(t *testing.T) {
 	tm.mode.handleSlashCommand("  /name  hello world ")
 	if got := tm.mode.session.SessionStore.GetSessionName(); got != "hello world" {
 		t.Fatalf("session name = %q", got)
+	}
+}
+
+// TestOnMessageStart_SectionUpdateDoesNotDuplicatePrompt reproduces the
+// "prompt shown twice" bug: session.Prompt prepends [SYS_EXT section=…]
+// update messages before the user's prompt. The update's message_start used
+// to consume the preemptive counter, so the real prompt rendered a second time.
+func TestOnMessageStart_SectionUpdateDoesNotDuplicatePrompt(t *testing.T) {
+	tm := newTestMode(t)
+
+	tm.mode.pendingPreemptiveUserMsgs.Add(1) // AddUserMessage("hello")
+	before := tm.messageCount()
+
+	tm.mode.onMessageStart(makeUserMsgEvent(sections.RenderUpdate("provider-usage", "warn", 2, 1)))
+	tm.mode.onMessageStart(makeUserMsgEvent("hello"))
+	tm.waitRender()
+
+	if after := tm.messageCount(); after != before {
+		t.Errorf("prompt or section update rendered again: message count %d → %d", before, after)
+	}
+	if got := tm.mode.pendingPreemptiveUserMsgs.Load(); got != 0 {
+		t.Errorf("expected counter 0, got %d", got)
+	}
+}
+
+// TestOnMessageStart_InjectedContextDoesNotConsumePreemptive: a [SYS_EXT]
+// context message delivered ahead of a queued prompt is rendered on its own
+// and must not take the prompt's preemptive slot (which doubled the prompt).
+func TestOnMessageStart_InjectedContextDoesNotConsumePreemptive(t *testing.T) {
+	tm := newTestMode(t)
+
+	tm.mode.pendingPreemptiveUserMsgs.Add(1)
+	before := tm.messageCount()
+
+	tm.mode.onMessageStart(makeUserMsgEvent("[SYS_EXT]\nctx\n[/SYS_EXT]"))
+	tm.mode.onMessageStart(makeUserMsgEvent("hello"))
+	tm.waitRender()
+
+	children := tm.mode.messageContainer.ChildrenSnapshot()
+	if n := len(children); n != before+1 {
+		t.Fatalf("expected only the injected context added (%d), got %d", before+1, n)
+	}
+	if got := strings.Join(children[len(children)-1].Render(80), "\n"); !strings.Contains(got, "ctx") || strings.Contains(got, "hello") {
+		t.Errorf("expected the injected context bubble, not a second prompt; got %q", got)
+	}
+	if got := tm.mode.pendingPreemptiveUserMsgs.Load(); got != 0 {
+		t.Errorf("expected counter 0, got %d", got)
 	}
 }

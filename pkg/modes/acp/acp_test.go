@@ -22,6 +22,7 @@ import (
 	"github.com/kfet/fir/pkg/mcp"
 	"github.com/kfet/fir/pkg/models"
 	"github.com/kfet/fir/pkg/resources"
+	"github.com/kfet/fir/pkg/sections"
 	"github.com/kfet/fir/pkg/session"
 	"github.com/kfet/fir/pkg/session/store"
 )
@@ -2013,5 +2014,26 @@ func TestRunPendingHandoffs_RunsHandoff(t *testing.T) {
 	}
 	if !sawFailure {
 		t.Fatalf("expected a continuation-failure agent message (no model configured); updates=%d", len(updates))
+	}
+}
+
+// TestReplaySessionHistory_SkipsSectionUpdates: section updates are prepended
+// to prompts for the model only and must not replay as user messages.
+func TestReplaySessionHistory_SkipsSectionUpdates(t *testing.T) {
+	tmpDir := t.TempDir()
+	sm := store.NewSessionStore(tmpDir, filepath.Join(tmpDir, "sessions"))
+	sm.AppendAIMessage(ai.NewUserMsg(sections.RenderUpdate("provider-usage", "warn", 2, 1), time.Now().UnixMilli()))
+	sm.AppendAIMessage(ai.NewUserMsg("real prompt", time.Now().UnixMilli()))
+
+	entry := &firSession{session: &session.AgentSession{SessionStore: sm}, termState: newTerminalState()}
+	mc := newMockConn()
+	pa := &firAgent{conn: mc, sessions: map[string]*firSession{"s": entry}}
+	pa.replaySessionHistory("s", entry)
+
+	mc.mu.Lock()
+	defer mc.mu.Unlock()
+	if len(mc.updates) != 1 || mc.updates[0].Update.UserMessageChunk == nil ||
+		mc.updates[0].Update.UserMessageChunk.Content.Text.Text != "real prompt" {
+		t.Fatalf("expected only the real prompt replayed, got %d updates", len(mc.updates))
 	}
 }

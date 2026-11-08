@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+- **Prompt shown twice after Enter when a SYS_EXT section changed.** The `[SYS_EXT section=…]` update prepended to the prompt consumed the TUI's preemptive-echo slot, so the real prompt rendered again. Section updates are now hidden in the TUI (live and on resume) and in ACP replay, and are not carried across a context handoff; injected `[SYS_EXT]` context no longer takes the prompt's slot either.
+- **tmux scrollback filled with copies of the screen on every full redraw** (resize, shrink): bumped `github.com/kfet/tui` to v0.1.2, which clears the screen before the scrollback.
+
 ## [1.49.0] - 2026-11-04
 
 ### Added

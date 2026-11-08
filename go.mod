@@ -13,7 +13,7 @@ require (
 	github.com/kfet/firpty v0.2.0
 	github.com/kfet/pinexec v0.0.4
 	github.com/kfet/skipstone v0.1.2
-	github.com/kfet/tui v0.1.1
+	github.com/kfet/tui v0.1.2
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/stretchr/testify v1.11.1
 	github.com/yuin/goldmark v1.7.16

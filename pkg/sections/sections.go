@@ -37,6 +37,10 @@ const BlockHeader = "[SYS_EXT sections]"
 // UpdatePrefix starts every in-session replacement message.
 const UpdatePrefix = "[SYS_EXT section="
 
+// IsUpdate reports whether a user message's text is an in-session section
+// replacement (machinery for the model, never shown as a user prompt).
+func IsUpdate(text string) bool { return strings.HasPrefix(text, UpdatePrefix) }
+
 // ext names are file basenames; keep them to a safe slug.
 var nameRe = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 

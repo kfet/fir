@@ -259,3 +259,12 @@ func TestSet_IOErrors(t *testing.T) {
 		t.Fatal("expected invalid name error")
 	}
 }
+
+func TestIsUpdate(t *testing.T) {
+	if !IsUpdate(RenderUpdate("x", "y", 2, 1)) {
+		t.Error("RenderUpdate output not recognised as an update")
+	}
+	if IsUpdate("hello") || IsUpdate(RenderBlock([]Section{{Name: "x", Text: "y"}})) {
+		t.Error("non-update text recognised as an update")
+	}
+}

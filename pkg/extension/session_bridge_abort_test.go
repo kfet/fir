@@ -8,6 +8,7 @@ import (
 
 	"github.com/kfet/agent"
 	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/sections"
 	"github.com/kfet/fir/pkg/session"
 	"github.com/kfet/fir/pkg/session/store"
 )
@@ -222,6 +223,7 @@ func TestSessionBridge_RestartSession_CarriesUnanswered(t *testing.T) {
 			agent.NewAgentMessage(ai.NewAssistantMsg(ai.AssistantMessage{StopReason: ai.StopReasonAborted,
 				Content: []ai.AssistantContent{{Text: &ai.TextContent{Type: "text", Text: "part"}}}}))}, "u2,s1,f1"},
 		{"injected context is not carried", []agent.AgentMessage{user("[SYS_EXT]\nbrief\n[/SYS_EXT]"), user("u1"), toolCall}, "u1,s1,f1"},
+		{"section update is not carried", []agent.AgentMessage{user(sections.RenderUpdate("x", "y", 2, 1)), user("u1"), toolCall}, "u1,s1,f1"},
 		{"no answer yet", []agent.AgentMessage{user("u1"), toolCall}, "u1,s1,f1"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -23,6 +23,7 @@ import (
 	"github.com/kfet/fir/pkg/mcp"
 	"github.com/kfet/fir/pkg/models"
 	firpkg "github.com/kfet/fir/pkg/pkg"
+	"github.com/kfet/fir/pkg/sections"
 	"github.com/kfet/fir/pkg/session"
 	"github.com/kfet/fir/pkg/session/store"
 )
@@ -737,7 +738,7 @@ func (pa *firAgent) replaySessionHistory(sessionID string, entry *firSession) {
 				continue
 			}
 			text := extractUserText(um.Content)
-			if text != "" {
+			if text != "" && !sections.IsUpdate(text) {
 				_ = pa.conn.SessionUpdate(context.Background(), entry.notification(sid, acpsdk.UpdateUserMessageText(text)))
 			}
 
