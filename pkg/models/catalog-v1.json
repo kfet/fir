@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-11-07T02:01:38Z",
+  "generatedAt": "2026-11-08T02:00:58Z",
   "clientVersions": {
     "claudeCode": "2.1.296"
   },
@@ -341,11 +341,19 @@
           },
           "maxTokens": 943717
         },
+        "deepseek/deepseek-v4-pro": {
+          "cost": {
+            "input": 0.9,
+            "output": 1.5,
+            "cacheRead": 0.25,
+            "cacheWrite": 0
+          }
+        },
         "deepseek/deepseek-v4-pro-0813": {
           "cost": {
-            "input": 0.1165,
-            "output": 4.66,
-            "cacheRead": 0.111,
+            "input": 0.111,
+            "output": 4.44,
+            "cacheRead": 0.106,
             "cacheWrite": 0
           }
         },
@@ -447,8 +455,8 @@
         "openai/gpt-oss-120b": {
           "cost": {
             "input": 0.012,
-            "output": 0.046,
-            "cacheRead": 0.011,
+            "output": 0.043,
+            "cacheRead": 0.01,
             "cacheWrite": 0
           }
         },
@@ -469,6 +477,15 @@
             "cacheWrite": 0
           },
           "maxTokens": 16384
+        },
+        "qwen/qwen3.6-27b": {
+          "cost": {
+            "input": 0.32,
+            "output": 3.2,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          },
+          "maxTokens": 81920
         },
         "reflection/beam-1.0-501b-a23b": {
           "cost": {
@@ -497,12 +514,11 @@
         },
         "z-ai/glm-5.3-flash": {
           "cost": {
-            "input": 0.15,
-            "output": 0.5,
+            "input": 0.0335,
+            "output": 0.083,
             "cacheRead": 0.03,
             "cacheWrite": 0
-          },
-          "maxTokens": 943717
+          }
         },
         "~deepseek/deepseek-flash-latest": {
           "cost": {
@@ -530,9 +546,9 @@
         },
         "~z-ai/glm-flash-latest": {
           "cost": {
-            "input": 0.0284,
-            "output": 0.0923,
-            "cacheRead": 0.0284,
+            "input": 0.0335,
+            "output": 0.083,
+            "cacheRead": 0.03,
             "cacheWrite": 0
           }
         }
@@ -628,6 +644,14 @@
             "input": 3,
             "output": 15,
             "cacheRead": 0.3,
+            "cacheWrite": 0
+          }
+        },
+        "nvidia/nemotron-3.5-lightning": {
+          "cost": {
+            "input": 0.06,
+            "output": 0.16,
+            "cacheRead": 0.03,
             "cacheWrite": 0
           }
         },
