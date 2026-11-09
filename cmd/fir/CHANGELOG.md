@@ -2,9 +2,12 @@
 
 ## [Unreleased]
 
+## [1.49.2] - 2026-11-09
+
 ### Changed
 
 - TUI `/mcp login` autocomplete lists errored/disconnected servers first, using live status.
+- **Model catalog regenerated**: added `opencode-go/longcat-2.5-free`, `opencode/longcat-2.5-free`, `opencode/muse-ember-1.0` (+1 on aggregators); removed `opencode/frantic-ferret-free` (+1 on aggregators); 21 model(s) with changed pricing/limits.
 
 ## [1.49.1] - 2026-11-08
 
