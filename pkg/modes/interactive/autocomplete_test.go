@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kfet/fir/pkg/mcp"
 	tuicomp "github.com/kfet/fir/pkg/tui/components"
 )
 
@@ -742,7 +743,7 @@ func TestTokenStartIndex_QuoteAware(t *testing.T) {
 
 func TestGetSuggestions_MCPServerNameArgs(t *testing.T) {
 	argSpecs := map[string]*CommandArgSpec{
-		"mcp": mcpArgSpec([]string{"github", "gitlab", "notion"}),
+		"mcp": mcpArgSpec(mcpDetailsFn("github", "gitlab", "notion")),
 	}
 	p := NewCombinedAutocompleteProvider(testCommands(), "/tmp", argSpecs)
 
@@ -778,7 +779,7 @@ func TestGetSuggestions_MCPServerNameArgs(t *testing.T) {
 
 func TestApplyCompletion_MCPLoginArg(t *testing.T) {
 	argSpecs := map[string]*CommandArgSpec{
-		"mcp": mcpArgSpec([]string{"github"}),
+		"mcp": mcpArgSpec(mcpDetailsFn("github")),
 	}
 	p := NewCombinedAutocompleteProvider(testCommands(), "/tmp", argSpecs)
 
@@ -790,5 +791,54 @@ func TestApplyCompletion_MCPLoginArg(t *testing.T) {
 	res := p.ApplyCompletion([]string{line}, 0, len(line), s.Items[0], s.Prefix)
 	if res.Lines[0] != "/mcp login github " {
 		t.Fatalf("got %q", res.Lines[0])
+	}
+}
+
+func mcpDetailsFn(names ...string) func() []mcp.ServerDetail {
+	return func() []mcp.ServerDetail {
+		var out []mcp.ServerDetail
+		for _, n := range names {
+			out = append(out, mcp.ServerDetail{Name: n, Status: "connected"})
+		}
+		return out
+	}
+}
+
+func TestMCPLoginOrder_BrokenFirst(t *testing.T) {
+	got := mcpLoginOrder([]mcp.ServerDetail{
+		{Name: "alpha", Status: "connected"},
+		{Name: "zeta", Status: "error"},
+		{Name: "beta", Status: "disabled"},
+		{Name: "gamma", Status: "disconnected"},
+		{Name: "delta", Status: "connecting"},
+	})
+	want := []string{"gamma", "zeta", "alpha", "beta", "delta"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+}
+
+func TestGetSuggestions_MCPLoginLiveStatusOrder(t *testing.T) {
+	status := map[string]string{"github": "connected", "notion": "connected"}
+	details := func() []mcp.ServerDetail {
+		return []mcp.ServerDetail{
+			{Name: "github", Status: status["github"]},
+			{Name: "notion", Status: status["notion"]},
+		}
+	}
+	p := NewCombinedAutocompleteProvider(testCommands(), "/tmp", map[string]*CommandArgSpec{"mcp": mcpArgSpec(details)})
+	first := func() string {
+		s := p.GetSuggestions([]string{"/mcp login "}, 0, 11)
+		if s == nil || len(s.Items) != 2 {
+			t.Fatalf("expected 2 suggestions, got %v", s)
+		}
+		return s.Items[0].Value
+	}
+	if got := first(); got != "github" {
+		t.Fatalf("first = %q, want github", got)
+	}
+	status["notion"] = "error" // status changes after the spec was built
+	if got := first(); got != "notion" {
+		t.Fatalf("first = %q, want notion", got)
 	}
 }

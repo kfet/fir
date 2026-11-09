@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- TUI `/mcp login` autocomplete lists errored/disconnected servers first, using live status.
+
 ## [1.49.1] - 2026-11-08
 
 ### Fixed

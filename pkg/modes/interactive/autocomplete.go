@@ -37,6 +37,9 @@ type CommandArgSpec struct {
 	Type CommandArgCompletionType
 	// Values holds the static completion values (for ArgCompleteStatic).
 	Values []string
+	// ValuesFn, when set, supplies the static values at completion time
+	// instead of Values, in the order returned (not re-sorted).
+	ValuesFn func() []string
 	// SubCommands maps a first argument to a nested spec for the second argument.
 	SubCommands map[string]*CommandArgSpec
 }
@@ -325,7 +328,11 @@ func (p *combinedAutocompleteProvider) getCommandArgSuggestions(cmdName, afterCm
 func (p *combinedAutocompleteProvider) completeFromSpec(spec *CommandArgSpec, partial, fullPrefix string) *tuicomp.AutocompleteSuggestions {
 	switch spec.Type {
 	case ArgCompleteStatic:
-		return p.filterStaticCandidates(spec.Values, partial, fullPrefix)
+		values := spec.Values
+		if spec.ValuesFn != nil {
+			values = spec.ValuesFn()
+		}
+		return p.filterStaticCandidates(values, partial, fullPrefix)
 	case ArgCompleteFile:
 		suggestions := p.getFileSuggestions(partial)
 		if len(suggestions) == 0 {

@@ -1115,11 +1115,7 @@ func (m *InteractiveMode) setupAutocomplete() {
 	// /mcp completes with server names for detailed inspection, and
 	// `/mcp login|logout` complete with server names too.
 	if m.mcpDetails != nil {
-		var serverNames []string
-		for _, d := range m.mcpDetails() {
-			serverNames = append(serverNames, d.Name)
-		}
-		argSpecs["mcp"] = mcpArgSpec(serverNames)
+		argSpecs["mcp"] = mcpArgSpec(m.mcpDetails)
 	}
 
 	provider := NewCombinedAutocompleteProvider(commands, basePath, argSpecs)
@@ -1128,11 +1124,20 @@ func (m *InteractiveMode) setupAutocomplete() {
 
 // mcpArgSpec builds the argument completion spec for /mcp. The first argument
 // completes to a server name (for `/mcp <name>` detail) or a subcommand, and
-// `/mcp login|logout` then complete their second argument with server names.
-func mcpArgSpec(serverNames []string) *CommandArgSpec {
-	names := append([]string{}, serverNames...)
+// `/mcp login|logout|reload` then complete their second argument with server
+// names. `/mcp login` lists servers that need attention (error, disconnected)
+// first, using live status at completion time.
+func mcpArgSpec(details func() []mcp.ServerDetail) *CommandArgSpec {
+	var names []string
+	for _, d := range details() {
+		names = append(names, d.Name)
+	}
 	sort.Strings(names)
 	serverSpec := &CommandArgSpec{Type: ArgCompleteStatic, Values: names}
+	loginSpec := &CommandArgSpec{
+		Type:     ArgCompleteStatic,
+		ValuesFn: func() []string { return mcpLoginOrder(details()) },
+	}
 
 	values := append(append([]string{}, names...), "reload", "login", "logout")
 	sort.Strings(values)
@@ -1141,8 +1146,33 @@ func mcpArgSpec(serverNames []string) *CommandArgSpec {
 		Values: values,
 		SubCommands: map[string]*CommandArgSpec{
 			"reload": serverSpec,
-			"login":  serverSpec,
+			"login":  loginSpec,
 			"logout": serverSpec,
 		},
 	}
+}
+
+// mcpLoginOrder returns server names with servers known to be unusable
+// (error — incl. needs auth / expired token — or disconnected) first, then
+// connected, connecting and disabled ones; names sort within each group.
+func mcpLoginOrder(details []mcp.ServerDetail) []string {
+	ds := append([]mcp.ServerDetail{}, details...)
+	broken := func(d mcp.ServerDetail) bool {
+		switch d.Status {
+		case "connected", "connecting", "disabled":
+			return false
+		}
+		return true
+	}
+	sort.SliceStable(ds, func(i, j int) bool {
+		if bi, bj := broken(ds[i]), broken(ds[j]); bi != bj {
+			return bi
+		}
+		return ds[i].Name < ds[j].Name
+	})
+	names := make([]string, len(ds))
+	for i, d := range ds {
+		names[i] = d.Name
+	}
+	return names
 }
