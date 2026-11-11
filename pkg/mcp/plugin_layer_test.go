@@ -27,6 +27,8 @@ func TestPluginLayer_LowestPrecedenceWithWarning(t *testing.T) {
 		[]byte(`{"mcpServers":{"proj":{"command":"proj-cmd"}}}`), 0o644))
 
 	var gotAgent, gotProject string
+	prev := pluginLayer.Load()
+	t.Cleanup(func() { pluginLayer.Store(prev) })
 	RegisterPluginLayer(func(a, p string) (map[string]ServerConfig, map[string]string, error) {
 		gotAgent, gotProject = a, p
 		return map[string]ServerConfig{
@@ -36,8 +38,6 @@ func TestPluginLayer_LowestPrecedenceWithWarning(t *testing.T) {
 			}, map[string]string{"shared": "/plug/mcp.json", "proj": "/plug/mcp.json", "only": "/plug/mcp.json"},
 			errors.New("plugin diag")
 	})
-	prev := pluginLayer.Load()
-	t.Cleanup(func() { pluginLayer.Store(prev) })
 
 	cfg, collisions, err := LoadDefaultConfigsReport(project)
 	assert.Equal(t, agentDir, gotAgent)
@@ -60,11 +60,11 @@ func TestPluginLayer_DropInShadowsPlugin(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(agentDir, "mcp.d"), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(agentDir, "mcp.d", "a.json"),
 		[]byte(`{"mcpServers":{"s":{"command":"dropin"}}}`), 0o644))
+	prev := pluginLayer.Load()
+	t.Cleanup(func() { pluginLayer.Store(prev) })
 	RegisterPluginLayer(func(string, string) (map[string]ServerConfig, map[string]string, error) {
 		return map[string]ServerConfig{"s": {Command: "plugin"}}, map[string]string{"s": "/plug/mcp.json"}, nil
 	})
-	prev := pluginLayer.Load()
-	t.Cleanup(func() { pluginLayer.Store(prev) })
 	cfg, _, err := LoadDefaultConfigsReport(t.TempDir())
 	assert.Equal(t, "dropin", cfg.MCPServers["s"].Command)
 	require.Error(t, err)
