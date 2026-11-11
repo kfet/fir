@@ -2,9 +2,15 @@
 
 ## [Unreleased]
 
+## [1.50.0] - 2026-11-10
+
 ### Added
 
 - MCP OAuth: public `https` `auth.redirect_uri` with `auth.callback_listen` (loopback bind), and `FIR_MCP_OAUTH_REDIRECT_BASE` deriving `<base>/<port>/callback` so a gateway can proxy phone-browser sign-in.
+
+### Changed
+
+- **Model catalog regenerated**: added `anthropic/claude-fable-5-2` (+ Bedrock/opencode variants), `google/gemini-4-carbon`, `amazon-bedrock/global.moonshotai.kimi-k3.1` +more (+17 on aggregators); removed `opencode-go/crouton-alpha-free`, `opencode/crouton-alpha-free` (+3 on aggregators); 27 model(s) with changed pricing/limits.
 
 ## [1.49.2] - 2026-11-09
 
