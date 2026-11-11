@@ -2,9 +2,15 @@
 
 ## [Unreleased]
 
+## [1.52.0] - 2026-11-11
+
 ### Added
 
 - **Experimental MCP files extension** (draft `io.modelcontextprotocol/files`), off by default, per server via `"files": {"enabled": true}`: `x-mcp-file` arguments become local paths for the model; fir sends files inline or uploads them (PUT or multipart POST) on `upload_required` and retries with `requestState`; download targets are fetched into a private dir. Files are approved via ACP `session/request_permission` or `files.autoApprove`; headless and TUI sessions refuse otherwise.
+
+### Changed
+
+- **Model catalog regenerated**: added `github-copilot/claude-fable-5.2`, `github-copilot/gemini-4-carbon` (+1 on aggregators); removed 6 aggregator model(s); 11 model(s) with changed pricing/limits.
 
 ### Fixed
 
