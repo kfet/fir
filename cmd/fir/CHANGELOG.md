@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Experimental MCP files extension** (draft `io.modelcontextprotocol/files`), off by default, per server via `"files": {"enabled": true}`: `x-mcp-file` arguments become local paths for the model; fir sends files inline or uploads them (PUT or multipart POST) on `upload_required` and retries with `requestState`; download targets are fetched into a private dir. Files are approved via ACP `session/request_permission` or `files.autoApprove`; headless and TUI sessions refuse otherwise.
+
+### Fixed
+
+- `pkg/extension` tests no longer load the developer's real global extensions (they skewed registered-tool counts).
+
 ## [1.51.0] - 2026-11-10
 
 ### Changed

@@ -20,8 +20,10 @@ var mcpInitialWait = 5 * time.Second
 
 // mcpHealthState tracks the session's MCP manager for health reporting.
 type mcpHealthState struct {
-	mgr      atomic.Pointer[mcp.Manager]
-	waitOnce sync.Once
+	mgr atomic.Pointer[mcp.Manager]
+	// fileApproval is applied to every Manager attached to the session.
+	fileApproval atomic.Pointer[mcp.FileApprovalFn]
+	waitOnce     sync.Once
 
 	mu       sync.Mutex
 	subs     map[int]func([]mcp.ServerHealth)
@@ -36,6 +38,9 @@ func (s *AgentSession) attachMCP(mgr *mcp.Manager) {
 	s.mcp.mgr.Store(mgr)
 	if mgr == nil {
 		return
+	}
+	if fn := s.mcp.fileApproval.Load(); fn != nil {
+		mgr.SetFileApprovalFn(*fn)
 	}
 	mgr.SetOnHealthChanged(s.publishMCPHealth)
 	mgr.SetSources(mcp.ConfigSources(s.cwd))
@@ -124,4 +129,18 @@ func (s *AgentSession) mcpSections() []sections.Section {
 		return nil
 	}
 	return []sections.Section{{Name: MCPSectionName, Text: text}}
+}
+
+// SetMCPFileApproval installs the prompt that approves sending local files
+// to MCP servers using the files extension, on the current MCP manager and
+// on any manager attached later (e.g. after /reload).
+func (s *AgentSession) SetMCPFileApproval(fn mcp.FileApprovalFn) {
+	if fn == nil {
+		s.mcp.fileApproval.Store(nil)
+	} else {
+		s.mcp.fileApproval.Store(&fn)
+	}
+	if mgr := s.mcp.mgr.Load(); mgr != nil {
+		mgr.SetFileApprovalFn(fn)
+	}
 }

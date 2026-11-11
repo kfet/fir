@@ -33,8 +33,9 @@ type ToolOrigin struct {
 }
 
 // adaptTool adapts tool and records its ToolOrigin under the adapted name.
-func (m *Manager) adaptTool(serverName string, tool *sdk.Tool) agent.AgentTool {
-	at := AdaptTool(m.serverSession(serverName), serverName, tool, &m.progressReg)
+// fx enables the files extension for the tool; nil leaves it off.
+func (m *Manager) adaptTool(serverName string, tool *sdk.Tool, fx *filesEnv) agent.AgentTool {
+	at := adaptToolFiles(m.serverSession(serverName), serverName, tool, &m.progressReg, fx)
 	m.toolInfo.Store(at.Name, ToolOrigin{Server: serverName, Name: tool.Name, Meta: map[string]any(tool.Meta)})
 	return at
 }

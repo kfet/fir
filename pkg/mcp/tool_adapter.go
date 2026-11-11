@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"os"
 	"regexp"
@@ -56,6 +57,13 @@ func StaticSession(s *sdk.ClientSession) SessionGetter {
 }
 
 func AdaptTool(getSession SessionGetter, serverName string, tool *sdk.Tool, registry *progressRegistry) agent.AgentTool {
+	return adaptToolFiles(getSession, serverName, tool, registry, nil)
+}
+
+// adaptToolFiles is AdaptTool with the files extension: when fx is non-nil,
+// file arguments are shown to the model as local paths and transferred by
+// fir, and download targets in results are fetched (see files.go).
+func adaptToolFiles(getSession SessionGetter, serverName string, tool *sdk.Tool, registry *progressRegistry, fx *filesEnv) agent.AgentTool {
 	label := tool.Title
 	if label == "" {
 		label = tool.Name + " (via " + serverName + ")"
@@ -68,11 +76,22 @@ func AdaptTool(getSession SessionGetter, serverName string, tool *sdk.Tool, regi
 	// ^[a-zA-Z0-9_-]{1,128}$
 	sanitizedName := ToolName(serverName, toolName)
 
+	params := tool.InputSchema
+	var origSchema any
+	if fx != nil {
+		origSchema = normalizeSchema(tool.InputSchema)
+		if rewritten, found := rewriteFileSchemas(origSchema); found {
+			params = rewritten
+		} else {
+			origSchema = nil // no file arguments to convert
+		}
+	}
+
 	return agent.AgentTool{
 		Tool: ai.Tool{
 			Name:        sanitizedName,
 			Description: tool.Description,
-			Parameters:  tool.InputSchema,
+			Parameters:  params,
 		},
 		Label: label,
 		Execute: func(
@@ -107,16 +126,49 @@ func AdaptTool(getSession SessionGetter, serverName string, tool *sdk.Tool, regi
 				registry.register(toolCallID, onUpdate)
 			}
 			firlog.Debug("mcp tool call", "server", serverName, "tool", toolName)
-			result, err := session.CallTool(ctx, callParams)
+			var result *sdk.CallToolResult
+			if fx != nil {
+				result, err = fx.call(ctx, session, toolCallID, toolName, origSchema, callParams)
+			} else {
+				result, err = session.CallTool(ctx, callParams)
+				if err == nil {
+					// The server may not use the extension even when it is
+					// enabled; never let a transfer target through.
+					result, err = scrubFilesResult(result)
+				}
+			}
 			if err != nil {
 				firlog.Warn("mcp tool call failed", "server", serverName, "tool", toolName, "err", err)
 				return agent.AgentToolResult{}, err
 			}
+			var notes []string
+			if fx != nil {
+				notes = fx.downloads(ctx, result)
+			}
 			res := convertResult(result)
+			for _, n := range notes {
+				res.Content = append(res.Content, ai.ToolResultContent{Type: ai.ContentTypeText, Text: n})
+			}
 			attachPassthrough(&res, serverName, toolName, result)
 			return res, nil
 		},
 	}
+}
+
+// normalizeSchema returns schema as generic JSON (map[string]any).
+func normalizeSchema(schema any) any {
+	if _, ok := schema.(map[string]any); ok {
+		return schema
+	}
+	b, err := json.Marshal(schema)
+	if err != nil {
+		return schema
+	}
+	var out any
+	if json.Unmarshal(b, &out) != nil {
+		return schema
+	}
+	return out
 }
 
 // convertResult maps an *sdk.CallToolResult to an agent.AgentToolResult.

@@ -52,6 +52,39 @@ type ServerConfig struct {
 	// Disabled keeps the server configured but never connects to it. fir
 	// still reports it (state "disabled") so the agent knows it exists.
 	Disabled bool `json:"disabled,omitempty"`
+	// Files opts this server into the experimental, draft MCP files
+	// extension (io.modelcontextprotocol/files): file uploads and downloads
+	// that never pass through the model. Absent (the default) means off.
+	// See FilesConfig.
+	Files *FilesConfig `json:"files,omitempty"`
+}
+
+// FilesConfig configures the experimental MCP files extension for one
+// server. The extension is used only when Enabled is true, the server
+// advertises io.modelcontextprotocol/files and the session speaks protocol
+// revision 2026-07-28 or later.
+//
+// When on, a tool argument the server marks with x-mcp-file is shown to the
+// model as {"path": "<local file>"}. fir reads that file, sends it inline or
+// uploads it to the target the server names, and retries the call; the model
+// never sees the bytes or the upload URL. Files a tool returns as download
+// targets are fetched into a private per-session directory and their local
+// paths are appended to the tool result.
+type FilesConfig struct {
+	// Enabled turns the extension on for this server.
+	Enabled bool `json:"enabled"`
+	// AutoApprove sends local files to this server without asking. Without
+	// it, every file is approved through the front end's permission prompt
+	// (ACP session/request_permission); a session with no prompt — headless
+	// runs and the terminal UI today — refuses to send files.
+	AutoApprove bool `json:"autoApprove,omitempty"`
+	// AllowedOrigins, when non-empty, restricts transfers to targets whose
+	// origin (scheme://host:port) is listed, besides paths under the
+	// server's own address. It is also the only way to reach a target on a
+	// private or loopback address, or over plain http (loopback only).
+	AllowedOrigins []string `json:"allowedOrigins,omitempty"`
+	// MaxDownloadBytes caps each downloaded file. 0 means 100 MiB.
+	MaxDownloadBytes int64 `json:"maxDownloadBytes,omitempty"`
 }
 
 // AuthMode selects the authentication strategy for an HTTP MCP server.

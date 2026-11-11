@@ -398,6 +398,72 @@ supplement project defaults without modifying files on disk.
 
 ---
 
+## Files extension (experimental)
+
+fir implements the client side of the draft
+[`io.modelcontextprotocol/files`](https://github.com/modelcontextprotocol/experimental-ext-file-uploads/blob/main/specification/draft/file-uploads.md)
+extension. It is off by default and enabled per server:
+
+```json
+{
+  "mcpServers": {
+    "drive": {
+      "transport": "streamable",
+      "url": "https://drive.example.com/mcp",
+      "files": { "enabled": true, "allowedOrigins": ["https://upload.example.com"] }
+    }
+  }
+}
+```
+
+Keys (see `FilesConfig` in `pkg/mcp/config_contract.go`): `enabled`,
+`autoApprove`, `allowedOrigins`, `maxDownloadBytes` (default 100 MiB).
+
+The extension is used only when the server advertises it in
+`server/discover` and the session speaks protocol 2026-07-28 or later. fir
+then declares `{upload, download}` in the `io.modelcontextprotocol/clientCapabilities`
+`_meta` of every request.
+
+**Uploads.** An argument marked `x-mcp-file` is shown to the model as
+`{"path": "<local file>"}` (also inside arrays and `anyOf`/`oneOf`). fir
+builds the `FileInput` (`id`, `name`, `mimeType`, `size`, and `digest` when
+the schema requires it), enforces `accept` and `maxSize`, and sends files
+inline while their total fits the server's `maxInlineBytes`. Larger files go
+out of band: on an `upload_required` result fir validates every target,
+uploads with `PUT` (retried up to 3 times) or multipart `POST`, then retries
+the call with the same arguments and `requestState`. A failed upload fails
+the call ("the tool did not run"); a second upload request fails it as
+"outcome unknown". The model never sees bytes or target URLs.
+
+**Approval.** Before anything is sent, the files are approved: in ACP fir asks
+the client with `session/request_permission` (only an explicit "Send"
+allows); the TUI and headless sessions have no prompt and refuse unless
+`autoApprove` is set.
+
+**Downloads.** Download targets in a result's
+`_meta["io.modelcontextprotocol/files"]` are fetched (at most 10 per result,
+`200` only, size and digest checked, `expiresAt` honoured) into a private
+temp directory (`fir-mcp-files-*`, files `0600`, never overwritten), and a
+line with the saved path is appended to the result. Downloaded files are kept after the
+session ends (they are the user's results); delete the directory when done.
+`Manager.CallTool` (ACP `_fir/mcp/tools/call`, auto-reply) does not run the
+files flow: it strips download targets and fails on an upload request. The `_meta` entry is
+removed so no URL reaches the model or the ACP passthrough.
+
+**Target safety.** https only (plain http only to an allowlisted loopback
+origin), no redirects, no cookies; the MCP credential is attached only to
+`credentials: "include"` targets on the server's origin or `path` targets
+under its address. Targets on non-globally-reachable addresses are refused
+unless allowlisted; behind an HTTP proxy, `url` targets must be allowlisted.
+stdio servers may only use `url` + `omit` targets. Error messages never
+include target URLs, headers or form values.
+
+**Implementation note.** go-sdk v1.8.0 drops the `uploads` member of an
+`upload_required` result, so `pkg/mcp/files_transport.go` wraps the
+transport and moves it into a fir-private `_meta` key (stripping any
+server-supplied copy). `pkg/mcp/mcptest.NewFilesServer` is a fake files
+server for tests.
+
 ## Limitations
 
 - **Login is user-initiated, never automatic.** fir performs the full OAuth discovery and

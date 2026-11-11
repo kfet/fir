@@ -188,6 +188,17 @@ type Manager struct {
 	// implementation for UI-enabled sessions.
 	ElicitationFn func(context.Context, *sdk.ElicitRequest) (*sdk.ElicitResult, error)
 
+	// fileApproval decides whether local files may be sent to a server
+	// (FileApprovalFn). Unset means no prompt: files are refused unless the
+	// server's config sets files.autoApprove.
+	fileApproval atomic.Pointer[FileApprovalFn]
+
+	// filesDir is the private directory downloads are saved in, created on
+	// first use.
+	filesDirOnce sync.Once
+	filesDir     string
+	filesDirErr  error
+
 	// progressReg routes progress notifications to active tool-call callbacks.
 	progressReg progressRegistry
 
@@ -808,12 +819,15 @@ func (m *Manager) clientOptions(serverName string) *sdk.ClientOptions {
 					return
 				}
 				var updated []agent.AgentTool
+				var cfg ServerConfig
+				m.withEntry(serverName, func(e *serverEntry) { cfg = e.config })
+				fx := m.filesEnvFor(serverName, cfg, session)
 				for tool, err := range session.Tools(context.Background(), nil) {
 					if err != nil {
 						firlog.Warn("MCP re-list tools error", "server", serverName, "err", err)
 						return
 					}
-					updated = append(updated, m.adaptTool(serverName, tool))
+					updated = append(updated, m.adaptTool(serverName, tool, fx))
 				}
 				var caps *sdk.ServerCapabilities
 				m.withEntry(serverName, func(e *serverEntry) {
@@ -1244,6 +1258,10 @@ func (m *Manager) dialOnce(ctx context.Context, name string, cfg ServerConfig) (
 	})
 
 	opts := m.clientOptions(name)
+	if filesEnabled(cfg) {
+		transport = wrapTransportForFiles(transport)
+		opts.Capabilities = filesClientCapabilities()
+	}
 	client := sdk.NewClient(&sdk.Implementation{Name: "fir", Version: "dev"}, opts)
 
 	rootURIs := cfg.Roots
@@ -1273,12 +1291,13 @@ func (m *Manager) dialOnce(ctx context.Context, name string, cfg ServerConfig) (
 	}
 
 	var tools []agent.AgentTool
+	fx := m.filesEnvFor(name, cfg, session)
 	for tool, terr := range session.Tools(ctx, nil) {
 		if terr != nil {
 			_ = session.Close()
 			return nil, nil, nil, fmt.Errorf("list tools: %w", terr)
 		}
-		tools = append(tools, m.adaptTool(name, tool))
+		tools = append(tools, m.adaptTool(name, tool, fx))
 	}
 
 	initResult := session.InitializeResult()
@@ -1537,10 +1556,14 @@ func (m *Manager) CallTool(ctx context.Context, serverName, toolName string, arg
 	if err != nil {
 		return nil, err
 	}
-	return session.CallTool(ctx, &sdk.CallToolParams{
+	res, err := session.CallTool(ctx, &sdk.CallToolParams{
 		Name:      toolName,
 		Arguments: args,
 	})
+	if err != nil {
+		return nil, err
+	}
+	return scrubFilesResult(res)
 }
 
 // serverSession returns a SessionGetter that resolves to the entry's

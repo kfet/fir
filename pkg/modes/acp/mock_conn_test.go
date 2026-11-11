@@ -21,6 +21,10 @@ type mockConn struct {
 	notices []mockNotice
 	// notifyErr, if non-nil, is returned by NotifyExtension.
 	notifyErr error
+	// permissions records session/request_permission calls; the response
+	// selects permissionOption, or is cancelled when it is empty.
+	permissions      []acpsdk.RequestPermissionRequest
+	permissionOption acpsdk.PermissionOptionId
 }
 
 // mockNotice is one recorded extension notification.
@@ -95,6 +99,18 @@ func (m *mockConn) WaitForTerminalExit(_ context.Context, _ acpsdk.WaitForTermin
 
 func (m *mockConn) ReadTextFile(_ context.Context, params acpsdk.ReadTextFileRequest) (acpsdk.ReadTextFileResponse, error) {
 	return acpsdk.ReadTextFileResponse{Content: ""}, nil
+}
+
+func (m *mockConn) RequestPermission(_ context.Context, params acpsdk.RequestPermissionRequest) (acpsdk.RequestPermissionResponse, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.permissions = append(m.permissions, params)
+	if m.permissionOption == "" {
+		return acpsdk.RequestPermissionResponse{Outcome: acpsdk.RequestPermissionOutcome{Cancelled: &acpsdk.RequestPermissionOutcomeCancelled{}}}, nil
+	}
+	return acpsdk.RequestPermissionResponse{Outcome: acpsdk.RequestPermissionOutcome{
+		Selected: &acpsdk.RequestPermissionOutcomeSelected{OptionId: m.permissionOption},
+	}}, nil
 }
 
 func (m *mockConn) WriteTextFile(_ context.Context, params acpsdk.WriteTextFileRequest) (acpsdk.WriteTextFileResponse, error) {

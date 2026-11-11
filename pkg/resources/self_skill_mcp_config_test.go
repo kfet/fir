@@ -69,6 +69,7 @@ var nonConfigKeys = map[string]bool{
 	"scopes_supported": true, // RFC 8414 authorization-server metadata field
 	"agent_introspect": true, // tool name (exposes mcp.servers health)
 	"mcp_state":        true, // extension event name (MCP health changes)
+	"upload_required":  true, // MCP files extension result type
 }
 
 // jsonKeyLike matches backtick-quoted lower_snake_case identifiers. The
@@ -93,7 +94,7 @@ func TestSelfSkillHasNoStaleMCPConfigKeys(t *testing.T) {
 	section := doc[start : start+end]
 
 	tags := map[string]bool{}
-	for _, typ := range []reflect.Type{reflect.TypeOf(mcp.ServerConfig{}), reflect.TypeOf(mcp.AuthConfig{})} {
+	for _, typ := range []reflect.Type{reflect.TypeOf(mcp.ServerConfig{}), reflect.TypeOf(mcp.AuthConfig{}), reflect.TypeOf(mcp.FilesConfig{})} {
 		for i := 0; i < typ.NumField(); i++ {
 			name, _, _ := strings.Cut(typ.Field(i).Tag.Get("json"), ",")
 			if name != "" {

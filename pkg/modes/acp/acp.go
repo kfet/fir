@@ -368,6 +368,7 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd, transcrip
 	// line can land mid-sentence inside the model's reply. MCP status is
 	// state, not an event — clients pull it via the advertised /mcp command.
 	// The goroutine exits when the Manager is closed (session teardown).
+	entry.session.SetMCPFileApproval(mcpFileApproval(pa.conn, sessionID))
 	if entry.mcpManager != nil {
 		mgr := entry.mcpManager
 		go drainMCPEvents(sessionID, mgr.Done(), mgr.ServerEvents())

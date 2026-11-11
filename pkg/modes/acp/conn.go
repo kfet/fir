@@ -27,6 +27,7 @@ type acpConn interface {
 	WaitForTerminalExit(ctx context.Context, params acpsdk.WaitForTerminalExitRequest) (acpsdk.WaitForTerminalExitResponse, error)
 	ReadTextFile(ctx context.Context, params acpsdk.ReadTextFileRequest) (acpsdk.ReadTextFileResponse, error)
 	WriteTextFile(ctx context.Context, params acpsdk.WriteTextFileRequest) (acpsdk.WriteTextFileResponse, error)
+	RequestPermission(ctx context.Context, params acpsdk.RequestPermissionRequest) (acpsdk.RequestPermissionResponse, error)
 	// NotifyExtension sends an ACP extension-method notification ("_"-prefixed).
 	NotifyExtension(ctx context.Context, method string, params any) error
 }
@@ -375,6 +376,10 @@ func (r *rawConn) WaitForTerminalExit(ctx context.Context, params acpsdk.WaitFor
 
 func (r *rawConn) ReadTextFile(ctx context.Context, params acpsdk.ReadTextFileRequest) (acpsdk.ReadTextFileResponse, error) {
 	return acpsdk.SendRequest[acpsdk.ReadTextFileResponse](r.conn, ctx, acpsdk.ClientMethodFsReadTextFile, params)
+}
+
+func (r *rawConn) RequestPermission(ctx context.Context, params acpsdk.RequestPermissionRequest) (acpsdk.RequestPermissionResponse, error) {
+	return acpsdk.SendRequest[acpsdk.RequestPermissionResponse](r.conn, ctx, acpsdk.ClientMethodSessionRequestPermission, params)
 }
 
 func (r *rawConn) WriteTextFile(ctx context.Context, params acpsdk.WriteTextFileRequest) (acpsdk.WriteTextFileResponse, error) {
