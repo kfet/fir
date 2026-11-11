@@ -200,7 +200,8 @@ Every field is an escape hatch. Omit the whole object unless you need one.
 | `client_secret` | string | Accompanies `client_id` for confidential clients. Native apps normally have none. Supports `${VAR}` expansion |
 | `scopes` | array of strings | Overrides the requested scope. Otherwise fir uses the challenge's `scope`, then the protected resource's `scopes_supported`, and otherwise omits the `scope` parameter entirely |
 | `authorization_servers` | array of strings | Forces the OAuth issuer(s), for servers whose `/.well-known/oauth-protected-resource` document is absent, wrong or unreachable. **Replaces** the advertised `authorization_servers` list — it is not merged with it. Tried in order; the first issuer publishing usable RFC 8414 / OpenID Connect metadata wins. Each entry must be an `https` URL (plain `http` only for loopback) with no query or fragment. Only valid where the OAuth chain actually runs — the default mode or `"oauth"`; it is rejected with `"bearer"` and `"none"` |
-| `redirect_uri` | string | Pins the OAuth loopback redirect URI, for authorization servers that require an exactly pre-registered value and ignore the loopback port variance of RFC 8252 §7.3 (Okta). Used **verbatim**, so it must match the registered value character for character — `localhost` and `127.0.0.1` are not interchangeable. Must be `http` on a loopback host, with an explicit non-zero port and a path, and no query or fragment. fir binds that host and port, so the port must be free at login time. Only valid where the OAuth chain runs; rejected with `"bearer"` and `"none"` |
+| `redirect_uri` | string | Pins the OAuth loopback redirect URI, for authorization servers that require an exactly pre-registered value and ignore the loopback port variance of RFC 8252 §7.3 (Okta). Used **verbatim**, so it must match the registered value character for character — `localhost` and `127.0.0.1` are not interchangeable. Either `http` on a loopback host with an explicit non-zero port (fir binds that host and port, so it must be free at login time), or a public `https` URI together with `callback_listen`. Needs a path and no query or fragment. Only valid where the OAuth chain runs; rejected with `"bearer"` and `"none"` |
+| `callback_listen` | string | Loopback `host:port` (e.g. `127.0.0.1:47123`) the callback server binds when `redirect_uri` is a public `https` URI served by a reverse proxy. The proxy must forward the request with its path unchanged — the callback route is `redirect_uri`'s path. Required with an `https` `redirect_uri`, rejected otherwise |
 | `allow_private_network` | bool | Lets the OAuth discovery and token requests reach an authorization server on a private network. By default the MCP SDK installs a hardened transport that refuses to connect to private, loopback, link-local or unique-local addresses. This relaxes only *where* those legs may connect — plain `http` to a non-loopback host is still refused, so tokens are never sent in cleartext (use `"mode": "none"` if the server needs no credentials). A private IP **literal** such as `https://192.168.1.10/` stays blocked by the SDK at the URL level, with no opt-out; the case this enables is a private DNS name with a real certificate, e.g. `https://mcp.corp.internal/`. Only meaningful where the OAuth chain runs — the default mode or `"oauth"`; it is rejected with `"bearer"` and `"none"` |
 
 When the metadata is wrong about the issuer it is often wrong about `scopes_supported` too, so
@@ -212,6 +213,21 @@ but a failure is no longer fatal.
 redirect URI issues you a client rather than allowing dynamic registration. Without it fir binds
 an ephemeral loopback port, which such a server rejects with `invalid_redirect_uri` — register
 `http://127.0.0.1:8765/oauth/callback` (or whatever port you pick) in the app and repeat it here.
+
+### Behind a reverse proxy (phone-browser sign-in)
+
+When fir runs in a box whose loopback the browser cannot reach, a gateway can serve a public
+URL and forward it into the box. Pin it explicitly:
+
+```json
+"auth": {"redirect_uri": "https://box.example/.agentbox/oauth-cb/fir/callback",
+         "callback_listen": "127.0.0.1:47123"}
+```
+
+or set `FIR_MCP_OAUTH_REDIRECT_BASE` (e.g. `https://box.example/.agentbox/oauth-cb`). With no
+`redirect_uri` configured, fir then picks a free loopback port `P`, listens on `127.0.0.1:P` and
+uses `<base>/P/callback` as the redirect URI; the gateway routes `<base>/P/…` to
+`127.0.0.1:P`, path unchanged. The variable applies only with dynamic client registration — a configured `redirect_uri` or `client_id` keeps it out (a pre-registered client pins an https `redirect_uri` with `callback_listen` instead).
 
 Changing `authorization_servers` invalidates any stored token for that server: a credential
 minted by an issuer no longer on the list is never reused, even across a restart. The stored row

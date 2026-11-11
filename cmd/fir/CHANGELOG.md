@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- MCP OAuth: public `https` `auth.redirect_uri` with `auth.callback_listen` (loopback bind), and `FIR_MCP_OAUTH_REDIRECT_BASE` deriving `<base>/<port>/callback` so a gateway can proxy phone-browser sign-in.
+
 ## [1.49.2] - 2026-11-09
 
 ### Changed

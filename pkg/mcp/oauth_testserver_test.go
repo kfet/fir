@@ -133,10 +133,11 @@ func (as *fakeAuthServer) handleRegister(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_client_metadata"})
 		return
 	}
-	if len(body.RedirectURIs) != 1 || !strings.HasPrefix(body.RedirectURIs[0], "http://127.0.0.1:") {
+	if len(body.RedirectURIs) != 1 || !(strings.HasPrefix(body.RedirectURIs[0], "http://127.0.0.1:") ||
+		strings.HasPrefix(body.RedirectURIs[0], "https://")) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{
 			"error":             "invalid_redirect_uri",
-			"error_description": fmt.Sprintf("want one loopback redirect URI, got %v", body.RedirectURIs),
+			"error_description": fmt.Sprintf("want one loopback or https redirect URI, got %v", body.RedirectURIs),
 		})
 		return
 	}

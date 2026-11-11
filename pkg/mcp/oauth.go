@@ -8,9 +8,12 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/kfet/fir/pkg/auth"
@@ -287,6 +290,7 @@ func (sa *serverAuth) matches(cfg ServerConfig) bool {
 		want.ClientID == sa.cfg.ClientID &&
 		want.ClientSecret == sa.cfg.ClientSecret &&
 		want.RedirectURI == sa.cfg.RedirectURI &&
+		want.CallbackListen == sa.cfg.CallbackListen &&
 		slices.Equal(want.Scopes, sa.cfg.Scopes) &&
 		slices.Equal(want.AuthorizationServers, sa.cfg.AuthorizationServers)
 }
@@ -689,18 +693,97 @@ func (sa *serverAuth) Login(ctx context.Context, ui pinoauth.LoginCallbacks) err
 // callbackTarget resolves where the loopback callback server listens and what
 // redirect URI the authorization server is told about. Without a pinned
 // auth.redirect_uri it is an ephemeral 127.0.0.1 port and the caller fills the
-// URI in from the resolved address; with one, the configured URI is used
-// verbatim — an authorization server that does not honour RFC 8252 §7.3 port
-// variance compares it literally — and the listener binds its host and port.
+// URI in from the resolved address — unless FIR_MCP_OAUTH_REDIRECT_BASE names
+// a public proxy base, in which case fir picks a free loopback port P and
+// uses "<base>/P/callback". With a pinned URI, it is used verbatim — an
+// authorization server that does not honour RFC 8252 §7.3 port variance
+// compares it literally — and the listener binds its host and port, or
+// auth.callback_listen for an https URI served by a proxy.
 func (sa *serverAuth) callbackTarget() (redirectURI, route, listenAddr string, err error) {
 	if sa.cfg.RedirectURI == "" {
-		return "", callbackRoute, "127.0.0.1:0", nil
+		// A pre-registered client relies on RFC 8252 loopback port variance;
+		// a derived public URI would not match its registration.
+		base := os.Getenv(envRedirectBase)
+		if base == "" || sa.cfg.ClientID != "" {
+			return "", callbackRoute, "127.0.0.1:0", nil
+		}
+		return proxiedCallbackTarget(base)
 	}
-	u, err := validateRedirectURI(sa.cfg.RedirectURI)
+	u, listen, err := validateRedirectURI(sa.cfg.RedirectURI, sa.cfg.CallbackListen)
 	if err != nil {
-		return "", "", "", fmt.Errorf("auth.redirect_uri: %w", err)
+		return "", "", "", err
 	}
-	return sa.cfg.RedirectURI, u.Path, u.Host, nil
+	return sa.cfg.RedirectURI, u.Path, listen, nil
+}
+
+// reserveLoopbackPort returns a 127.0.0.1 port that is free right now. A
+// variable so tests can force the rebind race.
+var reserveLoopbackPort = func() (int, error) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return 0, err
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	return port, ln.Close()
+}
+
+// envRedirectBase names the public base URL a reverse proxy forwards to
+// loopback callback servers; see proxiedCallbackTarget.
+const envRedirectBase = "FIR_MCP_OAUTH_REDIRECT_BASE"
+
+// proxiedCallbackTarget derives a callback target from a proxy base URL such
+// as "https://box.example/.agentbox/oauth-cb": it reserves a free loopback
+// port P and returns "<base>/P/callback", whose path the listener on
+// 127.0.0.1:P serves. The proxy forwards that path unchanged. The port is
+// released before the callback server rebinds it — the same unavoidable race
+// a pinned port has.
+func proxiedCallbackTarget(base string) (redirectURI, route, listenAddr string, err error) {
+	if !strings.HasPrefix(base, "https://") {
+		return "", "", "", fmt.Errorf("%s=%q must be an https URL", envRedirectBase, base)
+	}
+	port, err := reserveLoopbackPort()
+	if err != nil {
+		return "", "", "", fmt.Errorf("%s: reserve a loopback port: %w", envRedirectBase, err)
+	}
+	listen := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
+	uri := fmt.Sprintf("%s/%d/callback", strings.TrimRight(base, "/"), port)
+	u, _, err := validateRedirectURI(uri, listen)
+	if err != nil {
+		return "", "", "", fmt.Errorf("%s=%q: %w", envRedirectBase, base, err)
+	}
+	return uri, u.Path, listen, nil
+}
+
+// startCallbackServer binds the loopback callback server and returns the
+// redirect URI it answers. A port fir picked for FIR_MCP_OAUTH_REDIRECT_BASE
+// is released before the rebind, so a lost race retries with a fresh port; a
+// pinned port has no alternative and fails with the knob to turn.
+func (sa *serverAuth) startCallbackServer(ctx context.Context, state string) (*http.Server, <-chan *pinoauth.CallbackResult, string, error) {
+	for attempt := 1; ; attempt++ {
+		redirectURI, route, listenAddr, err := sa.callbackTarget()
+		if err != nil {
+			return nil, nil, "", err
+		}
+		srv, resultCh, addr, err := pinoauth.StartCallbackServer(ctx, route, listenAddr, state)
+		if err == nil {
+			if redirectURI == "" {
+				redirectURI = "http://" + addr + route
+			}
+			return srv, resultCh, redirectURI, nil
+		}
+		if redirectURI == "" {
+			return nil, nil, "", fmt.Errorf("start loopback callback server: %w", err)
+		}
+		source := "auth.redirect_uri"
+		if sa.cfg.RedirectURI == "" {
+			if attempt < 3 && errors.Is(err, syscall.EADDRINUSE) {
+				continue
+			}
+			source = envRedirectBase
+		}
+		return nil, nil, "", fmt.Errorf("start loopback callback server on %s (for %s %q): %w; "+
+			"free that port or register a different redirect URI", listenAddr, source, redirectURI, err)
+	}
 }
 
 func (sa *serverAuth) loginLocked(ctx context.Context, ui pinoauth.LoginCallbacks) error {
@@ -709,22 +792,11 @@ func (sa *serverAuth) loginLocked(ctx context.Context, ui pinoauth.LoginCallback
 	state := pinoauth.GenerateState()
 	cbCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	redirectURI, route, listenAddr, err := sa.callbackTarget()
+	srv, resultCh, redirectURI, err := sa.startCallbackServer(cbCtx, state)
 	if err != nil {
 		return err
 	}
-	srv, resultCh, addr, err := pinoauth.StartCallbackServer(cbCtx, route, listenAddr, state)
-	if err != nil {
-		if redirectURI != "" {
-			return fmt.Errorf("start loopback callback server on %s (from auth.redirect_uri %q): %w; "+
-				"free that port or register a different redirect URI", listenAddr, redirectURI, err)
-		}
-		return fmt.Errorf("start loopback callback server: %w", err)
-	}
 	defer srv.Close() //nolint:errcheck // best-effort; cbCtx cancel also closes it
-	if redirectURI == "" {
-		redirectURI = "http://" + addr + route
-	}
 
 	progress(ui, fmt.Sprintf("Discovering OAuth configuration for %s…", sa.resource))
 	prm, err := discoverResourceMetadata(ctx, sa.hc, sa.resource, sa.challenge)

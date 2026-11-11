@@ -23,6 +23,9 @@ func TestMain(m *testing.M) {
 		runTestServer()
 		os.Exit(0)
 	}
+	// The OAuth tests assume the ephemeral loopback default; a box that sets
+	// the proxy base globally must not reroute them. Tests opt in with Setenv.
+	_ = os.Unsetenv(envRedirectBase)
 	os.Exit(m.Run())
 }
 

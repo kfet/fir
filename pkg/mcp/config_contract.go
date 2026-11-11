@@ -116,7 +116,19 @@ type AuthConfig struct {
 	// versus "127.0.0.1" and the exact path. fir binds the host and port from
 	// this URI, so the port must be free when you log in. Deployments that
 	// need this normally also issue a pre-registered ClientID; set both.
+	//
+	// A public https URI is also accepted when CallbackListen is set: a
+	// reverse proxy (e.g. the agentbox gateway) serves that URI and forwards
+	// the request, path unchanged, to the loopback listener. When RedirectURI
+	// is empty and FIR_MCP_OAUTH_REDIRECT_BASE is set, fir derives
+	// "<base>/<port>/callback" for a free loopback port it listens on —
+	// only with dynamic registration, i.e. when ClientID is empty too.
 	RedirectURI string `json:"redirect_uri,omitempty"`
+	// CallbackListen is the loopback host:port the callback server binds when
+	// RedirectURI is a public https URI (e.g. "127.0.0.1:47123"). The callback
+	// route is RedirectURI's path, so the proxy must forward it unchanged.
+	// Required with an https RedirectURI and rejected otherwise.
+	CallbackListen string `json:"callback_listen,omitempty"`
 	// AllowPrivateNetwork permits the OAuth discovery and token requests to
 	// reach a private or otherwise non-public address. By default the MCP SDK
 	// installs a hardened transport that refuses to connect to private,

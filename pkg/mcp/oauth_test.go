@@ -352,7 +352,8 @@ func TestAuthConfigValidateRedirectURI(t *testing.T) {
 		Mode: AuthModeOAuth, ClientID: "c", RedirectURI: "http://127.0.0.1:8765/cb",
 	}).Validate())
 
-	require.ErrorContains(t, ok("https://127.0.0.1:8765/cb"), "must use http")
+	require.ErrorContains(t, ok("https://127.0.0.1:8765/cb"), "must name a public host")
+	require.ErrorContains(t, ok("ftp://127.0.0.1:8765/cb"), "must use http")
 	require.ErrorContains(t, ok("http://example.com:8765/cb"), "loopback host")
 	require.ErrorContains(t, ok("http://10.0.0.1:8765/cb"), "loopback host")
 	require.ErrorContains(t, ok("http://127.0.0.1/cb"), "explicit port in 1-65535")
@@ -390,6 +391,215 @@ func TestAuthConfigValidateRedirectURI(t *testing.T) {
 	_, err = newServerAuth("srv", bad, credentialStore{})
 	require.ErrorContains(t, err, `server "srv"`)
 	require.ErrorContains(t, err, "loopback host")
+}
+
+func TestAuthConfigValidateCallbackListen(t *testing.T) {
+	v := func(uri, listen string) error {
+		return (&AuthConfig{RedirectURI: uri, CallbackListen: listen}).Validate()
+	}
+	const pub = "https://box.example/.agentbox/oauth-cb/47123/callback"
+	require.NoError(t, v(pub, "127.0.0.1:47123"))
+	require.NoError(t, v(pub, "localhost:1"))
+	require.NoError(t, v(pub, "[::1]:47123"))
+
+	require.ErrorContains(t, v(pub, ""), "auth.callback_listen must name")
+	require.ErrorContains(t, v("https://box.example", "127.0.0.1:1"), "must include a path")
+	require.ErrorContains(t, v(pub+"?x=1", "127.0.0.1:1"), "query or fragment")
+	require.ErrorContains(t, v(pub, "0.0.0.0:47123"), "loopback host")
+	require.ErrorContains(t, v(pub, "box.example:47123"), "loopback host")
+	require.ErrorContains(t, v(pub, "127.0.0.1"), "host:port")
+	require.ErrorContains(t, v(pub, "127.0.0.1:0"), "explicit port")
+	require.ErrorContains(t, v("http://127.0.0.1:8765/cb", "127.0.0.1:1"), "only used with an https")
+	require.ErrorContains(t, v("", "127.0.0.1:1"), "requires an https auth.redirect_uri")
+	require.ErrorContains(t, (&AuthConfig{Mode: AuthModeNone, RedirectURI: pub, CallbackListen: "127.0.0.1:1"}).Validate(),
+		"auth.redirect_uri is not used in mode")
+
+	// Changing only the listen address invalidates cached credentials.
+	cfg := ServerConfig{Transport: "streamable", URL: "https://mcp.example.com/mcp",
+		Auth: &AuthConfig{RedirectURI: pub, CallbackListen: "127.0.0.1:47123"}}
+	sa, err := newServerAuth("srv", cfg, credentialStore{})
+	require.NoError(t, err)
+	require.True(t, sa.matches(cfg))
+	changed := cfg
+	changed.Auth = &AuthConfig{RedirectURI: pub, CallbackListen: "127.0.0.1:47124"}
+	require.False(t, sa.matches(changed))
+
+	redirect, route, addr, err := sa.callbackTarget()
+	require.NoError(t, err)
+	require.Equal(t, pub, redirect)
+	require.Equal(t, "/.agentbox/oauth-cb/47123/callback", route)
+	require.Equal(t, "127.0.0.1:47123", addr)
+}
+
+func TestCallbackTargetRedirectBaseEnv(t *testing.T) {
+	t.Setenv(envRedirectBase, "https://box.example/.agentbox/oauth-cb/")
+	redirect, route, addr, err := (&serverAuth{}).callbackTarget()
+	require.NoError(t, err)
+	host, port, err := net.SplitHostPort(addr)
+	require.NoError(t, err)
+	require.Equal(t, "127.0.0.1", host)
+	require.Equal(t, "https://box.example/.agentbox/oauth-cb/"+port+"/callback", redirect)
+	require.Equal(t, "/.agentbox/oauth-cb/"+port+"/callback", route)
+
+	// A pre-registered client keeps RFC 8252 loopback port variance.
+	redirect, route, addr, err = (&serverAuth{cfg: AuthConfig{ClientID: "c"}}).callbackTarget()
+	require.NoError(t, err)
+	require.Empty(t, redirect)
+	require.Equal(t, callbackRoute, route)
+	require.Equal(t, "127.0.0.1:0", addr)
+
+	// A pinned redirect_uri wins over the environment default.
+	redirect, _, addr, err = (&serverAuth{cfg: AuthConfig{RedirectURI: "http://127.0.0.1:8765/cb"}}).callbackTarget()
+	require.NoError(t, err)
+	require.Equal(t, "http://127.0.0.1:8765/cb", redirect)
+	require.Equal(t, "127.0.0.1:8765", addr)
+
+	for base, want := range map[string]string{
+		"http://box.example/cb":      "must be an https URL",
+		"https://127.0.0.1/cb":       "public host",
+		"https://box.example/cb?x=1": "query or fragment",
+	} {
+		t.Setenv(envRedirectBase, base)
+		_, _, _, err = (&serverAuth{}).callbackTarget()
+		require.ErrorContains(t, err, envRedirectBase)
+		require.ErrorContains(t, err, want, base)
+	}
+}
+
+// proxyBrowserCallbacks plays a browser behind a reverse proxy: it walks the
+// authorization endpoint, takes the redirect to the public callback URI and
+// delivers it, path and query unchanged, to the loopback listener — what the
+// agentbox gateway does. publicPrefix must prefix every redirect; listen
+// returns the loopback address to forward to.
+func proxyBrowserCallbacks(t *testing.T, publicPrefix string, listen func(path string) string) pinoauth.LoginCallbacks {
+	t.Helper()
+	noFollow := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	return pinoauth.LoginCallbacks{
+		OnAuth: func(info pinoauth.AuthInfo) {
+			resp, err := noFollow.Get(info.URL) //nolint:noctx // loopback test server
+			if err != nil {
+				t.Errorf("authorize: %v", err)
+				return
+			}
+			_ = resp.Body.Close()
+			loc := resp.Header.Get("Location")
+			if !strings.HasPrefix(loc, publicPrefix) {
+				t.Errorf("redirect %q is not under the public base %q", loc, publicPrefix)
+				return
+			}
+			u, err := url.Parse(loc)
+			if err != nil {
+				t.Errorf("parse redirect: %v", err)
+				return
+			}
+			u.Scheme, u.Host = "http", listen(u.Path)
+			cb, err := http.Get(u.String()) //nolint:gosec,noctx // loopback callback server
+			if err != nil {
+				t.Errorf("proxy forward: %v", err)
+				return
+			}
+			defer cb.Body.Close() //nolint:errcheck
+			if cb.StatusCode != http.StatusOK {
+				t.Errorf("callback ended with HTTP %d", cb.StatusCode)
+			}
+		},
+	}
+}
+
+func TestMCPOAuth_PublicRedirectURIWithCallbackListen(t *testing.T) {
+	// A strict server with a pre-registered public https redirect URI; fir
+	// listens on loopback and a proxy forwards the public path to it.
+	for attempt := 0; ; attempt++ {
+		port := freeLoopbackPort(t)
+		listen := fmt.Sprintf("127.0.0.1:%d", port)
+		redirectURI := "https://box.example/.agentbox/oauth-cb/fir/callback"
+		as := newFakeAuthServer(t, asOptions{
+			noDCR: true, preRegistered: "okta-client", preRegisteredRedirect: redirectURI,
+		})
+		srv := newFakeMCPServer(t, as, mcpOptions{})
+		mgr, _ := newTestManager(t, srv.config(&AuthConfig{
+			ClientID: "okta-client", RedirectURI: redirectURI, CallbackListen: listen,
+		}))
+		err := loginAndConnect(t, mgr, proxyBrowserCallbacks(t, redirectURI, func(string) string { return listen }))
+		if err != nil && attempt < 5 && errors.Is(err, syscall.EADDRINUSE) {
+			continue
+		}
+		require.NoError(t, err)
+		requireToolsWork(t, mgr)
+		require.Equal(t, redirectURI, as.lastRedirectURI())
+		return
+	}
+}
+
+func TestMCPOAuth_RedirectBaseEnvWithDCR(t *testing.T) {
+	// No redirect_uri configured: the environment base drives the URI, and
+	// dynamic client registration registers the derived public value.
+	const base = "https://box.example/.agentbox/oauth-cb"
+	t.Setenv(envRedirectBase, base)
+	as := newFakeAuthServer(t, asOptions{})
+	srv := newFakeMCPServer(t, as, mcpOptions{})
+	mgr, _ := newTestManager(t, srv.config(nil))
+	// The gateway routes /.agentbox/oauth-cb/<P>/callback to 127.0.0.1:<P>.
+	listen := func(path string) string {
+		parts := strings.Split(strings.TrimPrefix(path, "/.agentbox/oauth-cb/"), "/")
+		return "127.0.0.1:" + parts[0]
+	}
+	require.NoError(t, loginAndConnect(t, mgr, proxyBrowserCallbacks(t, base+"/", listen)))
+	requireToolsWork(t, mgr)
+	registrations, _, issued := as.counters()
+	require.Equal(t, 1, registrations)
+	require.Equal(t, 1, issued)
+	require.Regexp(t, `^https://box\.example/\.agentbox/oauth-cb/\d+/callback$`, as.lastRedirectURI())
+}
+
+// squatPorts holds n loopback ports open for the test and returns them.
+func squatPorts(t *testing.T, n int) []int {
+	t.Helper()
+	var ports []int
+	for range n {
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = ln.Close() })
+		ports = append(ports, ln.Addr().(*net.TCPAddr).Port)
+	}
+	return ports
+}
+
+func TestStartCallbackServerRedirectBaseRetriesTakenPort(t *testing.T) {
+	t.Setenv(envRedirectBase, "https://box.example/cb")
+	taken := squatPorts(t, 1)
+	calls := 0
+	orig := reserveLoopbackPort
+	t.Cleanup(func() { reserveLoopbackPort = orig })
+	reserveLoopbackPort = func() (int, error) {
+		calls++
+		if calls == 1 {
+			return taken[0], nil
+		}
+		return orig()
+	}
+	srv, _, redirect, err := (&serverAuth{}).startCallbackServer(context.Background(), "s")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = srv.Close() })
+	require.Equal(t, 2, calls)
+	require.NotContains(t, redirect, fmt.Sprintf("/%d/", taken[0]))
+}
+
+func TestStartCallbackServerRedirectBaseGivesUp(t *testing.T) {
+	t.Setenv(envRedirectBase, "https://box.example/cb")
+	taken := squatPorts(t, 1)
+	orig := reserveLoopbackPort
+	t.Cleanup(func() { reserveLoopbackPort = orig })
+	calls := 0
+	reserveLoopbackPort = func() (int, error) { calls++; return taken[0], nil }
+	_, _, _, err := (&serverAuth{}).startCallbackServer(context.Background(), "s")
+	require.ErrorIs(t, err, syscall.EADDRINUSE)
+	require.ErrorContains(t, err, envRedirectBase)
+	require.Equal(t, 3, calls)
+
+	reserveLoopbackPort = func() (int, error) { return 0, errors.New("no ports") }
+	_, _, _, err = (&serverAuth{}).startCallbackServer(context.Background(), "s")
+	require.ErrorContains(t, err, "reserve a loopback port")
 }
 
 // --- Refresh ----------------------------------------------------------------

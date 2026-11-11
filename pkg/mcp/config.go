@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -85,9 +86,11 @@ func (a *AuthConfig) Validate() error {
 		if mode == AuthModeBearer || mode == AuthModeNone {
 			return fmt.Errorf("auth.redirect_uri is not used in mode %q; remove it or use mode %q", mode, AuthModeOAuth)
 		}
-		if _, err := validateRedirectURI(a.RedirectURI); err != nil {
-			return fmt.Errorf("auth.redirect_uri: %w", err)
+		if _, _, err := validateRedirectURI(a.RedirectURI, a.CallbackListen); err != nil {
+			return err
 		}
+	} else if a.CallbackListen != "" {
+		return fmt.Errorf("auth.callback_listen requires an https auth.redirect_uri for the proxy to serve")
 	}
 	if a.AllowPrivateNetwork && (mode == AuthModeBearer || mode == AuthModeNone) {
 		// The flag only widens where the OAuth discovery and token legs may
@@ -99,39 +102,89 @@ func (a *AuthConfig) Validate() error {
 	return nil
 }
 
-// validateRedirectURI checks a pinned loopback redirect URI, returning the
-// parsed form so callers need not parse it twice. RFC 8252 §7.3 confines a
-// native-app redirect to plain http on a loopback interface; the callback
-// server fir starts is a plain HTTP listener, so https could never complete.
-// The port must be explicit and non-zero — pinning a URI whose port fir would
-// choose at random defeats the purpose — and the path must be non-empty
-// because it is registered as the callback route. Query and fragment
-// components are rejected: the authorization server compares the URI
-// literally, and the callback route cannot carry them.
-func validateRedirectURI(raw string) (*url.URL, error) {
+// validateRedirectURI checks a pinned redirect URI and the optional
+// callback_listen address, returning the parsed URI and the address the
+// callback server binds. Two shapes are accepted:
+//
+//   - http on a loopback host (RFC 8252 §7.3), with no callback_listen: fir
+//     binds the URI's own host and port. The port must be explicit and
+//     non-zero — pinning a URI whose port fir would choose at random defeats
+//     the purpose.
+//   - https on a public host, with callback_listen naming a loopback
+//     host:port: a reverse proxy serves the public URI and forwards the
+//     request, path unchanged, to that listener.
+//
+// The path must be non-empty because it is registered as the callback route.
+// Query and fragment components are rejected: the authorization server
+// compares the URI literally, and the callback route cannot carry them.
+// Errors name the offending auth.* field.
+func validateRedirectURI(raw, listen string) (*url.URL, string, error) {
 	u, err := url.Parse(raw)
 	if err != nil {
-		return nil, fmt.Errorf("parse %q: %w", raw, err)
-	}
-	if u.Scheme != "http" {
-		return nil, fmt.Errorf("%q must use http (the loopback callback server is plain HTTP; RFC 8252 §7.3)", raw)
-	}
-	if !isLoopbackHost(u.Hostname()) {
-		return nil, fmt.Errorf("%q must point at a loopback host (127.0.0.1, ::1 or localhost)", raw)
-	}
-	port := u.Port()
-	// url.Parse already guarantees the port is all digits, and Atoi("") is 0,
-	// so this one check covers a missing, zero and out-of-range port alike.
-	if n, _ := strconv.Atoi(port); n < 1 || n > 65535 {
-		return nil, fmt.Errorf("%q must specify an explicit port in 1-65535", raw)
+		return nil, "", fmt.Errorf("auth.redirect_uri: parse %q: %w", raw, err)
 	}
 	if u.Path == "" {
-		return nil, fmt.Errorf("%q must include a path (for example %q)", raw, raw+callbackRoute)
+		return nil, "", fmt.Errorf("auth.redirect_uri: %q must include a path (for example %q)", raw, raw+callbackRoute)
 	}
 	if u.RawQuery != "" || u.Fragment != "" {
-		return nil, fmt.Errorf("%q must not carry a query or fragment", raw)
+		return nil, "", fmt.Errorf("auth.redirect_uri: %q must not carry a query or fragment", raw)
 	}
-	return u, nil
+	if u.User != nil {
+		return nil, "", fmt.Errorf("auth.redirect_uri: %q must not carry userinfo", raw)
+	}
+	switch u.Scheme {
+	case "http":
+		if listen != "" {
+			return nil, "", fmt.Errorf("auth.callback_listen is only used with an https auth.redirect_uri; "+
+				"with %q fir binds the URI's own host and port", raw)
+		}
+		if !isLoopbackHost(u.Hostname()) {
+			return nil, "", fmt.Errorf("auth.redirect_uri: %q must point at a loopback host (127.0.0.1, ::1 or localhost); "+
+				"for a public host use https with auth.callback_listen", raw)
+		}
+		if !validPort(u.Port()) {
+			return nil, "", fmt.Errorf("auth.redirect_uri: %q must specify an explicit port in 1-65535", raw)
+		}
+		return u, u.Host, nil
+	case "https":
+		if u.Hostname() == "" || isLoopbackHost(u.Hostname()) {
+			return nil, "", fmt.Errorf("auth.redirect_uri: %q: an https redirect URI must name a public host "+
+				"(the loopback callback server is plain HTTP)", raw)
+		}
+		if listen == "" {
+			return nil, "", fmt.Errorf("auth.redirect_uri: %q is https, so auth.callback_listen must name the "+
+				"loopback host:port the proxy forwards it to (for example \"127.0.0.1:47123\")", raw)
+		}
+		if err := validateCallbackListen(listen); err != nil {
+			return nil, "", err
+		}
+		return u, listen, nil
+	default:
+		return nil, "", fmt.Errorf("auth.redirect_uri: %q must use http on a loopback host (RFC 8252 §7.3) "+
+			"or https together with auth.callback_listen", raw)
+	}
+}
+
+// validateCallbackListen checks a loopback host:port with an explicit port.
+func validateCallbackListen(listen string) error {
+	host, port, err := net.SplitHostPort(listen)
+	if err != nil {
+		return fmt.Errorf("auth.callback_listen: %q must be host:port: %w", listen, err)
+	}
+	if !isLoopbackHost(host) {
+		return fmt.Errorf("auth.callback_listen: %q must bind a loopback host (127.0.0.1, ::1 or localhost)", listen)
+	}
+	if !validPort(port) {
+		return fmt.Errorf("auth.callback_listen: %q must specify an explicit port in 1-65535", listen)
+	}
+	return nil
+}
+
+// validPort reports whether port is a decimal in 1-65535. Atoi("") is 0, so a
+// missing port fails too.
+func validPort(port string) bool {
+	n, err := strconv.Atoi(port)
+	return err == nil && n >= 1 && n <= 65535
 }
 
 // validateIssuerURL checks one forced authorization-server issuer. The URL
