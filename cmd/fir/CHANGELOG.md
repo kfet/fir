@@ -2,10 +2,13 @@
 
 ## [Unreleased]
 
+## [1.53.0] - 2026-11-12
+
 ### Added
 - **ACP `_fir/session/steer`** injects a message into a running `session/prompt` turn without cancelling it (seen at the next tool boundary); returns `-32002` when no turn is running. `mode: "record"` instead logs a side Q&A as a `side_query` custom entry that the LLM never sees. Advertised as `_meta["dev.fir.steer/v1"]` (`docs/acp-steer.md`).
 
 ### Changed
+- **Model catalog:** pricing changed for openrouter: deepseek/deepseek-v4.1-flash-1017, qwen/qwen3.5-9b, z-ai/glm-5.2:batch, z-ai/glm-5.3:batch.
 - **Forked Python extension children use ~47-54% less private memory** (~6.0 MB → ~3.2 MB each, ~2.7 MB when sessions share a template; measured with the 25 builtin extensions on hpbox): the fork template pre-imports common stdlib modules (ssl, asyncio, urllib, …) and caches each extension's compiled code so children share both copy-on-write.
 - **`make -j1 all` (or `make all JOBS=N`) now caps the inner parallel make**; before, `all` always ran its sub-targets with unlimited `-j`.
 
