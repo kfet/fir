@@ -90,6 +90,11 @@ func (s *firSession) touch(t time.Time) {
 	atomic.StoreInt64(&s.lastActiveNs, t.UnixNano())
 }
 
+// running reports whether a turn runs on this session.
+func (s *firSession) running() bool {
+	return s.session != nil && s.session.IsStreaming()
+}
+
 // lastActive returns the last-activity time recorded for this session.
 func (s *firSession) lastActive() time.Time {
 	return time.Unix(0, atomic.LoadInt64(&s.lastActiveNs))
@@ -463,11 +468,12 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd, transcrip
 		close(entry.extReady)
 	}
 
+	// Touch before the entry is visible: a zero lastActive reads as
+	// idle since 1970, and the idle reaper would take a new session.
+	entry.touch(pa.now())
 	pa.mu.Lock()
 	pa.sessions[sessionID] = entry
 	pa.mu.Unlock()
-
-	entry.touch(pa.now())
 
 	firlog.Info("acp createSession: done", "total_ms", time.Since(createStart).Milliseconds(), "sessionID", sessionID)
 	return entry, forked, nil

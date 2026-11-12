@@ -161,6 +161,11 @@ func (pa *firAgent) NewSession(ctx context.Context, params acpsdk.NewSessionRequ
 func (pa *firAgent) Prompt(ctx context.Context, params acpsdk.PromptRequest) (acpsdk.PromptResponse, error) {
 	pa.mu.Lock()
 	entry, ok := pa.sessions[string(params.SessionId)]
+	if ok {
+		// Under pa.mu, so an idle reaper pass cannot take the session
+		// between this lookup and the touch.
+		entry.touch(pa.now())
+	}
 	pa.mu.Unlock()
 	if !ok {
 		// The session isn't in memory — it was likely reaped for idleness (an
@@ -177,8 +182,10 @@ func (pa *firAgent) Prompt(ctx context.Context, params acpsdk.PromptRequest) (ac
 			return acpsdk.PromptResponse{}, newSessionNotFound(string(params.SessionId))
 		}
 		entry = rehydrated
+		entry.touch(pa.now())
 	}
-	entry.touch(pa.now())
+	// The idle clock starts when the turn ends, not when it began.
+	defer func() { entry.touch(pa.now()) }()
 
 	// Wait for async extension setup to complete so hooks and event
 	// forwarding are wired before any tool calls execute.

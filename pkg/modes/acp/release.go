@@ -113,7 +113,9 @@ func (pa *firAgent) reapIdle(now time.Time) []string {
 	pa.mu.Lock()
 	var victims []string
 	for sid, entry := range pa.sessions {
-		if entry.lastActive().Before(cutoff) {
+		// A running turn is activity however long it runs: reaping it
+		// would abort its tool and lose any steer sent to it.
+		if entry.lastActive().Before(cutoff) && !entry.running() {
 			victims = append(victims, sid)
 		}
 	}

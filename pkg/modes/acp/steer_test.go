@@ -346,3 +346,44 @@ func TestSteer_DuringCancelUnwind(t *testing.T) {
 		t.Fatalf("err = %v, want code %d", rerr, NoActiveTurnError)
 	}
 }
+
+// TestReapIdle_SparesRunningTurn: a turn that runs longer than the idle
+// TTL (a long tool, an agent loop with many tool calls) is activity, not
+// idleness. The reaper must not tear the session down under it: that
+// aborted the running tool and made a later _fir/session/steer fail.
+func TestReapIdle_SparesRunningTurn(t *testing.T) {
+	sess, started, release, contexts := newSteerSession(t)
+	base := time.Date(2026, 6, 7, 12, 0, 0, 0, time.UTC)
+	entry := &firSession{termState: newTerminalState(), session: sess}
+	pa := &firAgent{conn: newMockConn(), sessions: map[string]*firSession{"s1": entry},
+		idleTTL: 30 * time.Minute, nowFn: func() time.Time { return base }}
+	handler := rawMethodHandler(pa, newWriteNotifier(io.Discard))
+	done := make(chan error, 1)
+	go func() {
+		_, err := pa.Prompt(context.Background(), acpsdk.PromptRequest{SessionId: "s1", Prompt: textPrompt("run the gate")})
+		done <- err
+	}()
+	<-started
+	entry.touch(base.Add(-time.Hour)) // the turn began long ago
+	if reaped := pa.reapIdle(pa.now()); len(reaped) != 0 {
+		t.Fatalf("reaped a running session: %v", reaped)
+	}
+	if _, rerr := handler(context.Background(), SteerMethod, steerParams(t, "s1", "side answer: use plan B")); rerr != nil {
+		t.Fatalf("steer after reaper pass: %v", rerr)
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if c := contexts(); len(c) == 0 || !contextHasUserText(c[len(c)-1], "plan B") {
+		t.Fatal("steer did not reach the model")
+	}
+	if !entry.lastActive().Equal(base) {
+		t.Fatalf("lastActive = %v, want the turn's end %v", entry.lastActive(), base)
+	}
+	// Idle again and past the TTL: now it is reaped.
+	entry.touch(base.Add(-time.Hour))
+	if reaped := pa.reapIdle(pa.now()); len(reaped) != 1 {
+		t.Fatalf("idle session not reaped: %v", reaped)
+	}
+}
