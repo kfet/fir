@@ -35,17 +35,38 @@ func (p *fakeOAuthProvider) ModelDefaults(_ string, _ []*Model) *Model { return 
 // any providers registered elsewhere are preserved.
 func resetRegistryForTest(t *testing.T) {
 	t.Helper()
-	saved := map[string]OAuthProvider{}
-	oauthRegistry.Range(func(k, v any) bool {
-		saved[k.(string)] = v.(OAuthProvider)
-		return true
-	})
+	oauthMu.Lock()
+	saved := oauthRegistry
+	oauthRegistry = map[string][]OAuthProvider{}
+	oauthMu.Unlock()
 	t.Cleanup(func() {
-		ResetOAuthProviders()
-		for k, v := range saved {
-			oauthRegistry.Store(k, v)
-		}
+		oauthMu.Lock()
+		oauthRegistry = saved
+		oauthMu.Unlock()
 	})
+}
+
+func TestUnregisterOAuthProviderInstance(t *testing.T) {
+	resetRegistryForTest(t)
+	a := &fakeOAuthProvider{id: "x", name: "A"}
+	b := &fakeOAuthProvider{id: "x", name: "B"}
+	RegisterOAuthProvider(a)
+	RegisterOAuthProvider(b)
+	UnregisterOAuthProviderInstance(b)
+	if got := GetOAuthProvider("x"); got != a {
+		t.Fatalf("after removing b want a, got %v", got)
+	}
+	RegisterOAuthProvider(b)
+	UnregisterOAuthProviderInstance(a)
+	if got := GetOAuthProvider("x"); got != b {
+		t.Fatalf("after removing a want b, got %v", got)
+	}
+	RegisterOAuthProvider(b) // re-register moves to top, no duplicate
+	UnregisterOAuthProviderInstance(b)
+	if got := GetOAuthProvider("x"); got != nil {
+		t.Fatalf("want empty, got %v", got)
+	}
+	UnregisterOAuthProviderInstance(b) // absent: no-op
 }
 
 func TestRegisterAndGetOAuthProvider(t *testing.T) {

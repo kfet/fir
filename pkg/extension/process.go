@@ -19,6 +19,9 @@ var ErrTooManyFailures = errors.New("extension: too many consecutive failures")
 
 const maxRestarts = 5
 
+// killPid signals a process by pid; a variable so tests can simulate failure.
+var killPid = syscall.Kill
+
 // Process wraps an exec.Cmd and provides a JSON-RPC Codec over its stdio.
 type Process struct {
 	cfg    ExtProcConfig
@@ -194,11 +197,22 @@ func (p *Process) Stop(ctx context.Context) error {
 		if conn != nil {
 			_ = conn.Close()
 		}
-		_ = fs.StopChild(pid)
+		err := fs.StopChild(pid)
+		if err != nil {
+			// The template (the child's parent) is dead or unreachable, so it
+			// cannot terminate the child: kill it directly. Once orphaned it is
+			// reparented and reaped by init.
+			if kerr := killPid(pid, syscall.SIGKILL); kerr != nil && !errors.Is(kerr, syscall.ESRCH) {
+				err = fmt.Errorf("extension: stop forked %s (pid %d): %w; kill: %v", p.cfg.Name, pid, err, kerr)
+			} else {
+				p.logger.Warn("fork template could not stop child; killed it directly", "ext", p.cfg.Name, "pid", pid, "err", err)
+				err = nil
+			}
+		}
 		if done != nil {
 			close(done)
 		}
-		return nil
+		return err
 	}
 	cmd := p.cmd
 	done := p.waitDone

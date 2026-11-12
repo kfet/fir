@@ -75,7 +75,19 @@ type Manager struct {
 	// session's forked children but never closes the shared template. nil
 	// when disabled, unavailable, or no eligible extensions are present.
 	fork *ForkServer
+
+	// respawns counts recent unexpected-exit respawns per extension name,
+	// capped at maxRespawns so a crash-looping extension is left down. A
+	// death more than respawnWindow after the previous one starts a new count.
+	respawns  map[string]int
+	lastDeath map[string]time.Time
 }
+
+// maxRespawns bounds how often one extension is respawned after its process
+// dies unexpectedly within respawnWindow of the previous death.
+const maxRespawns = 3
+
+const respawnWindow = 5 * time.Minute
 
 type managedBridge struct {
 	cfg    ExtProcConfig
@@ -506,17 +518,19 @@ func (m *Manager) startOne(ctx context.Context, cfg ExtProcConfig, cwd string, e
 	if m.setStatusFn != nil {
 		bridge.SetSetStatusFn(m.setStatusFn)
 	}
-	m.bridges = append(m.bridges, &managedBridge{
+	mb := &managedBridge{
 		cfg:    cfg,
 		proc:   proc,
 		bridge: bridge,
 		cancel: cancel,
-	})
+	}
+	m.bridges = append(m.bridges, mb)
 	m.mu.Unlock()
 
 	go func() {
 		if err := bridge.Run(bCtx, api); err != nil && bCtx.Err() == nil {
 			m.logger.Warn("bridge exited", "ext", cfg.Name, "err", err)
+			m.handleBridgeDied(ctx, mb, cwd, env, api, projectDir)
 		}
 	}()
 
@@ -736,36 +750,7 @@ func (m *Manager) ReloadOne(ctx context.Context, name string) error {
 		// signalled.
 		awaitShutdownEvents([]*managedBridge{running}, SessionEndPayload{Reason: "reload"})
 
-		// Remove ONLY this extension's tools from the session's tool set.
-		// The bridge already knows its own tool names from caps.Tools; we
-		// reuse the SessionBridge's ToolSet.Remove path internally without
-		// exposing a caller-visible "unregister by name" API.
-		if running.bridge != nil && running.bridge.caps != nil {
-			var toolNames []string
-			for _, t := range running.bridge.caps.Tools {
-				toolNames = append(toolNames, t.Name)
-			}
-			if len(toolNames) > 0 {
-				if r, ok := api.(interface {
-					removeExtensionTools(names []string)
-				}); ok {
-					r.removeExtensionTools(toolNames)
-				}
-			}
-		}
-
-		// Tear down provider/auth/api registrations (mirrors Stop) and
-		// cancel the bridge context, then stop the process.
-		running.bridge.UnregisterAuthProviders()
-		running.bridge.UnregisterProviders()
-		running.bridge.UnregisterApis()
-		if running.bridge.caps != nil && len(running.bridge.caps.ToolNameMap) > 0 {
-			providers.UnregisterToolNameAliases(running.bridge.caps.Name)
-		}
-		running.cancel()
-		stopCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		_ = running.proc.Stop(stopCtx)
-		cancel()
+		m.teardownBridge(api, running)
 	}
 
 	// 4. Respawn the edited/new version, or stop-only if the file was deleted.
@@ -788,6 +773,85 @@ func (m *Manager) ReloadOne(ctx context.Context, name string) error {
 		return nil
 	}
 	return m.startOne(ctx, *found, cwd, sdkEnv, api, projectDir)
+}
+
+// teardownBridge removes one bridge's tools and its provider/auth/api
+// registrations (mirrors Stop), cancels its context and stops its process.
+// The caller must already have removed mb from m.bridges.
+func (m *Manager) teardownBridge(api BridgeAPI, mb *managedBridge) {
+	// Remove ONLY this extension's tools from the session's tool set.
+	var toolNames []string
+	for _, t := range mb.bridge.caps.Tools {
+		toolNames = append(toolNames, t.Name)
+	}
+	if r, ok := api.(interface {
+		removeExtensionTools(names []string)
+	}); ok && len(toolNames) > 0 {
+		r.removeExtensionTools(toolNames)
+	}
+	mb.bridge.UnregisterAuthProviders()
+	mb.bridge.UnregisterProviders()
+	mb.bridge.UnregisterApis()
+	if len(mb.bridge.caps.ToolNameMap) > 0 {
+		providers.UnregisterToolNameAliases(mb.bridge.caps.Name)
+	}
+	mb.cancel()
+	stopCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	if err := mb.proc.Stop(stopCtx); err != nil {
+		m.logger.Warn("stopping extension process", "ext", mb.cfg.Name, "err", err)
+	}
+	cancel()
+}
+
+// handleBridgeDied runs when an extension's stream closed while its bridge
+// was still live (the process crashed or was killed from outside, e.g. a
+// forked child reaped behind the manager's back). It tears the dead bridge
+// down so none of its registrations — auth providers above all — keep
+// pointing at a dead process, then respawns it (bounded by maxRespawns).
+// If Stop/Reload already removed mb, the exit was expected and nothing is done.
+func (m *Manager) handleBridgeDied(ctx context.Context, mb *managedBridge, cwd string, env []string, api BridgeAPI, projectDir string) {
+	// Serialize with ReloadOne so a concurrent reload of the same extension
+	// cannot also respawn it and leave two bridges running.
+	m.reloadOneMu.Lock()
+	defer m.reloadOneMu.Unlock()
+	m.mu.Lock()
+	idx := -1
+	for i, b := range m.bridges {
+		if b == mb {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 || m.stopped {
+		m.mu.Unlock()
+		return
+	}
+	m.bridges = append(m.bridges[:idx:idx], m.bridges[idx+1:]...)
+	if m.respawns == nil {
+		m.respawns = map[string]int{}
+		m.lastDeath = map[string]time.Time{}
+	}
+	now := time.Now()
+	if now.Sub(m.lastDeath[mb.cfg.Name]) > respawnWindow {
+		m.respawns[mb.cfg.Name] = 0
+	}
+	m.lastDeath[mb.cfg.Name] = now
+	m.respawns[mb.cfg.Name]++
+	n := m.respawns[mb.cfg.Name]
+	m.mu.Unlock()
+
+	m.teardownBridge(api, mb)
+	if n > maxRespawns {
+		m.logger.Error("extension died too often; not respawning", "ext", mb.cfg.Name, "respawns", n-1)
+		return
+	}
+	m.logger.Warn("extension died unexpectedly; respawning", "ext", mb.cfg.Name, "attempt", n)
+	if err := m.startOne(ctx, mb.cfg, cwd, env, api, projectDir); err != nil {
+		m.logger.Error("respawning extension failed", "ext", mb.cfg.Name, "err", err)
+		return
+	}
+	// startOne pushes the new auth providers on top; restore scope priority.
+	m.resolveAuthConflicts()
 }
 
 // EmitEvent fans out a notification to all bridges.

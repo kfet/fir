@@ -182,11 +182,15 @@ func (b *Bridge) RegisterAuthProviders() {
 func (b *Bridge) UnregisterAuthProviders() {
 	b.authProvidersMu.Lock()
 	defer b.authProvidersMu.Unlock()
+	// Remove only this bridge's own instances: another bridge (e.g. the same
+	// builtin in a sibling ACP session) may have registered the same ID, and
+	// tearing this one down must not break auth for that session.
 	for _, p := range b.authProviders {
 		p.StopCallbackServer()
+		ai.UnregisterOAuthProviderInstance(p)
 	}
-	for _, spec := range b.caps.AuthProviders {
-		ai.UnregisterOAuthProvider(spec.ID)
+	for _, p := range b.genericAuthProviders {
+		ai.UnregisterOAuthProviderInstance(p)
 	}
 	b.authProviders = nil
 	b.genericAuthProviders = nil
@@ -197,11 +201,11 @@ func (b *Bridge) UnregisterAuthProviders() {
 func (b *Bridge) UnregisterAuthProvider(id string) {
 	b.authProvidersMu.Lock()
 	defer b.authProvidersMu.Unlock()
-	ai.UnregisterOAuthProvider(id)
 	kept := b.authProviders[:0]
 	for _, p := range b.authProviders {
 		if p.spec.ID == id {
 			p.StopCallbackServer()
+			ai.UnregisterOAuthProviderInstance(p)
 			continue
 		}
 		kept = append(kept, p)
@@ -210,6 +214,7 @@ func (b *Bridge) UnregisterAuthProvider(id string) {
 	keptGeneric := b.genericAuthProviders[:0]
 	for _, p := range b.genericAuthProviders {
 		if p.spec.ID == id {
+			ai.UnregisterOAuthProviderInstance(p)
 			continue
 		}
 		keptGeneric = append(keptGeneric, p)

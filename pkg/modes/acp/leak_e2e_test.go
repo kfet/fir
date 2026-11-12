@@ -108,18 +108,55 @@ func childPIDs(ppid int) []int {
 // descendantPythonCount walks the process tree rooted at root and counts
 // descendants whose command name contains "python".
 func descendantPythonCount(root int) int {
-	count := 0
-	queue := childPIDs(root)
+	return len(descendantPythonPIDs(root))
+}
+
+// descendantPythonPIDs returns the pids of root's python descendants,
+// including forked sidecars (children of the fork template, not of fir). It
+// snapshots the whole process table with a single ps call so a scan stays
+// fast on a loaded box (per-pid pgrep/ps walks took seconds, long enough for
+// short idle TTLs to expire mid-scan).
+func descendantPythonPIDs(root int) map[int]bool {
+	out, err := exec.Command("ps", "-A", "-o", "pid=,ppid=,comm=").Output()
+	if err != nil {
+		return nil
+	}
+	children := map[int][]int{}
+	python := map[int]bool{}
+	for _, line := range strings.Split(string(out), "\n") {
+		f := strings.Fields(line)
+		if len(f) < 3 {
+			continue
+		}
+		pid, err1 := strconv.Atoi(f[0])
+		ppid, err2 := strconv.Atoi(f[1])
+		if err1 != nil || err2 != nil {
+			continue
+		}
+		children[ppid] = append(children[ppid], pid)
+		if strings.Contains(strings.ToLower(strings.Join(f[2:], " ")), "python") {
+			python[pid] = true
+		}
+	}
+	pids := map[int]bool{}
+	queue := append([]int(nil), children[root]...)
 	for len(queue) > 0 {
 		pid := queue[0]
 		queue = queue[1:]
-		out, err := exec.Command("ps", "-o", "comm=", "-p", strconv.Itoa(pid)).Output()
-		if err == nil && strings.Contains(strings.ToLower(string(out)), "python") {
-			count++
+		if python[pid] {
+			pids[pid] = true
 		}
-		queue = append(queue, childPIDs(pid)...)
+		queue = append(queue, children[pid]...)
 	}
-	return count
+	return pids
+}
+
+// pidGone reports whether pid no longer exists. A zombie (exited but not
+// reaped by its parent) counts as still present: the point is that the
+// fork template actually reaps the session's children.
+func pidGone(pid int) bool {
+	out, err := exec.Command("ps", "-o", "stat=", "-p", strconv.Itoa(pid)).Output()
+	return err != nil || strings.TrimSpace(string(out)) == ""
 }
 
 // waitForPythonCount polls until descendantPythonCount equals want or the
@@ -367,4 +404,61 @@ func waitForPythonCountStable(root int) int {
 		}
 	}
 	return prev
+}
+
+// TestACP_E2E_IdleReaper_ForkedChildPIDsGone verifies that the exact sidecar
+// pids a session spawned — forked children of the shared fork template, not
+// direct children of fir — are terminated AND reaped (no zombies) once the
+// session sits idle past --acp-session-idle-ttl.
+func TestACP_E2E_IdleReaper_ForkedChildPIDsGone(t *testing.T) {
+	// 10s TTL: long enough to snapshot the session's sidecars on a loaded
+	// box before the reaper fires.
+	conn, cmd, cleanup := spawnACPLeakAgent(t, "--acp-session-idle-ttl", "10s")
+	defer cleanup()
+	rootPID := cmd.Process.Pid
+
+	rawInitialize(t, conn)
+	waitForPythonCountStable(rootPID)
+	before := descendantPythonPIDs(rootPID)
+	baseline := len(before)
+
+	rawNewSession(t, conn, t.TempDir())
+	if got := waitForPythonCountAtLeast(rootPID, baseline+1, 10*time.Second); got < baseline+1 {
+		t.Fatalf("session spawned no sidecars: %d python procs (baseline %d)", got, baseline)
+	}
+	direct := map[int]bool{}
+	for _, pid := range childPIDs(rootPID) {
+		direct[pid] = true
+	}
+	var sessionPIDs []int
+	forked := 0
+	for pid := range descendantPythonPIDs(rootPID) {
+		if before[pid] {
+			continue
+		}
+		sessionPIDs = append(sessionPIDs, pid)
+		if !direct[pid] {
+			forked++
+		}
+	}
+	if forked == 0 {
+		t.Fatalf("no forked sidecars among session pids %v; fork path not exercised", sessionPIDs)
+	}
+
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		var alive []int
+		for _, pid := range sessionPIDs {
+			if !pidGone(pid) {
+				alive = append(alive, pid)
+			}
+		}
+		if len(alive) == 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("session sidecar pids still present after idle TTL: %v (of %v)", alive, sessionPIDs)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 }

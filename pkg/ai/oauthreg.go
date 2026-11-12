@@ -87,42 +87,85 @@ type OAuthProvider interface {
 	ModelDefaults(modelID string, siblings []*Model) *Model
 }
 
-var oauthRegistry sync.Map // string → OAuthProvider
+// oauthRegistry holds, per provider ID, a stack of registered instances. The
+// top of the stack is the active provider. Several owners (e.g. the same
+// builtin extension running once per ACP session) can register the same ID;
+// each one removes only its own instance via UnregisterOAuthProviderInstance,
+// so one owner going away (a session reaped, a child crashing) leaves the
+// other owners' registrations intact instead of breaking auth for everyone.
+var (
+	oauthMu       sync.Mutex
+	oauthRegistry = map[string][]OAuthProvider{}
+)
 
-// RegisterOAuthProvider registers an OAuth provider under p.ID().
+// RegisterOAuthProvider registers p under p.ID() and makes it the active
+// provider for that ID. Registering an instance already present moves it to
+// the top.
 func RegisterOAuthProvider(p OAuthProvider) {
-	oauthRegistry.Store(p.ID(), p)
+	oauthMu.Lock()
+	defer oauthMu.Unlock()
+	id := p.ID()
+	oauthRegistry[id] = append(removeInstance(oauthRegistry[id], p), p)
 }
 
-// UnregisterOAuthProvider removes the provider with the given ID, if any.
+// UnregisterOAuthProvider removes every provider registered under id.
 func UnregisterOAuthProvider(id string) {
-	oauthRegistry.Delete(id)
+	oauthMu.Lock()
+	defer oauthMu.Unlock()
+	delete(oauthRegistry, id)
+}
+
+// UnregisterOAuthProviderInstance removes only the given instance. If another
+// instance is still registered under the same ID, the most recent remaining
+// one becomes active.
+func UnregisterOAuthProviderInstance(p OAuthProvider) {
+	oauthMu.Lock()
+	defer oauthMu.Unlock()
+	id := p.ID()
+	rest := removeInstance(oauthRegistry[id], p)
+	if len(rest) == 0 {
+		delete(oauthRegistry, id)
+		return
+	}
+	oauthRegistry[id] = rest
+}
+
+func removeInstance(stack []OAuthProvider, p OAuthProvider) []OAuthProvider {
+	out := make([]OAuthProvider, 0, len(stack))
+	for _, q := range stack {
+		if q != p {
+			out = append(out, q)
+		}
+	}
+	return out
 }
 
 // ResetOAuthProviders clears the registry.
 func ResetOAuthProviders() {
-	oauthRegistry.Range(func(k, _ any) bool {
-		oauthRegistry.Delete(k)
-		return true
-	})
+	oauthMu.Lock()
+	defer oauthMu.Unlock()
+	oauthRegistry = map[string][]OAuthProvider{}
 }
 
-// GetOAuthProvider returns the OAuth provider with the given ID, or nil.
+// GetOAuthProvider returns the active OAuth provider with the given ID, or nil.
 func GetOAuthProvider(id string) OAuthProvider {
-	v, ok := oauthRegistry.Load(id)
-	if !ok {
+	oauthMu.Lock()
+	defer oauthMu.Unlock()
+	stack := oauthRegistry[id]
+	if len(stack) == 0 {
 		return nil
 	}
-	return v.(OAuthProvider)
+	return stack[len(stack)-1]
 }
 
-// GetOAuthProviders returns all registered OAuth providers, sorted by ID.
+// GetOAuthProviders returns the active provider for every ID, sorted by ID.
 func GetOAuthProviders() []OAuthProvider {
-	var result []OAuthProvider
-	oauthRegistry.Range(func(_, v any) bool {
-		result = append(result, v.(OAuthProvider))
-		return true
-	})
+	oauthMu.Lock()
+	result := make([]OAuthProvider, 0, len(oauthRegistry))
+	for _, stack := range oauthRegistry {
+		result = append(result, stack[len(stack)-1])
+	}
+	oauthMu.Unlock()
 	sort.Slice(result, func(i, j int) bool {
 		return result[i].ID() < result[j].ID()
 	})
