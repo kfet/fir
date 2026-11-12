@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [1.54.1] - 2026-11-12
+
+### Changed
+- **Model catalog regenerated**: added 2 aggregator models (openrouter, vercel-ai-gateway: google/gemini-4-hydrogen); changed pricing/limits for 1 (openrouter: qwen/qwen3.5-9b).
+
 ### Fixed
 - **ACP idle reaper tore down a session while its turn ran.** The idle clock was touched only when a prompt started, so a turn longer than the idle TTL (default 90m) was reaped mid-run: its tool was aborted and `_fir/session/steer` then failed, so a relay with interject cancelled the turn and re-prompted. The reaper now skips a session with a running turn, and the idle clock restarts when the turn ends. A new session is also touched before it is registered, so a reaper pass can no longer see it as idle since 1970.
 
