@@ -62,6 +62,9 @@ type sessionStatus struct {
 	// "context canceled" turn error is known to be the operator's abort
 	// rather than a provider failure.
 	aborted bool
+	// abortedRun is the IdleChan of the run Abort was called on. Unlike
+	// aborted (reset by the async EventAgentStart), it is exact per run.
+	abortedRun <-chan struct{}
 
 	// Last card written, to skip identical rewrites (every assistant
 	// message_end lands here). Keyed by store: /new and session switches
@@ -76,15 +79,17 @@ type sessionStatus struct {
 func (s *AgentSession) Abort() {
 	s.status.mu.Lock()
 	s.status.aborted = true
+	s.status.abortedRun = s.Agent.IdleChan()
 	s.status.mu.Unlock()
 	s.Agent.Abort()
 }
 
 // abortPending reports whether Abort was called on the current run.
 func (s *AgentSession) abortPending() bool {
+	run := s.Agent.IdleChan()
 	s.status.mu.Lock()
 	defer s.status.mu.Unlock()
-	return s.status.aborted
+	return s.status.abortedRun == run
 }
 
 // initStatus publishes the initial card for a freshly constructed session.
