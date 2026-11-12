@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Changed
+- **Forked Python extension children use ~47-54% less private memory** (~6.0 MB → ~3.2 MB each, ~2.7 MB when sessions share a template; measured with the 25 builtin extensions on hpbox): the fork template pre-imports common stdlib modules (ssl, asyncio, urllib, …) and caches each extension's compiled code so children share both copy-on-write.
+- **`make -j1 all` (or `make all JOBS=N`) now caps the inner parallel make**; before, `all` always ran its sub-targets with unlimited `-j`.
+
+### Fixed
+- **Fork template left exited extension children as zombies** until its next control message; it now reaps them on SIGCHLD.
+
 ## [1.52.1] - 2026-11-11
 
 ### Fixed

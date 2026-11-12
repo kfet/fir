@@ -51,10 +51,15 @@ build: tidy
 	$(call RUN,build (native),go build -trimpath -ldflags="$(LDFLAGS)" -o $(BINARY) ./cmd/fir/)
 	@$(MAKE) --no-print-directory check-size
 
-# `make all` runs fmt first, then everything else in parallel via recursive make -j.
+# `make all` runs fmt first, then everything else in parallel via recursive make.
 # TIDY_DONE=1 tells sub-targets to skip redundant go-mod-tidy (already ran here).
+# JOBS caps the inner make's parallelism (empty = unlimited). It defaults to
+# the outer -jN, so `make -j1 all` really is serial; `make all JOBS=2` works
+# too. OUTER_JOBS must stay recursive (=): MAKEFLAGS lacks -jN at parse time.
+OUTER_JOBS = $(patsubst -j%,%,$(filter -j%,$(MAKEFLAGS)))
+JOBS ?= $(OUTER_JOBS)
 all: fmt tidy
-	@$(MAKE) -j --no-print-directory _all_parallel TIDY_DONE=1
+	@$(MAKE) -j$(JOBS) --no-print-directory _all_parallel TIDY_DONE=1
 
 _all_parallel: vet test-race coverage build-all lint-python test-python-sdk test-python-ext test-python-schedule test-python-tmuxspinner test-node-sdk test-go-sdk check-licenses lint-shell
 
