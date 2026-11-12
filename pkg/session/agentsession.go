@@ -5,6 +5,7 @@ package session
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"regexp"
@@ -684,26 +685,7 @@ func (s *AgentSession) Prompt(text string, opts ...*PromptOptions) error {
 		images = opts[0].Images
 	}
 
-	var userMsgContent any
-	if len(images) > 0 {
-		// Build content as array of content blocks (text + images)
-		blocks := make([]any, 0, 1+len(images))
-		if content != "" {
-			blocks = append(blocks, map[string]any{"type": "text", "text": content})
-		}
-		for _, img := range images {
-			blocks = append(blocks, map[string]any{
-				"type":     "image",
-				"data":     img.Data,
-				"mimeType": img.MimeType,
-			})
-		}
-		userMsgContent = blocks
-	} else {
-		userMsgContent = content
-	}
-
-	userMsg := agent.NewAgentMessage(ai.NewUserMsg(userMsgContent, ts))
+	userMsg := newUserMessage(content, images, ts)
 
 	// If streaming, queue the message as a follow-up. The agent drains the
 	// queue automatically when the current turn ends. This applies both to
@@ -739,6 +721,48 @@ func (s *AgentSession) Prompt(text string, opts ...*PromptOptions) error {
 		s.UpdatePlan("", nil, nil)
 	}
 
+	return nil
+}
+
+// newUserMessage builds a user message from text plus optional images.
+func newUserMessage(content string, images []ai.ImageContent, ts int64) agent.AgentMessage {
+	var userMsgContent any
+	if len(images) > 0 {
+		// Build content as array of content blocks (text + images)
+		blocks := make([]any, 0, 1+len(images))
+		if content != "" {
+			blocks = append(blocks, map[string]any{"type": "text", "text": content})
+		}
+		for _, img := range images {
+			blocks = append(blocks, map[string]any{
+				"type":     "image",
+				"data":     img.Data,
+				"mimeType": img.MimeType,
+			})
+		}
+		userMsgContent = blocks
+	} else {
+		userMsgContent = content
+	}
+
+	return agent.NewAgentMessage(ai.NewUserMsg(userMsgContent, ts))
+}
+
+// ErrNotStreaming is returned by Steer when no run is in progress.
+var ErrNotStreaming = errors.New("no turn is running")
+
+// Steer queues text (and images) as a steering message for the running
+// turn: the model sees it at the next tool boundary (or, if the model was
+// about to stop, the loop continues with it) without cancelling the turn.
+// With no run in progress, or once the run was aborted (its unwind would
+// swallow the message), it returns ErrNotStreaming and queues nothing.
+// If the run ends between the check and the next boundary, the message
+// stays queued and is delivered at the start of the next prompt.
+func (s *AgentSession) Steer(text string, images []ai.ImageContent) error {
+	if !s.IsStreaming() || s.abortPending() {
+		return ErrNotStreaming
+	}
+	s.Agent.Steer(newUserMessage(text, images, time.Now().UnixMilli()))
 	return nil
 }
 

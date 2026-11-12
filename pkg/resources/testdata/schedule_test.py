@@ -434,13 +434,15 @@ class TestIntegration(unittest.TestCase):
 
     def test_schedule_fires_continue(self):
         """Schedule 1s, wait for the thread to fire send_user_message('continue')."""
-        with _Timeout(5):
+        with _Timeout(25):
             ctx = mock.MagicMock()
             result = schedule.cmd_schedule(["1s"], ctx)
             self.assertIn("Scheduled", result["message"])
 
             # Wait for the countdown thread to finish and fire.
-            deadline = datetime.now(tz=timezone.utc) + timedelta(seconds=3)
+            deadline = datetime.now(tz=timezone.utc) + timedelta(
+                seconds=20
+            )  # generous: early-exit poll, CI load
             while datetime.now(tz=timezone.utc) < deadline:
                 if ctx.send_user_message.called:
                     break

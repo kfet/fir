@@ -231,3 +231,50 @@ type ForkSessionRequest struct {
 	// at (default: the parent's forkable leaf).
 	Meta map[string]any `json:"_meta,omitempty"`
 }
+
+// SteerMethod is the fir extension method that injects a steering message
+// into a session's running session/prompt turn without cancelling it.
+// Advertised in initialize agentCapabilities._meta under steerExtKey.
+const (
+	SteerMethod = "_fir/session/steer"
+	steerExtKey = "dev.fir.steer/v1"
+)
+
+// NoActiveTurnError is the stable JSON-RPC error code _fir/session/steer
+// returns when the session has no running turn. Nothing is queued; the
+// client should send the content as a regular session/prompt instead.
+// Do NOT change this value.
+const NoActiveTurnError = -32002
+
+// _fir/session/steer modes.
+const (
+	SteerModeSteer  = "steer"  // default: queue prompt for the running turn
+	SteerModeRecord = "record" // append a side_query custom entry; not sent to the LLM
+)
+
+// SideQueryCustomType is the customType of entries written by record mode.
+const SideQueryCustomType = "side_query"
+
+// SteerSessionRequest is the request for _fir/session/steer.
+type SteerSessionRequest struct {
+	SessionId acpsdk.SessionId      `json:"sessionId"`
+	Mode      string                `json:"mode,omitempty"`
+	Prompt    []acpsdk.ContentBlock `json:"prompt,omitempty"`
+	// Record mode only.
+	Question      string `json:"question,omitempty"`
+	Answer        string `json:"answer,omitempty"`
+	ForkSessionId string `json:"forkSessionId,omitempty"`
+}
+
+// SideQueryData is the data of a side_query custom entry.
+type SideQueryData struct {
+	Question      string `json:"question"`
+	Answer        string `json:"answer"`
+	ForkSessionId string `json:"forkSessionId,omitempty"`
+}
+
+// SteerSessionResponse is the success response for _fir/session/steer.
+// EntryId is set in record mode: the id of the appended custom entry.
+type SteerSessionResponse struct {
+	EntryId string `json:"entryId,omitempty"`
+}

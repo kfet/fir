@@ -100,6 +100,8 @@ func rawMethodHandler(pa *firAgent, wn *writeNotifier) acpsdk.MethodHandler {
 					capMeta = map[string]any{}
 				}
 				capMeta[mcpExtKey] = mcpCapability()
+				// fir extension: _fir/session/steer (steer.go).
+				capMeta[steerExtKey] = map[string]any{"method": SteerMethod}
 				caps["_meta"] = capMeta
 			}
 			// Replace authMethods with extended format (RFD auth-methods).
@@ -333,6 +335,17 @@ func rawMethodHandler(pa *firAgent, wn *writeNotifier) acpsdk.MethodHandler {
 			}()
 			firlog.Info("acp dispatch: "+method+" done", "total_ms", time.Since(methodStart).Milliseconds())
 			return respMap, nil
+
+		case SteerMethod:
+			var p SteerSessionRequest
+			if err := json.Unmarshal(params, &p); err != nil {
+				return nil, acpsdk.NewInvalidParams(map[string]any{"error": err.Error()})
+			}
+			resp, err := pa.steerSession(ctx, p)
+			if err != nil {
+				return nil, toReqErr(err)
+			}
+			return resp, nil
 
 		case mcpMethodReadResource, mcpMethodCallTool:
 			return pa.handleMCPMethod(ctx, method, params)

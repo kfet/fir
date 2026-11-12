@@ -80,6 +80,13 @@ func (s *AgentSession) Abort() {
 	s.Agent.Abort()
 }
 
+// abortPending reports whether Abort was called on the current run.
+func (s *AgentSession) abortPending() bool {
+	s.status.mu.Lock()
+	defer s.status.mu.Unlock()
+	return s.status.aborted
+}
+
 // initStatus publishes the initial card for a freshly constructed session.
 func (s *AgentSession) initStatus() {
 	s.status.mu.Lock()
