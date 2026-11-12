@@ -2,10 +2,13 @@
 
 ## [Unreleased]
 
+## [1.54.0] - 2026-11-12
+
 ### Added
 - **OS secret-store backend for credentials**: set `"auth": {"storage": "auto"|"keyring"}` (global settings, or `FIR_AUTH_STORAGE`) to keep provider and MCP OAuth secrets in the macOS Keychain / Linux Secret Service / Windows Credential Manager, with `auth.json` holding only metadata; `auto` falls back to `auth.json` when no store answers. `fir auth storage [keyring|file]` shows or migrates (verified, reversible). Default stays `file`.
 
 ### Changed
+- **Model catalog regenerated**: removed 1 aggregator model (openrouter: deepseek/deepseek-v4.1-flash-1017:batch); changed pricing/limits for 10 (openrouter: deepseek-v4-pro, deepseek-v4.1-flash, gemma-4-26b-a4b-it, minimax-m3.1-flash, kimi-k3.1-pro, qwen3-14b, qwen3.5-9b, hy3, hy4-preview, glm-5.3:batch).
 - `AuthStorage.Set`/`Remove` now return the persistence error instead of only recording it, so a failed save (e.g. a locked keychain) is reported rather than appearing to succeed.
 
 ## [1.53.1] - 2026-11-12
