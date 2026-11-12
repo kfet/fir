@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.53.1] - 2026-11-12
+
 ### Fixed
 - **ACP `_fir/session/steer` could accept a steer right after `session/cancel`** (race with async event handling); the cancelled run is now tracked exactly, so the steer is refused with `-32002`.
 
