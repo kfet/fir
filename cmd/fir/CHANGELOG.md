@@ -2,9 +2,14 @@
 
 ## [Unreleased]
 
+## [1.52.1] - 2026-11-11
+
 ### Fixed
 - **A dead extension child no longer leaves auth broken.** When an extension process dies unexpectedly (e.g. a forked sidecar reaped from outside), the manager tears its registrations down and respawns it (up to 3 times). OAuth providers are now tracked per instance, so one session's extension going away no longer unregisters the same provider for every other ACP session.
 - **Stopping a forked extension whose fork template is dead kills the child directly** instead of silently ignoring the template error.
+
+### Changed
+- **Model catalog regenerated**: added 1 aggregator model; 15 models with changed pricing/limits.
 
 ## [1.52.0] - 2026-11-11
 
