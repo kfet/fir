@@ -17,6 +17,7 @@ require (
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/stretchr/testify v1.11.1
 	github.com/yuin/goldmark v1.7.16
+	github.com/zalando/go-keyring v0.2.8
 	go.uber.org/goleak v1.3.0
 	golang.org/x/sys v0.41.0
 	gopkg.in/yaml.v3 v3.0.1
@@ -24,6 +25,8 @@ require (
 )
 
 require (
+	github.com/danieljoos/wincred v1.2.3 // indirect
+	github.com/godbus/dbus/v5 v5.2.2 // indirect
 	github.com/kfet/covgate v0.1.2 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect

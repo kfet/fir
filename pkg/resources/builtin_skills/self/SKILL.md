@@ -127,6 +127,14 @@ Each account appears as its own labelled group in the model selector and `--list
 > testing needs a **separate login**, not a file copy.
 
 
+### Secret storage (`auth.storage`, `fir auth storage`)
+
+By default every credential (provider logins, API keys, MCP OAuth tokens) is plain text in `auth.json` (0600, flock-guarded). Set `"auth": {"storage": "auto"}` (or `"keyring"`) in the **global** `settings.json` to move secrets into the OS secret store — macOS Keychain, Linux Secret Service (GNOME Keyring/KWallet over D-Bus), Windows Credential Manager. `auth.json` then keeps only metadata (type, label, expiry) plus a `_fir_storage` marker; secrets are one keychain item per slot under service `fir`. `auto` falls back to `auth.json` when no store answers (e.g. headless Linux without a session bus); `keyring` errors instead. Once migrated the marker is authoritative: if the store later becomes unavailable fir reports an error rather than silently writing secrets back to the file.
+
+- `fir auth storage` — show where secrets live, the setting, and whether the OS store answers.
+- `fir auth storage keyring` — migrate now (each secret is written and read back before the file is stripped).
+- `fir auth storage file` — move secrets back into `auth.json` and delete the keychain items (set `auth.storage` to `file` first, or the next access migrates them again).
+
 ### Amazon Bedrock accounts
 
 `fir login bedrock` configures one or more Bedrock accounts (these are credential configs, not OAuth flows). Three modes:
@@ -913,6 +921,11 @@ All fields are optional. Nested objects merge recursively; arrays and primitives
     { "path": "~/fir-traces/zbox",       //   see "Session stores"). env FIR_SESSION_STORES replaces it.
       "label": "zbox" }                  //   label defaults to the dir name; "local" is reserved
   ],
+
+  "auth": {                              // Credential storage (global settings only; see "Secret storage")
+    "storage": "file"                    // file (default) | auto (OS secret store if it answers a probe,
+                                         // else auth.json) | keyring (require it). env FIR_AUTH_STORAGE overrides.
+  },
 
   "mcp": {                               // MCP (Model Context Protocol) behaviour
     "toolTimeoutSeconds": 120            // Default per-call timeout for model-dispatched MCP tools

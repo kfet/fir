@@ -45,6 +45,8 @@ func runAuthSubcommand() error {
 		return nil
 	case "refresh":
 		return runAuthRefresh(args[1:])
+	case "storage":
+		return runAuthStorage(os.Stdout, filepath.Join(resolveAgentDir(), "auth.json"), args[1:])
 	default:
 		printAuthHelp()
 		return fmt.Errorf("unknown 'fir auth' subcommand: %s", args[0])
@@ -52,6 +54,13 @@ func runAuthSubcommand() error {
 }
 
 func printAuthHelp() {
+	fmt.Println("Usage: fir auth storage [keyring|file]")
+	fmt.Println()
+	fmt.Println("Show where credential secrets live, or move them into the OS secret store")
+	fmt.Println("(macOS Keychain, Linux Secret Service, Windows Credential Manager) or back")
+	fmt.Println("into auth.json. Set auth.storage (file|auto|keyring) in settings.json to")
+	fmt.Println("choose where new installs keep them.")
+	fmt.Println()
 	fmt.Println("Usage: fir auth refresh [provider-id | provider-id#account] [--force] [--within DURATION]")
 	fmt.Println()
 	fmt.Println("Refresh stored OAuth credentials without running a turn — for cron on")
@@ -256,5 +265,34 @@ func reportRefreshResults(w io.Writer, results []auth.RefreshResult) error {
 	if failed > 0 {
 		return fmt.Errorf("%d of %d account(s) failed to refresh", failed, len(results))
 	}
+	return nil
+}
+
+// runAuthStorage implements `fir auth storage [keyring|file]`.
+func runAuthStorage(w io.Writer, authPath string, args []string) error {
+	if len(args) > 1 {
+		return fmt.Errorf("usage: fir auth storage [keyring|file]")
+	}
+	if len(args) == 1 {
+		switch args[0] {
+		case "-h", "--help", "help":
+			printAuthHelp()
+			return nil
+		}
+		if err := auth.MigrateAuthStorage(authPath, args[0]); err != nil {
+			return err
+		}
+	}
+	st, err := auth.AuthStorageStatus(authPath)
+	if err != nil {
+		return err
+	}
+	probe := "available"
+	if st.ProbeErr != nil {
+		probe = "unavailable: " + st.ProbeErr.Error()
+	}
+	fmt.Fprintf(w, "secrets:     %s (%d slots)\n", st.Location, st.SlotCount)
+	fmt.Fprintf(w, "setting:     auth.storage=%s\n", st.Mode)
+	fmt.Fprintf(w, "store:       %s\n", probe)
 	return nil
 }

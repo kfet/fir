@@ -19,6 +19,7 @@ type Var struct {
 // Registry is the canonical list. Keep it sorted by name.
 var Registry = []Var{
 	{Name: "FIR_AGENT_DIR", Description: "Override config/session directory (default: ~/.config/fir; CLI --agent-dir wins)"},
+	{Name: "FIR_AUTH_STORAGE", Description: "Override the auth.storage setting: file, auto or keyring (where credential secrets live)"},
 	{Name: "FIR_BIN", Description: "Path of the running fir binary; set by fir for its extensions so they can call `$FIR_BIN <verb>` (an inherited value is kept)"},
 	{Name: "FIR_CACHE_RETENTION", Description: "Anthropic prompt cache retention (set to \"long\" for extended)"},
 	{Name: "FIR_DEBUG", Description: "Enable debug logging (set to 1)"},

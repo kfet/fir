@@ -17,6 +17,7 @@ import (
 
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/ai/envkeys"
+	"github.com/kfet/fir/pkg/config"
 	"github.com/kfet/pinoauth"
 )
 
@@ -244,9 +245,16 @@ type AuthStorage struct {
 }
 
 // NewAuthStorage creates an AuthStorage backed by the given file path.
-// authPath must be non-empty.
+// authPath must be non-empty. Secrets live in auth.json or, per the global
+// auth.storage setting (or once migrated), in the OS secret store; see
+// SecureFileBackend. An invalid setting is recorded and treated as "file".
 func NewAuthStorage(authPath string) *AuthStorage {
-	s := newAuthStorage(NewFileAuthStorageBackend(authPath))
+	mode, modeErr := config.LoadAuthStorageMode(filepath.Dir(authPath))
+	if modeErr != nil {
+		mode = config.AuthStorageFile
+	}
+	s := newAuthStorage(NewSecureFileBackend(authPath, defaultSecretStore, mode))
+	s.recordError(modeErr)
 	s.audit = newAuditWriter(authPath)
 	return s
 }
@@ -425,9 +433,12 @@ func (s *AuthStorage) RefreshApiKey(provider string) string {
 	return s.GetApiKey(provider)
 }
 
-func (s *AuthStorage) persistProviderChange(provider string, cred *AuthCredential) {
+// persistProviderChange writes one slot change. It returns the load error (the
+// store could not be read, so writing would clobber it) or the write error; both
+// are also recorded for DrainErrors.
+func (s *AuthStorage) persistProviderChange(provider string, cred *AuthCredential) error {
 	if s.loadError != nil {
-		return
+		return fmt.Errorf("credentials not saved: %w", s.loadError)
 	}
 	_, err := s.storage.WithLock(func(current []byte) (any, []byte) {
 		currentData := s.parseStorageData(current)
@@ -441,11 +452,12 @@ func (s *AuthStorage) persistProviderChange(provider string, cred *AuthCredentia
 	})
 	if err != nil {
 		s.recordError(err)
-		return
+		return err
 	}
 	// We just wrote the file — adopt the new stamp so the next staleness
 	// check doesn't re-read our own write.
 	s.lastStamp = s.backendStamp()
+	return nil
 }
 
 // persistChanges applies several slot changes to the backing file in ONE
@@ -493,9 +505,9 @@ func (s *AuthStorage) Set(provider string, cred AuthCredential) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.data[provider] = cred
-	s.persistProviderChange(provider, &cred)
+	err := s.persistProviderChange(provider, &cred)
 	s.audit.record(AuditActionSet, provider, &cred, len(s.data))
-	return nil
+	return err
 }
 
 // Remove deletes a credential for a provider.
@@ -504,13 +516,13 @@ func (s *AuthStorage) Remove(provider string) error {
 	defer s.mu.Unlock()
 	prev, existed := s.data[provider]
 	delete(s.data, provider)
-	s.persistProviderChange(provider, nil)
+	err := s.persistProviderChange(provider, nil)
 	if existed {
 		s.audit.record(AuditActionRemove, provider, &prev, len(s.data))
 	} else {
 		s.audit.record(AuditActionRemove, provider, nil, len(s.data))
 	}
-	return nil
+	return err
 }
 
 // List returns all providers with stored credentials. MCP server credentials

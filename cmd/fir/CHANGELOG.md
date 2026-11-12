@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Added
+- **OS secret-store backend for credentials**: set `"auth": {"storage": "auto"|"keyring"}` (global settings, or `FIR_AUTH_STORAGE`) to keep provider and MCP OAuth secrets in the macOS Keychain / Linux Secret Service / Windows Credential Manager, with `auth.json` holding only metadata; `auto` falls back to `auth.json` when no store answers. `fir auth storage [keyring|file]` shows or migrates (verified, reversible). Default stays `file`.
+
+### Changed
+- `AuthStorage.Set`/`Remove` now return the persistence error instead of only recording it, so a failed save (e.g. a locked keychain) is reported rather than appearing to succeed.
+
 ## [1.53.1] - 2026-11-12
 
 ### Fixed

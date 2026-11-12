@@ -152,7 +152,7 @@ func TestLiveModelState_BuiltinNotInModels(t *testing.T) {
 }
 
 func TestGetAvailable_WithLiveFiltering(t *testing.T) {
-	authStore := auth.NewAuthStorage("")
+	authStore := auth.NewInMemoryAuthStorage(nil)
 	t.Setenv("ANTHROPIC_API_KEY", "test")
 
 	ai.RegisterModel(&ai.Model{ID: "real-model", Provider: "anthropic", API: "anthropic-messages", BaseURL: "https://api.anthropic.com"})
@@ -204,7 +204,7 @@ func TestGetAvailable_WithLiveFiltering(t *testing.T) {
 
 func TestLiveCachePersistence(t *testing.T) {
 	tmpDir := t.TempDir()
-	authStore := auth.NewAuthStorage("")
+	authStore := auth.NewInMemoryAuthStorage(nil)
 	registry := NewModelRegistry(authStore, "")
 
 	models := []*ai.Model{
@@ -246,7 +246,7 @@ func TestRefreshLive_ClearsStateAndDiskCache(t *testing.T) {
 	}
 
 	tmpDir := t.TempDir()
-	authStore := auth.NewAuthStorage("")
+	authStore := auth.NewInMemoryAuthStorage(nil)
 	registry := NewModelRegistry(authStore, "")
 
 	// Seed disk cache and in-memory state as if a previous fetch happened.
@@ -312,7 +312,7 @@ func TestStartLiveModelFetch_SkipsListerForOAuthProvider(t *testing.T) {
 	RegisterModelLister(prov, lister)
 	t.Cleanup(func() { UnregisterModelLister(prov) })
 
-	authStore := auth.NewAuthStorage("")
+	authStore := auth.NewInMemoryAuthStorage(nil)
 	if err := authStore.Set(prov, auth.AuthCredential{Type: auth.CredentialTypeOAuth, Access: "tok"}); err != nil {
 		t.Fatal(err)
 	}
@@ -341,7 +341,7 @@ func TestStartLiveModelFetch_UsesListerForAPIKeyProvider(t *testing.T) {
 	RegisterModelLister(prov, lister)
 	t.Cleanup(func() { UnregisterModelLister(prov) })
 
-	authStore := auth.NewAuthStorage("")
+	authStore := auth.NewInMemoryAuthStorage(nil)
 	if err := authStore.Set(prov, auth.AuthCredential{Type: auth.CredentialTypeAPIKey, Key: "k"}); err != nil {
 		t.Fatal(err)
 	}

@@ -132,6 +132,9 @@ type Settings struct {
 	// deepMergeSettings never takes it from project settings. Read it with
 	// LoadSessionStores.
 	SessionStores []SessionStoreSettings `json:"sessionStores,omitempty"`
+	// Auth configures credential storage. Global-only: deepMergeSettings
+	// never takes it from project settings. Read it with LoadAuthStorageMode.
+	Auth *AuthSettings `json:"auth,omitempty"`
 }
 
 // deepMergeSettings merges overrides into base, with nested objects merged recursively.

@@ -239,7 +239,7 @@ func TestSynthesise_Pipeline(t *testing.T) {
 		ContextWindow: 50000,
 		MaxTokens:     1000,
 	})
-	authStore := auth.NewAuthStorage("")
+	authStore := auth.NewInMemoryAuthStorage(nil)
 	r := NewModelRegistry(authStore, "")
 
 	// Fall back to sibling-clone.
@@ -259,7 +259,7 @@ func TestSynthesise_Pipeline(t *testing.T) {
 }
 
 func TestSynthesise_NoSiblings_ReturnsNil(t *testing.T) {
-	authStore := auth.NewAuthStorage("")
+	authStore := auth.NewInMemoryAuthStorage(nil)
 	r := NewModelRegistry(authStore, "")
 	m := r.synthesise("totally-unknown-provider", "x")
 	if m != nil {
@@ -274,7 +274,7 @@ func TestFind_LiveListAuthoritative(t *testing.T) {
 		ID: "find-auth-real", Provider: "find-auth-test", API: "anthropic-messages",
 		BaseURL: "https://example.com", ContextWindow: 100000, MaxTokens: 4096,
 	})
-	authStore := auth.NewAuthStorage("")
+	authStore := auth.NewInMemoryAuthStorage(nil)
 	r := NewModelRegistry(authStore, "")
 
 	// Inject a live-list state with one known ID.

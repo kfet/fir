@@ -99,6 +99,7 @@ var subcommands = []subcommand{
 		Help: [][2]string{
 			{"fir auth refresh [provider]", "Refresh stored OAuth tokens (no inference; for cron)"},
 			{"", "  Options: --force, --within DURATION (default 1h)"},
+			{"fir auth storage [keyring|file]", "Show or move where credential secrets live (OS secret store or auth.json)"},
 		},
 	},
 	{

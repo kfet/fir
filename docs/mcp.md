@@ -121,7 +121,7 @@ specification. fir connects unauthenticated and, on a `401`, runs the full disco
 4. **Authorization code + PKCE (S256)** with the RFC 8707 `resource` indicator (the canonical
    MCP server URL) on the authorization, token and refresh requests.
 
-Tokens are persisted in `auth.json` next to provider credentials, under an `mcp:<server>` key.
+Tokens are persisted in `auth.json` next to provider credentials, under an `mcp:<server>` key. With `auth.storage` set to `auto`/`keyring` the token secrets live in the OS secret store instead and `auth.json` keeps only metadata (see the `self` skill, "Secret storage").
 They survive a restart. A rotated refresh token is written back on every refresh.
 
 ### Logging in
