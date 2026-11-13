@@ -376,14 +376,7 @@ func ReloadMCP(ctx context.Context, mgrPtr **mcp.Manager, sess *AgentSession, cw
 		}
 		cfg = mcp.MergeConfigs(cfg, extra)
 	}
-	servers := mergeMCP(cfg.MCPServers, sess.SessionMCPServers())
-	// Merge in-memory overrides.
-	for name, sc := range extraConfigs {
-		if servers == nil {
-			servers = make(map[string]mcp.ServerConfig)
-		}
-		servers[name] = sc
-	}
+	servers := mergeMCP(mergeMCP(cfg.MCPServers, sess.SessionMCPServers()), extraConfigs)
 	if *mgrPtr != nil {
 		_, err := (*mgrPtr).Reload(ctx, servers)
 		sess.attachMCP(*mgrPtr) // refresh config sources

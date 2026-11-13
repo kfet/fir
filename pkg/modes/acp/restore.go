@@ -164,7 +164,7 @@ func (pa *firAgent) openSession(ctx context.Context, sessionID string, req *clie
 			return
 		}
 		if req.mcpServers != nil {
-			st.Runtime.McpServers = mergeRequestMCPServers(nil, req.mcpServers)
+			st.Runtime.McpServers = requestMCPServers(req.mcpServers)
 		}
 		if req.meta != nil {
 			st.Runtime.Meta = req.meta

@@ -541,3 +541,17 @@ func loadDefaultConfigs(projectDir string) (*ConfigFile, []Collision, map[string
 
 	return merged, collisions, serverSource, errors.Join(errs...)
 }
+
+// InheritLocalSettings returns injected with the local-only settings of
+// configured copied in when injected leaves them unset. An injected server
+// (e.g. an ACP client's session/new mcpServers entry) replaces the transport
+// of a same-name mcp.json entry, but settings that only the local config can
+// express — today the Files block — would otherwise be dropped, leaving no
+// way to enable them for that server.
+func InheritLocalSettings(injected, configured ServerConfig) ServerConfig {
+	if injected.Files == nil && configured.Files != nil {
+		f := *configured.Files
+		injected.Files = &f
+	}
+	return injected
+}

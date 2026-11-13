@@ -419,6 +419,26 @@ extension. It is off by default and enabled per server:
 Keys (see `FilesConfig` in `pkg/mcp/config_contract.go`): `enabled`,
 `autoApprove`, `allowedOrigins`, `maxDownloadBytes` (default 100 MiB).
 
+**Servers injected by an ACP client.** A server an ACP client passes in
+`session/new` / `session/load` `mcpServers` (e.g. zulip-acp's `relay`) has no
+place to say `files`. Add a same-name entry to `mcp.json` with just the
+`files` block: the client's entry still decides the transport (command, URL),
+and fir keeps the configured `files` settings:
+
+```json
+{
+  "mcpServers": {
+    "relay": {
+      "files": { "enabled": true, "autoApprove": true }
+    }
+  }
+}
+```
+
+Only `files` is inherited. In a session where no client injects `relay`
+(e.g. the TUI), this entry has no transport and shows as failed; keep it in
+the ACP agent's own config (e.g. passed with `--mcp-config`) if that matters.
+
 The extension is used only when the server advertises it in
 `server/discover` and the session speaks protocol 2026-07-28 or later. fir
 then declares `{upload, download}` in the `io.modelcontextprotocol/clientCapabilities`

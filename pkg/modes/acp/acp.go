@@ -508,16 +508,14 @@ func loadProjectMCPConfigs(cwd, extraConfigPath string) map[string]mcp.ServerCon
 // Helpers
 // ============================================================================
 
-// mergeRequestMCPServers merges ACP request-level MCP server configurations
-// into an existing config map. Request entries take precedence. Returns the
-// merged map (creating one if configs is nil and servers is non-empty).
-func mergeRequestMCPServers(configs map[string]mcp.ServerConfig, servers []acpsdk.McpServer) map[string]mcp.ServerConfig {
+// requestMCPServers converts ACP request-level MCP servers into session
+// configs (nil when there are none). session.mergeMCP later lays them over
+// mcp.json; a same-name configured entry keeps its files block there.
+func requestMCPServers(servers []acpsdk.McpServer) map[string]mcp.ServerConfig {
 	if len(servers) == 0 {
-		return configs
+		return nil
 	}
-	if configs == nil {
-		configs = make(map[string]mcp.ServerConfig)
-	}
+	configs := make(map[string]mcp.ServerConfig)
 	for _, mcpServer := range servers {
 		switch {
 		case mcpServer.Stdio != nil:

@@ -234,3 +234,34 @@ func TestSessionState_SwitchIgnoresStaleHandle(t *testing.T) {
 		t.Fatalf("forked=%v file=%q, want %q", forked, s.SessionStore.GetSessionFile(), file)
 	}
 }
+
+func TestMergeMCPKeepsConfiguredFiles(t *testing.T) {
+	files := &mcp.FilesConfig{Enabled: true, AutoApprove: true}
+	base := map[string]mcp.ServerConfig{
+		"relay": {Command: "old", Files: files},
+		"other": {Command: "x"},
+	}
+	overlay := map[string]mcp.ServerConfig{
+		"relay": {Transport: "streamable", URL: "http://injected"},
+	}
+	got := mergeMCP(base, overlay)
+	r := got["relay"]
+	if r.URL != "http://injected" || r.Command != "" || r.Transport != "streamable" {
+		t.Fatalf("transport not from overlay: %+v", r)
+	}
+	if r.Files == nil || !r.Files.Enabled || !r.Files.AutoApprove {
+		t.Fatalf("configured Files dropped: %+v", r.Files)
+	}
+	if r.Files == files {
+		t.Fatal("Files shares pointer with base")
+	}
+	if got["other"].Command != "x" {
+		t.Fatal("unrelated server lost")
+	}
+	// An overlay's own Files wins.
+	own := &mcp.FilesConfig{Enabled: false}
+	got = mergeMCP(base, map[string]mcp.ServerConfig{"relay": {URL: "u", Files: own}})
+	if got["relay"].Files != own {
+		t.Fatal("overlay Files overridden")
+	}
+}

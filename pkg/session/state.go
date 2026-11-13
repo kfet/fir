@@ -232,7 +232,7 @@ func mergeMCP(base, overlay map[string]mcp.ServerConfig) map[string]mcp.ServerCo
 		out[k] = v
 	}
 	for k, v := range overlay {
-		out[k] = v
+		out[k] = mcp.InheritLocalSettings(v, base[k])
 	}
 	return out
 }
