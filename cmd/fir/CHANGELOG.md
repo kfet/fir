@@ -2,9 +2,15 @@
 
 ## [Unreleased]
 
+## [1.55.0] - 2026-11-13
+
 ### Added
 
-- **Idle stop for extension children.** After `extensionIdleStopMinutes` (default 30, `0` = off) of idle time, fir stops its forked builtin Python extension children (the warm fork template stays up) and re-forks them before the next turn, replaying `session_start` with their saved session data and `session_named`. Idle stops do not count toward the crash respawn budget. Extensions opt out with `keep_alive: true` frontmatter; `schedule`, `observe` and `tmuxspinner` do, as do extensions serving auth providers, providers or apis. The builtin `doctor` extension carries its tool-error log across an idle stop instead of writing a partial failure record.
+- **Idle stop for extension children.** After `extensionIdleStopMinutes` (default 30, `0` = off) of idle time, fir stops its forked builtin Python extension children (the warm fork template stays up) and re-forks them before the next turn, replaying `session_start` with their saved session data and `session_named`. Idle stops do not count toward the crash respawn budget. Extensions opt out with `keep_alive: true` frontmatter; `schedule`, `observe` and `tmuxspinner` do, as do extensions serving auth providers, providers or apis. The builtin `doctor` extension carries its tool-error log across an idle stop instead of writing a partial failure record. Measured on hpbox: resuming the 16 idle-stopped builtins takes ~56 ms in total (7–52 ms per child, forked in parallel), up to ~175 ms under full test-suite load.
+
+### Changed
+
+- **Model catalog regenerated**: added `google/gemini-4-hydrogen`, `opencode/gemini-4-hydrogen` (+9 on aggregators); removed 4 aggregator model(s); 14 model(s) with changed pricing/limits, incl. mistral: mistral-large-latest; openrouter: deepseek/deepseek-v4-pro, deepseek/deepseek-v4.1-flash-1017, google/gemma-4-26b-a4b-it, ibm-granite/granite-4.2-8b.
 
 ## [1.54.1] - 2026-11-12
 
