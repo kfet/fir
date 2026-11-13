@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.55.1] - 2026-11-13
+
 ### Fixed
 
 - An MCP server injected by an ACP client (`session/new` `mcpServers`) no longer drops the `files` block of a same-name `mcp.json` entry, so the files extension can be enabled for relay-injected servers such as zulip-acp's `relay`.
