@@ -108,6 +108,13 @@ func (p *Process) StartForked(fs *ForkServer) error {
 	return nil
 }
 
+// Forked reports whether the process was spawned from the fork template.
+func (p *Process) Forked() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.forkSrv != nil
+}
+
 func (p *Process) startLocked() error {
 	cmd := exec.Command(p.cfg.Path)
 	cmd.Env = append(os.Environ(), p.env...)

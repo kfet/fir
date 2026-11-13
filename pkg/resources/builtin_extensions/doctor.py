@@ -121,7 +121,23 @@ def on_session_start(params, ctx: fir_ext.Context) -> None:
     )
     _tool_errors.clear()
     _session_end_fired = False
+    # Resumed after an idle stop: the session never ended, so pick up where
+    # it left off and do not repeat the startup warnings.
+    carried = (params.get("session_data") or {}).get(_IDLE_KEY)
+    if carried:
+        try:
+            state = json.loads(carried)
+            _session["start_time"] = state.get("start_time", _session["start_time"])
+            _tool_errors.extend(state.get("tool_errors") or [])
+        except ValueError:
+            pass
+        ctx.set_session_data(_IDLE_KEY, "")
+        return
     _warn_client_version_gates(ctx)
+
+
+# Session-data key carrying state across an idle stop (session_end reason "idle").
+_IDLE_KEY = "idle_state"
 
 
 # Diagnostic code core uses for an unresolved client-version-gate record.
@@ -164,6 +180,12 @@ def on_session_end(params: dict, ctx: fir_ext.Context) -> None:
     _session_end_fired = True
     reason = params.get("reason", "unknown")
     error_msg = params.get("error", "")
+    if reason == "idle":
+        ctx.set_session_data(
+            _IDLE_KEY,
+            json.dumps({"start_time": _session.get("start_time"), "tool_errors": _tool_errors}),
+        )
+        return
 
     has_errors = bool(_tool_errors) or reason == "error" or bool(error_msg)
 

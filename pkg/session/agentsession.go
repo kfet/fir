@@ -173,6 +173,21 @@ type AgentSessionHooks struct {
 	// inference (see SetModel). It lets a provider extension correct the
 	// model's endpoint on-demand or veto it. Return nil for no change.
 	ResolveModelEndpoint ModelEndpointResolver
+	// BeforeTurn runs before every turn a prompt, carried prompt or injected
+	// message starts, after extensions finished loading. Extensions use it to
+	// bring back children stopped while the session sat idle.
+	BeforeTurn func()
+}
+
+// awaitTurnReady is the single gate in front of every turn: it waits for
+// extensions to finish loading, then runs the BeforeTurn hook.
+func (s *AgentSession) awaitTurnReady() {
+	if s.extReady != nil {
+		<-s.extReady
+	}
+	if h := s.hooks.Load(); h != nil && h.BeforeTurn != nil {
+		h.BeforeTurn()
+	}
 }
 
 // ModelEndpointCorrection is an optional adjustment to a model at selection
@@ -655,9 +670,7 @@ func (s *AgentSession) Prompt(text string, opts ...*PromptOptions) error {
 	// produce a spurious "Credentials may have expired" error. This is
 	// the single gate covering all turn entry points (user prompts,
 	// initial prompt, MCP channel injection via InjectMessage).
-	if s.extReady != nil {
-		<-s.extReady
-	}
+	s.awaitTurnReady()
 
 	s.resyncModelAuth()
 
@@ -777,9 +790,7 @@ func (s *AgentSession) InjectMessage(msg agent.AgentMessage) {
 			// Same gate as Prompt: don't fire the first LLM call before
 			// extensions (auth providers, ModifyModels hooks, etc.) have
 			// finished loading.
-			if s.extReady != nil {
-				<-s.extReady
-			}
+			s.awaitTurnReady()
 			if err := s.Agent.PromptMessages(append(s.sections.updateMessages(), msg)); err != nil {
 				firlog.Debug("injected message auto-prompt failed", "err", err)
 			}
@@ -812,9 +823,7 @@ func (s *AgentSession) PromptWithCarried(prompt string, carried []agent.AgentMes
 			return nil
 		}
 		// Same extension-readiness gate as Prompt.
-		if s.extReady != nil {
-			<-s.extReady
-		}
+		s.awaitTurnReady()
 		if err := s.Agent.PromptMessages(carried); err != nil {
 			for _, m := range carried {
 				s.Agent.FollowUp(m)

@@ -545,3 +545,11 @@ func TestSettingsManager_GetMCPToolTimeout(t *testing.T) {
 	t.Setenv("FIR_MCP_TOOL_TIMEOUT", "0")
 	assert.Equal(t, time.Duration(0), sm.GetMCPToolTimeout())
 }
+
+func TestSettingsManager_GetExtensionIdleStop(t *testing.T) {
+	assert.Equal(t, DefaultExtensionIdleStop, NewInMemorySettingsManager(Settings{}).GetExtensionIdleStop())
+	five, zero, neg := 5, 0, -3
+	assert.Equal(t, 5*time.Minute, NewInMemorySettingsManager(Settings{ExtensionIdleStopMinutes: &five}).GetExtensionIdleStop())
+	assert.Equal(t, time.Duration(0), NewInMemorySettingsManager(Settings{ExtensionIdleStopMinutes: &zero}).GetExtensionIdleStop())
+	assert.Equal(t, time.Duration(0), NewInMemorySettingsManager(Settings{ExtensionIdleStopMinutes: &neg}).GetExtensionIdleStop())
+}

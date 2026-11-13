@@ -825,6 +825,7 @@ All fields are optional. Nested objects merge recursively; arrays and primitives
   "turnCache1h": true,                   // Anthropic: cache each turn's user message for 1h (TUI/ACP; env FIR_TURN_CACHE_1H=0/1 overrides)
   "doubleEscapeAction": "tree",          // "tree" or "quit"
   "autocompleteMaxVisible": 5,           // Max autocomplete suggestions shown
+  "extensionIdleStopMinutes": 30,        // Stop forked builtin extension children after N idle minutes; re-forked before the next turn (0 = off; frontmatter keep_alive: true opts out)
   "showHardwareCursor": false,           // Show hardware cursor
 
   // Shell

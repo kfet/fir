@@ -299,8 +299,20 @@ func Setup(asession *session.AgentSession, opts SetupOptions) (*SetupResult, err
 			}
 			return nil
 		},
+		// Re-fork extensions stopped while idle before the turn starts, so
+		// they see its events and their tools are registered. Mark the
+		// session busy now (not at agent_start) so the idle timer cannot
+		// stop them again before the turn begins; agent_end clears it.
+		BeforeTurn: func() {
+			mgr.Resume()
+			mgr.SetBusy(true)
+		},
 	}
 	asession.SetHooks(hooks)
+
+	if sm := asession.SettingsManager; sm != nil {
+		mgr.SetIdleStop(sm.GetExtensionIdleStop())
+	}
 
 	// Forward MCP server health changes (auth lost/regained, errors,
 	// recovery) to extensions.
@@ -337,9 +349,11 @@ func Setup(asession *session.AgentSession, opts SetupOptions) (*SetupResult, err
 		ae := event.AgentEvent
 		switch ae.Type {
 		case agent.EventAgentStart:
+			mgr.SetBusy(true)
 			mgr.EmitEvent("agent_start", nil)
 		case agent.EventAgentEnd:
 			mgr.EmitEvent("agent_end", nil)
+			mgr.SetBusy(false)
 		case agent.EventTurnStart:
 			mgr.EmitEvent("turn_start", nil)
 		case agent.EventTurnEnd:

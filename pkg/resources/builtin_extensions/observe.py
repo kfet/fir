@@ -6,6 +6,7 @@
 #   accepts user-input messages on a Unix socket, and provides command-line
 #   tools to list, tail, and steer running fir sessions.
 # builtin: true
+# keep_alive: true
 # cli_verbs: observe, send, htop
 # ---
 """fir observe / fir send — per-session observation extension and CLI verbs.

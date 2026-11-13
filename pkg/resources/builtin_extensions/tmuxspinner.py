@@ -3,6 +3,7 @@
 # name: tmuxspinner
 # description: Show agent work status in the tmux window name
 # builtin: true
+# keep_alive: true
 # modes: tui
 # ---
 """Show agent work status in the tmux window name while the agent is working.

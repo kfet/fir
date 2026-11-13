@@ -95,39 +95,42 @@ type DebugLogSettings struct {
 
 // Settings is the full settings schema.
 type Settings struct {
-	DefaultProvider        string                    `json:"defaultProvider,omitempty"`
-	DefaultModel           string                    `json:"defaultModel,omitempty"`
-	DefaultThinkingLevel   string                    `json:"defaultThinkingLevel,omitempty"`
-	Transport              string                    `json:"transport,omitempty"`
-	SteeringMode           string                    `json:"steeringMode,omitempty"`
-	FollowUpMode           string                    `json:"followUpMode,omitempty"`
-	Theme                  string                    `json:"theme,omitempty"`
-	Compaction             *CompactionSettings       `json:"compaction,omitempty"`
-	BranchSummary          *BranchSummarySettings    `json:"branchSummary,omitempty"`
-	Retry                  *RetrySettings            `json:"retry,omitempty"`
-	HideThinkingBlock      *bool                     `json:"hideThinkingBlock,omitempty"`
-	ShellPath              string                    `json:"shellPath,omitempty"`
-	ShellCommandPrefix     string                    `json:"shellCommandPrefix,omitempty"`
-	CollapseChangelog      *bool                     `json:"collapseChangelog,omitempty"`
-	TurnCache1h            *bool                     `json:"turnCache1h,omitempty"`
-	Packages               []any                     `json:"packages,omitempty"`
-	Extensions             []string                  `json:"extensions,omitempty"`
-	ExtensionPaths         []string                  `json:"extensionPaths,omitempty"`
-	Skills                 []string                  `json:"skills,omitempty"`
-	Themes                 []string                  `json:"themes,omitempty"`
-	EnableSkillCommands    *bool                     `json:"enableSkillCommands,omitempty"`
-	EnableSysExtensions    *bool                     `json:"enableSysExtensions,omitempty"`
-	Terminal               *TerminalSettings         `json:"terminal,omitempty"`
-	Images                 *ImageSettings            `json:"images,omitempty"`
-	EnabledModels          []string                  `json:"enabledModels,omitempty"`
-	ThinkingBudgets        *ThinkingBudgetsSettings  `json:"thinkingBudgets,omitempty"`
-	AutocompleteMaxVisible *int                      `json:"autocompleteMaxVisible,omitempty"`
-	ShowHardwareCursor     *bool                     `json:"showHardwareCursor,omitempty"`
-	Markdown               *MarkdownSettings         `json:"markdown,omitempty"`
-	ServerTools            []string                  `json:"serverTools,omitempty"`
-	ServerCompaction       *ServerCompactionSettings `json:"serverCompaction,omitempty"`
-	DebugLog               *DebugLogSettings         `json:"debugLog,omitempty"`
-	MCP                    *MCPSettings              `json:"mcp,omitempty"`
+	DefaultProvider        string                   `json:"defaultProvider,omitempty"`
+	DefaultModel           string                   `json:"defaultModel,omitempty"`
+	DefaultThinkingLevel   string                   `json:"defaultThinkingLevel,omitempty"`
+	Transport              string                   `json:"transport,omitempty"`
+	SteeringMode           string                   `json:"steeringMode,omitempty"`
+	FollowUpMode           string                   `json:"followUpMode,omitempty"`
+	Theme                  string                   `json:"theme,omitempty"`
+	Compaction             *CompactionSettings      `json:"compaction,omitempty"`
+	BranchSummary          *BranchSummarySettings   `json:"branchSummary,omitempty"`
+	Retry                  *RetrySettings           `json:"retry,omitempty"`
+	HideThinkingBlock      *bool                    `json:"hideThinkingBlock,omitempty"`
+	ShellPath              string                   `json:"shellPath,omitempty"`
+	ShellCommandPrefix     string                   `json:"shellCommandPrefix,omitempty"`
+	CollapseChangelog      *bool                    `json:"collapseChangelog,omitempty"`
+	TurnCache1h            *bool                    `json:"turnCache1h,omitempty"`
+	Packages               []any                    `json:"packages,omitempty"`
+	Extensions             []string                 `json:"extensions,omitempty"`
+	ExtensionPaths         []string                 `json:"extensionPaths,omitempty"`
+	Skills                 []string                 `json:"skills,omitempty"`
+	Themes                 []string                 `json:"themes,omitempty"`
+	EnableSkillCommands    *bool                    `json:"enableSkillCommands,omitempty"`
+	EnableSysExtensions    *bool                    `json:"enableSysExtensions,omitempty"`
+	Terminal               *TerminalSettings        `json:"terminal,omitempty"`
+	Images                 *ImageSettings           `json:"images,omitempty"`
+	EnabledModels          []string                 `json:"enabledModels,omitempty"`
+	ThinkingBudgets        *ThinkingBudgetsSettings `json:"thinkingBudgets,omitempty"`
+	AutocompleteMaxVisible *int                     `json:"autocompleteMaxVisible,omitempty"`
+	// ExtensionIdleStopMinutes stops forked extension children after this
+	// many idle minutes; they resume on the next prompt. 0 turns it off.
+	ExtensionIdleStopMinutes *int                      `json:"extensionIdleStopMinutes,omitempty"`
+	ShowHardwareCursor       *bool                     `json:"showHardwareCursor,omitempty"`
+	Markdown                 *MarkdownSettings         `json:"markdown,omitempty"`
+	ServerTools              []string                  `json:"serverTools,omitempty"`
+	ServerCompaction         *ServerCompactionSettings `json:"serverCompaction,omitempty"`
+	DebugLog                 *DebugLogSettings         `json:"debugLog,omitempty"`
+	MCP                      *MCPSettings              `json:"mcp,omitempty"`
 	// SessionStores lists extra read-only session stores. Global-only:
 	// deepMergeSettings never takes it from project settings. Read it with
 	// LoadSessionStores.
@@ -162,6 +165,7 @@ func deepMergeSettings(base, overrides Settings) Settings {
 	mergeBool(&r.EnableSysExtensions, overrides.EnableSysExtensions)
 	mergeBool(&r.ShowHardwareCursor, overrides.ShowHardwareCursor)
 	mergeInt(&r.AutocompleteMaxVisible, overrides.AutocompleteMaxVisible)
+	mergeInt(&r.ExtensionIdleStopMinutes, overrides.ExtensionIdleStopMinutes)
 
 	// Slice fields: override wins if non-nil
 	if overrides.Packages != nil {
@@ -1107,6 +1111,23 @@ func (sm *SettingsManager) GetAutocompleteMaxVisible() int {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 	return intDefault(sm.settings.AutocompleteMaxVisible, 5)
+}
+
+// DefaultExtensionIdleStop is how long a session sits idle before its forked
+// extension children are stopped (extensionIdleStopMinutes).
+const DefaultExtensionIdleStop = 30 * time.Minute
+
+// GetExtensionIdleStop returns the extension idle stop delay; 0 means off.
+func (sm *SettingsManager) GetExtensionIdleStop() time.Duration {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	if v := sm.settings.ExtensionIdleStopMinutes; v != nil {
+		if *v <= 0 {
+			return 0
+		}
+		return time.Duration(*v) * time.Minute
+	}
+	return DefaultExtensionIdleStop
 }
 
 func (sm *SettingsManager) GetShowHardwareCursor() bool {

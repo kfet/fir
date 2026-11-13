@@ -215,6 +215,24 @@ class TestDoctor(unittest.TestCase):
         )
         self.assertIn("edit it", doctor.cmd_doctor([], self.ctx)["message"])
 
+    def test_idle_stop_carries_errors_and_skips_record(self):
+        doctor.on_session_start({"session_id": "s1"}, self.ctx)
+        doctor.on_tool_execution_end({"tool_name": "bash", "is_error": True}, self.ctx)
+        doctor.on_session_end({"reason": "idle"}, self.ctx)
+        self.assertEqual(doctor._read_records(), [])
+        key, saved = self.ctx.set_session_data.call_args[0]
+        self.assertEqual(key, doctor._IDLE_KEY)
+
+        # Resumed child: fresh state, restored from session data, no re-warning.
+        doctor._tool_errors.clear()
+        self._with_diagnostics([{"code": "client_version_gate", "summary": "gated"}])
+        doctor.on_session_start({"session_id": "s1", "session_data": {key: saved}}, self.ctx)
+        self.ctx.notify.assert_not_called()
+        doctor.on_session_end({"reason": "normal"}, self.ctx)
+        records = doctor._read_records()
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["tool_error_count"], 1)
+
     # --- client-version-gate (records written by core) ---
 
     def test_session_start_warns_on_unresolved_gate(self):

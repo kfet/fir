@@ -57,7 +57,10 @@ type ExtensionFrontmatter struct {
 	// Explicit marks an extension as opt-in: it is discovered (so `-e <name>`
 	// can find it) but is NOT auto-loaded. Use for example/demo extensions
 	// that should only run when the user asks for them by name.
-	Explicit      bool
+	Explicit bool
+	// KeepAlive opts the extension out of the idle stop: it keeps running
+	// while the session sits idle (timers, sockets, watchers).
+	KeepAlive     bool
 	Modes         []string
 	AuthProviders []string // auth provider IDs this extension registers
 	CLIVerbs      []string // top-level `fir <verb>` names this extension claims
@@ -124,6 +127,8 @@ func ParseCommentFrontmatter(content string) ExtensionFrontmatter {
 			fm.Builtin = value == "true"
 		case "explicit":
 			fm.Explicit = value == "true"
+		case "keep_alive", "keep-alive":
+			fm.KeepAlive = value == "true"
 		case "mode", "modes":
 			fm.Modes = parseExtensionModes(value)
 		case "auth_provider", "auth_providers":

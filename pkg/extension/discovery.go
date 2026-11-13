@@ -22,6 +22,7 @@ type ExtProcConfig struct {
 	AuthProviders []string // auth provider IDs declared in frontmatter
 	CLIVerbs      []string // top-level `fir <verb>` names declared in frontmatter
 	Explicit      bool     // when true, extension is opt-in: only loaded when named via -e
+	KeepAlive     bool     // when true, the idle stop never stops this extension
 }
 
 // originForScope maps the existing Scope label to the Origin label used by
@@ -52,6 +53,7 @@ func makeExtConfig(name, path, scope string, fm resources.ExtensionFrontmatter) 
 		AuthProviders: fm.AuthProviders,
 		CLIVerbs:      fm.CLIVerbs,
 		Explicit:      fm.Explicit,
+		KeepAlive:     fm.KeepAlive,
 	}
 }
 

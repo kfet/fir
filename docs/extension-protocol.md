@@ -1409,6 +1409,7 @@ parallel frontmatter declaration.  All extensions start eagerly in parallel.
 | `description` | One-line summary shown in listings. |
 | `builtin` | When `true`, marks a builtin extension shipped with fir. |
 | `explicit` | When `true`, the extension is **opt-in**: it is discovered (so `fir -e <name>` and listings find it), but is **not** auto-loaded. Use for example/demo extensions that should only run when the user asks for them by name. |
+| `keep_alive` | When `true`, the extension is never stopped by the idle stop. By default, after `extensionIdleStopMinutes` (default 30, `0` = off) of idle time fir stops forked builtin Python children (except ones serving auth providers, providers or apis) with `session_end` reason `"idle"`, and re-forks them before the next turn with `session_start` (carrying their saved session data) and `session_named`. Set it for extensions that must run while the user is away (timers, sockets, watchers). |
 | `modes` | Comma-separated list of fir modes in which this extension should run.  Values: `tui` (alias `interactive`), `text`, `json`, `rpc`, `acp`.  Omit to run in all modes. |
 | `auth_providers` | Comma-separated list of auth provider IDs registered by the extension (used by the auth-only manager to discover provider extensions before full startup). |
 | `cli_verbs` | Comma-separated list of top-level `fir <verb>` names this extension claims. See [CLI Verbs](#cli-verbs) below. |

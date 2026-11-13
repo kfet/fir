@@ -81,6 +81,13 @@ type Manager struct {
 	// death more than respawnWindow after the previous one starts a new count.
 	respawns  map[string]int
 	lastDeath map[string]time.Time
+
+	// Idle stop state (see idle.go).
+	idleAfter time.Duration
+	idleTimer *time.Timer
+	idleGen   uint64
+	busy      bool
+	idled     []idledExt
 }
 
 // maxRespawns bounds how often one extension is respawned after its process
@@ -553,6 +560,8 @@ func (m *Manager) StopWithReason(reason, errMsg string) error {
 	m.bridges = nil
 	m.stopped = true
 	m.fork = nil
+	m.idled = nil
+	m.armIdleLocked() // stopped: just cancels the timer
 	m.mu.Unlock()
 
 	// Build session_end payload.
@@ -1143,12 +1152,20 @@ type ExtCommand struct {
 func (m *Manager) GetCommands() []ExtCommand {
 	m.mu.Lock()
 	bridges := append([]*managedBridge(nil), m.bridges...)
+	idled := append([]idledExt(nil), m.idled...)
 	m.mu.Unlock()
 
 	var cmds []ExtCommand
 	for _, mb := range bridges {
 		for _, spec := range mb.bridge.caps.Commands {
 			cmds = append(cmds, ExtCommand{ExtName: mb.cfg.Name, Spec: spec})
+		}
+	}
+	// Idle-stopped extensions keep their commands listed; dispatching one
+	// resumes them first.
+	for _, e := range idled {
+		for _, spec := range e.commands {
+			cmds = append(cmds, ExtCommand{ExtName: e.cfg.Name, Spec: spec})
 		}
 	}
 	return cmds
@@ -1177,6 +1194,8 @@ func (m *Manager) DispatchCommand(name string, args []string, timeout time.Durat
 	if timeout == 0 {
 		timeout = 10 * time.Second
 	}
+	// A slash command is user activity: bring idle-stopped extensions back.
+	m.Resume()
 
 	m.mu.Lock()
 	bridges := append([]*managedBridge(nil), m.bridges...)
@@ -1307,22 +1326,27 @@ func (m *Manager) EmitSessionStartWithData(reexecData map[string]map[string]stri
 	m.mu.Lock()
 	bridges := append([]*managedBridge(nil), m.bridges...)
 	m.mu.Unlock()
+	m.emitSessionStart(bridges, reexecData)
+}
 
+// emitSessionStart sends session_start (seeding each bridge's saved data) to
+// the given bridges and waits for their acknowledgements.
+func (m *Manager) emitSessionStart(bridges []*managedBridge, savedData map[string]map[string]string) {
 	ctx, cancel := context.WithTimeout(context.Background(), sessionStartAckTimeout)
 	defer cancel()
+	var sid string
+	if m.api != nil {
+		sid = m.api.GetSessionID()
+	}
 	var wg sync.WaitGroup
 	for _, mb := range bridges {
 		var payload *SessionStartPayload
-		// Always include session_id so extensions can identify the session.
-		var sid string
-		if m.api != nil {
-			sid = m.api.GetSessionID()
-		}
 		var data map[string]string
-		if d, ok := reexecData[mb.cfg.Name]; ok && len(d) > 0 {
+		if d, ok := savedData[mb.cfg.Name]; ok && len(d) > 0 {
 			mb.bridge.SeedSessionData(d)
 			data = d
 		}
+		// Always include session_id so extensions can identify the session.
 		if sid != "" || len(data) > 0 {
 			payload = &SessionStartPayload{
 				SessionID:   sid,

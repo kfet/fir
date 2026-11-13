@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Idle stop for extension children.** After `extensionIdleStopMinutes` (default 30, `0` = off) of idle time, fir stops its forked builtin Python extension children (the warm fork template stays up) and re-forks them before the next turn, replaying `session_start` with their saved session data and `session_named`. Idle stops do not count toward the crash respawn budget. Extensions opt out with `keep_alive: true` frontmatter; `schedule`, `observe` and `tmuxspinner` do, as do extensions serving auth providers, providers or apis. The builtin `doctor` extension carries its tool-error log across an idle stop instead of writing a partial failure record.
+
 ## [1.54.1] - 2026-11-12
 
 ### Changed

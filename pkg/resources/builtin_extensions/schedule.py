@@ -3,6 +3,7 @@
 # name: schedule
 # description: Schedule the agent to continue at a future time
 # builtin: true
+# keep_alive: true
 # modes: tui
 # ---
 """Schedule the agent session to resume at a future time.
