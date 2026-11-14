@@ -19,6 +19,18 @@ import (
 // mangle, when non-nil, edits the landing URL before it is "pasted".
 func remoteBrowserCallbacks(t *testing.T, mangle func(*url.URL)) pinoauth.LoginCallbacks {
 	t.Helper()
+	return remoteBrowserPaste(t, func(u *url.URL) string {
+		if mangle != nil {
+			mangle(u)
+		}
+		return u.String()
+	})
+}
+
+// remoteBrowserPaste is remoteBrowserCallbacks with full control over what the
+// user pastes back, derived from the landing URL.
+func remoteBrowserPaste(t *testing.T, render func(*url.URL) string) pinoauth.LoginCallbacks {
+	t.Helper()
 	landing := make(chan string, 1)
 	noFollow := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
 		return http.ErrUseLastResponse
@@ -38,10 +50,7 @@ func remoteBrowserCallbacks(t *testing.T, mangle func(*url.URL)) pinoauth.LoginC
 				close(landing)
 				return
 			}
-			if mangle != nil {
-				mangle(loc)
-			}
-			landing <- loc.String()
+			landing <- render(loc)
 		},
 		OnManualCodeInput: func() (string, error) {
 			v, ok := <-landing
@@ -98,4 +107,20 @@ func TestMCPOAuth_PastedLandingURL_StateMismatchRejected(t *testing.T) {
 		u.RawQuery = q.Encode()
 	}))
 	require.ErrorContains(t, err, "state mismatch")
+}
+
+// Some phones show the code but not the URL, or the user copies only the code:
+// a bare authorization code pasted back must complete the login too.
+func TestMCPOAuth_PastedBareCode(t *testing.T) {
+	as := newFakeAuthServer(t, asOptions{})
+	srv := newFakeMCPServer(t, as, mcpOptions{})
+	mgr, _ := newTestManager(t, srv.config(nil))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	require.NoError(t, mgr.LoginServer(ctx, "srv", remoteBrowserPaste(t, func(u *url.URL) string {
+		return "  " + u.Query().Get("code") + "\n"
+	})))
+	require.NoError(t, connectAndWait(t, mgr))
+	requireToolsWork(t, mgr)
 }

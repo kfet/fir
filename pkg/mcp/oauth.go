@@ -150,6 +150,11 @@ type serverAuth struct {
 	mu     authMutex
 	loaded bool
 	cred   *oauthCredential
+	// synced is the fingerprint of the stored credential as of our last load
+	// or write. A stored row with a different fingerprint was written by
+	// someone else — another fir process, or another Manager in this one —
+	// and supersedes whatever we hold in memory.
+	synced string
 	// loginInFlight is true while an interactive login holds mu. Requests
 	// check it to fail fast with a clear message instead of burning their
 	// whole deadline waiting on a human.
@@ -295,13 +300,39 @@ func (sa *serverAuth) matches(cfg ServerConfig) bool {
 		slices.Equal(want.AuthorizationServers, sa.cfg.AuthorizationServers)
 }
 
-// ensureLoadedLocked lazily pulls the persisted credential. Called with mu held.
+// ensureLoadedLocked pulls the persisted credential: lazily on first use, and
+// again whenever the stored row has changed since we last loaded or wrote it.
+// Called with mu held.
+//
+// The re-check is what lets several fir processes share one credential. With
+// rotating refresh tokens, a process that keeps using its in-memory copy after
+// another process refreshed holds a spent refresh token; its next refresh
+// fails and used to delete the other process's perfectly good credential. It
+// is also what lets a running session pick up a token minted out-of-band by
+// `fir mcp login` without a manual /mcp reload. The check is a stat of
+// auth.json plus a map lookup.
 func (sa *serverAuth) ensureLoadedLocked() {
-	if sa.loaded {
+	if !sa.loaded {
+		sa.loaded = true
+		sa.adoptLocked(sa.store.Load(sa.name, sa.resource))
 		return
 	}
-	sa.loaded = true
-	sa.cred = sa.store.Load(sa.name, sa.resource)
+	if !sa.store.persistent() {
+		return
+	}
+	sa.store.reloadIfStale()
+	stored := sa.store.Load(sa.name, sa.resource)
+	if fingerprint(stored) == sa.synced {
+		return
+	}
+	firlog.Debug("mcp oauth: adopting credential written elsewhere", "server", sa.name, "present", stored != nil)
+	sa.adoptLocked(stored)
+}
+
+// adoptLocked installs a credential read from storage. Called with mu held.
+func (sa *serverAuth) adoptLocked(stored *oauthCredential) {
+	sa.synced = fingerprint(stored)
+	sa.cred = stored
 	sa.gen++
 	if sa.cred != nil && !sa.credIssuerAllowed(sa.cred.Issuer) {
 		// The user has since forced a different authorization server. The
@@ -391,7 +422,7 @@ func (sa *serverAuth) accessToken(ctx context.Context) (string, uint64, error) {
 		return "", sa.gen, nil
 	}
 	if sa.cred.Token.ExpiresWithin(tokenRefreshWindow) {
-		if err := sa.refreshLocked(ctx); err != nil {
+		if err := sa.refreshLocked(ctx, false); err != nil {
 			firlog.Debug("mcp oauth: proactive refresh failed", "server", sa.name, "err", err)
 			if sa.cred == nil || sa.cred.Token == nil {
 				return "", sa.gen, sa.requireLoginLocked("token refresh failed", err)
@@ -443,15 +474,20 @@ func (sa *serverAuth) handleUnauthorized(ctx context.Context, headers []string, 
 	}
 
 	if sa.cred != nil && sa.cred.Token != nil && sa.cred.Token.RefreshToken != "" {
-		err := sa.refreshLocked(ctx)
-		if err == nil {
+		err := sa.refreshLocked(ctx, true)
+		if err == nil && sa.cred != nil && sa.cred.Token != nil {
 			return sa.cred.Token.AccessToken, nil
 		}
 		firlog.Debug("mcp oauth: refresh after 401 failed", "server", sa.name, "err", err)
-		// The refresh token is revoked or expired — a full re-login is the
-		// only way back. Drop the dead credential so the next dial does not
-		// retry it.
-		sa.dropCredentialLocked()
+		if err != nil && !isRefreshRejected(err) && !errors.Is(err, errCredentialRemoved) {
+			// Network blip, token endpoint down, 5xx: the refresh token may
+			// well still be good. Keep it and fail this request; the next
+			// one (or the reconnect loop) tries again.
+			return "", fmt.Errorf("MCP server %q: token refresh failed: %w", sa.name, err)
+		}
+		// The authorization server rejected the refresh token (refreshLocked
+		// has deleted it from storage), or the stored credential is gone: a
+		// full re-login is the only way back.
 		return "", sa.requireLoginLocked("stored credentials are no longer valid", err)
 	}
 
@@ -465,12 +501,35 @@ func (sa *serverAuth) handleUnauthorized(ctx context.Context, headers []string, 
 
 // dropCredentialLocked forgets the cached credential and deletes it from
 // storage. Called with mu held.
+//
+// The delete is compare-and-delete under the auth.json lock: a row another
+// process rewrote since we loaded it is someone else's fresh credential and is
+// adopted instead of deleted.
 func (sa *serverAuth) dropCredentialLocked() {
+	failed := sa.synced
 	sa.cred = nil
 	sa.gen++
-	if err := sa.store.Delete(sa.name); err != nil {
-		firlog.Warn("mcp oauth: failed to delete stale credential", "server", sa.name, "err", err)
+	if !sa.store.persistent() {
+		return
 	}
+	var adopted bool
+	var fresh *oauthCredential
+	err := sa.store.Update(sa.name, sa.resource, func(cur *oauthCredential) (*oauthCredential, bool, error) {
+		if fingerprint(cur) != failed {
+			adopted, fresh = true, cur
+			return nil, false, nil
+		}
+		return nil, true, nil
+	})
+	if err != nil {
+		firlog.Warn("mcp oauth: failed to delete stale credential", "server", sa.name, "err", err)
+		return
+	}
+	if adopted {
+		sa.adoptLocked(fresh)
+		return
+	}
+	sa.synced = ""
 }
 
 // requireLoginLocked records and returns an AuthRequiredError. Called with mu held.
@@ -559,36 +618,121 @@ func (sa *serverAuth) forget() {
 	sa.gen++
 }
 
+// errCredentialRemoved reports that the stored credential was deleted by
+// another process (e.g. `fir mcp logout`) while we held a copy in memory.
+var errCredentialRemoved = errors.New("stored credential was removed")
+
+// isRefreshRejected reports whether a refresh failure is the authorization
+// server definitively rejecting the grant (invalid_grant and friends), as
+// opposed to a transport failure or server error that may clear on retry.
+func isRefreshRejected(err error) bool {
+	var te *pinoauth.TokenError
+	if !errors.As(err, &te) {
+		return false
+	}
+	return te.Code != "" || te.HTTPStatus == http.StatusBadRequest || te.HTTPStatus == http.StatusUnauthorized
+}
+
 // refreshLocked exchanges the stored refresh token for a fresh access token
 // and persists the result. Called with mu held.
 //
-// Persisting immediately is not optional: many authorization servers rotate
-// the refresh token on every use, and dropping the rotated value would strand
-// the user at the next restart.
+// With a persistent store the whole read-decide-refresh-write runs under the
+// cross-process auth.json lock, mirroring the provider refresh path:
+//
+//   - If the stored row is not the one we last saw, another process (or
+//     another Manager) already refreshed or re-logged in. Its credential is
+//     adopted and no grant is spent — spending ours would replay a rotated
+//     refresh token, which servers answer with invalid_grant and, with reuse
+//     detection, by revoking the whole token family.
+//   - Otherwise refresh, and persist the rotated token before releasing the
+//     lock. Dropping a rotated refresh token strands the user at restart.
+//   - When dropOnReject is set and the server rejects the grant, the dead row
+//     is deleted in the same critical section, so it can never clobber a
+//     credential written concurrently by someone else.
 //
 // No issuer check is needed here: a credential only reaches this point after
 // ensureLoadedLocked's gate, so its TokenURL belongs to an issuer the current
 // config permits.
-func (sa *serverAuth) refreshLocked(ctx context.Context) error {
+func (sa *serverAuth) refreshLocked(ctx context.Context, dropOnReject bool) error {
 	if sa.cred == nil || sa.cred.Token == nil || sa.cred.Token.RefreshToken == "" {
 		return errors.New("no refresh token")
 	}
 	if sa.cred.TokenURL == "" {
 		return errors.New("no token endpoint recorded for this credential")
 	}
+	if !sa.store.persistent() {
+		tok, err := sa.grant(ctx)
+		if err != nil {
+			return err
+		}
+		sa.applyRefreshedLocked(tok)
+		sa.synced = fingerprint(sa.cred)
+		return nil
+	}
+	var (
+		adopted    bool
+		fresh      *oauthCredential
+		refreshErr error
+		dropped    bool
+	)
+	err := sa.store.Update(sa.name, sa.resource, func(cur *oauthCredential) (*oauthCredential, bool, error) {
+		if fingerprint(cur) != sa.synced {
+			adopted, fresh = true, cur
+			return nil, false, nil
+		}
+		tok, err := sa.grant(ctx)
+		if err != nil {
+			refreshErr = err
+			if dropOnReject && isRefreshRejected(err) {
+				dropped = true
+				return nil, true, nil
+			}
+			return nil, false, nil
+		}
+		sa.applyRefreshedLocked(tok)
+		return sa.cred, true, nil
+	})
+	switch {
+	case adopted:
+		firlog.Debug("mcp oauth: credential refreshed elsewhere; adopting it", "server", sa.name)
+		sa.adoptLocked(fresh)
+		if sa.cred == nil {
+			return errCredentialRemoved
+		}
+		return nil
+	case refreshErr != nil:
+		if dropped && err == nil {
+			sa.cred = nil
+			sa.synced = ""
+			sa.gen++
+		}
+		return refreshErr
+	case err != nil:
+		// The rotated token lives on in memory; synced still matches the
+		// old row on disk, so it is not mistaken for someone else's write.
+		return fmt.Errorf("persist refreshed token: %w", err)
+	}
+	sa.synced = fingerprint(sa.cred)
+	firlog.Debug("mcp oauth: refreshed token", "server", sa.name)
+	return nil
+}
+
+// grant performs the refresh-token grant for the in-memory credential.
+func (sa *serverAuth) grant(ctx context.Context) (*pinoauth.Token, error) {
 	client := &pinoauth.Client{
 		TokenURL:     sa.cred.TokenURL,
 		ClientID:     sa.cred.ClientID,
 		ClientSecret: sa.cred.ClientSecret,
 		HTTPClient:   sa.tokenHTTPClient(),
 	}
-	tok, err := client.Refresh(ctx, pinoauth.RefreshRequest{
+	return client.Refresh(ctx, pinoauth.RefreshRequest{
 		RefreshToken: sa.cred.Token.RefreshToken,
 		Extra:        url.Values{"resource": []string{sa.resource}},
 	})
-	if err != nil {
-		return err
-	}
+}
+
+// applyRefreshedLocked installs a freshly granted token. Called with mu held.
+func (sa *serverAuth) applyRefreshedLocked(tok *pinoauth.Token) {
 	if tok.RefreshToken == "" {
 		// Non-rotating server: keep the refresh token we already hold.
 		tok.RefreshToken = sa.cred.Token.RefreshToken
@@ -599,11 +743,6 @@ func (sa *serverAuth) refreshLocked(ctx context.Context) error {
 	sa.cred.Token = tok
 	sa.cred.Scope = tok.Scope
 	sa.gen++
-	if err := sa.store.Save(sa.name, sa.cred); err != nil {
-		return fmt.Errorf("persist refreshed token: %w", err)
-	}
-	firlog.Debug("mcp oauth: refreshed token", "server", sa.name)
-	return nil
 }
 
 // tokenHTTPClient returns the HTTP client used for token-endpoint requests. It
@@ -848,7 +987,7 @@ func (sa *serverAuth) loginLocked(ctx context.Context, ui pinoauth.LoginCallback
 	if ui.OnAuth != nil {
 		ui.OnAuth(pinoauth.AuthInfo{
 			URL:          authURL,
-			Instructions: fmt.Sprintf("Authorize fir to access the MCP server %q.", sa.name),
+			Instructions: loginInstructions(sa.name, redirectURI),
 		})
 	}
 	code, gotState, err := pinoauth.AwaitAuthCode(ctx, resultCh, ui.OnManualCodeInput, ui.OnDismissManualInput)
@@ -900,6 +1039,7 @@ func (sa *serverAuth) loginLocked(ctx context.Context, ui pinoauth.LoginCallback
 	if err := sa.store.Save(sa.name, sa.cred); err != nil {
 		return fmt.Errorf("persist token: %w", err)
 	}
+	sa.synced = fingerprint(sa.cred)
 	firlog.Info("mcp oauth: login complete", "server", sa.name, "issuer", asm.Issuer)
 	return nil
 }
@@ -1077,4 +1217,19 @@ func authHTTPClient(sa *serverAuth) *http.Client {
 // embedded uses with no agent directory.
 func newCredentialStore(storage *auth.AuthStorage) credentialStore {
 	return credentialStore{storage: storage}
+}
+
+// loginInstructions tells the user how to finish a login. With a loopback
+// redirect the final page only loads in a browser on this host; from a phone
+// or another machine it fails, and the user must paste that page's address
+// (or just its code= value) back. Saying so up front is the difference
+// between a 30-second login and a confused user.
+func loginInstructions(server, redirectURI string) string {
+	msg := fmt.Sprintf("Authorize fir to access the MCP server %q.", server)
+	u, err := url.Parse(redirectURI)
+	if err != nil || !isLoopbackHost(u.Hostname()) {
+		return msg
+	}
+	return msg + " If you approve on another device, the final page will not load — that is expected:" +
+		" copy its full address (or just the code= value) and paste it back here."
 }

@@ -129,7 +129,7 @@ func runMCPLogin(serverName string) error {
 		return err
 	}
 	fmt.Fprintf(os.Stderr, "Logged in to MCP server %q. Credentials saved.\n", serverName)
-	fmt.Fprintf(os.Stderr, "Any fir session already running: use /mcp reload to pick this up.\n")
+	fmt.Fprintf(os.Stderr, "Running fir sessions pick this up automatically within a few seconds.\n")
 	return nil
 }
 

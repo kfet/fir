@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- MCP: closing a manager cancels and waits for initial server connects still in flight, so none outlives it.
+- MCP OAuth: a credential shared by several fir processes is no longer deleted when one of them refreshes it. Refreshes run under the auth.json lock, a stale in-memory token adopts the stored one, and a credential is deleted only when the authorization server rejects it — never on a network error.
+- MCP OAuth: running sessions pick up a credential saved by `fir mcp login` in another process without `/mcp reload`.
+- MCP OAuth: the login prompt says that from another device the final page will not load, and that its address or bare `code=` value can be pasted back.
+
 ## [1.55.1] - 2026-11-13
 
 ### Fixed

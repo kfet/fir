@@ -280,3 +280,75 @@ func carryAccountMetadata(updated, previous AuthCredential) AuthCredential {
 	}
 	return updated
 }
+
+// UpdateSlot runs fn against the slot's credential as read UNDER the backend
+// lock (an exclusive flock on auth.json, so it serialises across processes)
+// and applies fn's decision before the lock is released. cur is nil when the
+// slot is empty. fn returns write=false to leave the slot alone, or write=true
+// with next set (store) or nil (delete). An fn error aborts without writing.
+//
+// This is the primitive for read-decide-rotate-write on credentials that the
+// provider refresh path (refreshOAuthLocked) does not manage — MCP OAuth
+// tokens. fn may perform network I/O; only the backend lock is held while it
+// runs, never s.mu, so concurrent readers are not blocked.
+func (s *AuthStorage) UpdateSlot(slotKey string, fn func(cur *AuthCredential) (next *AuthCredential, write bool, err error)) error {
+	s.mu.RLock()
+	loadErr := s.loadError
+	s.mu.RUnlock()
+	if loadErr != nil {
+		return fmt.Errorf("credentials not saved: %w", loadErr)
+	}
+	type lockedResult struct {
+		data  AuthStorageData
+		wrote bool
+		next  *AuthCredential
+		prev  *AuthCredential
+	}
+	raw, err := s.storage.WithLockFallible(func(current []byte) (any, []byte, error) {
+		data := s.parseStorageData(current)
+		lr := lockedResult{data: data}
+		var cur *AuthCredential
+		if c, ok := data[slotKey]; ok {
+			cur = &c
+		}
+		next, write, err := fn(cur)
+		if err != nil || !write {
+			return lr, nil, err
+		}
+		if next != nil {
+			data[slotKey] = *next
+		} else {
+			if cur == nil {
+				return lr, nil, nil
+			}
+			delete(data, slotKey)
+		}
+		b, err := json.MarshalIndent(data, "", "  ")
+		if err != nil {
+			return lr, nil, fmt.Errorf("encode auth storage after update of %s: %w", slotKey, err)
+		}
+		lr.wrote, lr.next, lr.prev = true, next, cur
+		return lr, b, nil
+	})
+	lr, _ := raw.(lockedResult)
+	s.mu.Lock()
+	if lr.data != nil {
+		s.data = lr.data
+	}
+	if lr.wrote {
+		s.lastStamp = s.backendStamp()
+	}
+	if err != nil {
+		s.recordError(err)
+	}
+	remain := len(s.data)
+	s.mu.Unlock()
+	if lr.wrote {
+		if lr.next != nil {
+			s.audit.record(AuditActionSet, slotKey, lr.next, remain)
+		} else {
+			s.audit.record(AuditActionRemove, slotKey, lr.prev, remain)
+		}
+	}
+	return err
+}

@@ -22,6 +22,8 @@ func newSessionWithAuthPath(t *testing.T) (*AgentSession, string, string) {
 	t.Helper()
 	cwd := t.TempDir()
 	agentDir := t.TempDir()
+	// Keep the user's real MCP config out: ReloadMCP loads the global one.
+	t.Setenv("FIR_AGENT_DIR", agentDir)
 	authPath := filepath.Join(agentDir, "auth.json")
 
 	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})

@@ -227,6 +227,8 @@ type Manager struct {
 	// to decide whether bringing a server up is its business at all: a
 	// Manager built only to mint a token (`fir mcp login`) is never started.
 	started atomic.Bool
+	// credWatch guards the out-of-band credential watcher (creds_watch.go).
+	credWatch sync.Once
 
 	// reconnectWG tracks in-flight reconnect-loop goroutines. Close waits
 	// on this WG so callers know all loops have observed cancellation
@@ -693,6 +695,16 @@ func mcpShutdownGrace() time.Duration {
 // and logged but do not prevent other servers from starting.
 func (m *Manager) Start(ctx context.Context) {
 	m.started.Store(true)
+	m.startCredentialWatch()
+	// Close cancels in-flight initial dials and waits for them, so no dial
+	// (or its credential-store I/O) outlives the Manager.
+	ctx, cancel := context.WithCancel(ctx)
+	m.reconnectWG.Add(1)
+	go func() {
+		defer m.reconnectWG.Done()
+		defer cancel()
+		<-m.done
+	}()
 	firlog.Info("mcp starting", "servers", m.configsLen())
 	m.forEachServer(func(name string, e *serverEntry) bool {
 		if e.config.Disabled {
@@ -1542,6 +1554,7 @@ func (m *Manager) Close() error {
 	// Wait for reconnect loops to actually exit, so callers know no
 	// goroutine still references the manager's state.
 	m.reconnectWG.Wait()
+	m.startWG.Wait()
 	return firstErr
 }
 
@@ -1608,7 +1621,16 @@ func (m *Manager) ensureConnected(ctx context.Context, serverName string) (*sdk.
 		return nil, fmt.Errorf("MCP server %q not configured", serverName)
 	}
 	if !hasLoop {
-		// Initial connect failed and was never retried, or Close() ran.
+		// Initial connect failed and was never retried, or Close() ran. If
+		// it failed for want of a login that has since happened in another
+		// process, connect now rather than report "not connected".
+		m.credStore.reloadIfStale()
+		if m.redialIfCredentialed(ctx, serverName) {
+			m.withEntry(serverName, func(e *serverEntry) { session = e.session })
+			if session != nil {
+				return session, nil
+			}
+		}
 		return nil, fmt.Errorf("MCP server %q not connected", serverName)
 	}
 	// Non-blocking kick.

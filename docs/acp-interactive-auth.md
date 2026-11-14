@@ -55,9 +55,13 @@ Cancel:          authenticate { methodId, _meta: { auth: { interactive: true, id
 - The loopback callback listener stays up while fir waits for call 2, so a
   browser that *is* on the agent host still completes the flow on its own;
   whichever of loopback hit and pasted URL arrives first wins. The `state` in a
-  pasted URL is validated; a bare code carries no state.
+  pasted URL is validated; a bare code carries no state. A bare code (just the
+  `code=` value, surrounding whitespace ignored) is accepted — relays may pass
+  whatever the user pasted verbatim.
 - On success the server is reconnected and its tools are pushed into the
-  session — no `/mcp reload` needed.
+  session — no `/mcp reload` needed. A credential minted out-of-band
+  (`fir mcp login <server>` on the agent host) is also picked up by running
+  sessions within ~5s, or at once on a tool call to that server.
 - The method ids are dynamic, so clients must not reject an `mcp:*` method for
   being absent from `initialize.authMethods`.
 

@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"net/url"
@@ -81,7 +82,12 @@ func (c credentialStore) Load(serverName, wantResource string) *oauthCredential 
 	if c.storage == nil {
 		return nil
 	}
-	cred := c.storage.Get(storageKey(serverName))
+	return decodeCredential(c.storage.Get(storageKey(serverName)), wantResource)
+}
+
+// decodeCredential converts a stored row into an oauthCredential, or nil when
+// absent, unusable, or bound to a different resource than wantResource.
+func decodeCredential(cred *auth.AuthCredential, wantResource string) *oauthCredential {
 	if cred == nil || cred.Type != auth.CredentialTypeOAuth {
 		return nil
 	}
@@ -125,6 +131,12 @@ func (c credentialStore) Save(serverName string, oc *oauthCredential) error {
 	if oc == nil || oc.Token == nil {
 		return fmt.Errorf("save MCP credential for %q: nothing to store", serverName)
 	}
+	cred := encodeCredential(serverName, oc)
+	return c.storage.Set(storageKey(serverName), cred)
+}
+
+// encodeCredential converts an oauthCredential into its stored row.
+func encodeCredential(serverName string, oc *oauthCredential) auth.AuthCredential {
 	cred := auth.AuthCredential{
 		Type:    auth.CredentialTypeOAuth,
 		Label:   serverName,
@@ -143,7 +155,50 @@ func (c credentialStore) Save(serverName string, oc *oauthCredential) error {
 	putExtra(cred.Extra, extraAuthURL, oc.AuthURL)
 	putExtra(cred.Extra, extraIssuer, oc.Issuer)
 	putExtra(cred.Extra, extraScope, oc.Scope)
-	return c.storage.Set(storageKey(serverName), cred)
+	return cred
+}
+
+// persistent reports whether credentials outlive the process, i.e. whether
+// another process can write them behind our back.
+func (c credentialStore) persistent() bool { return c.storage != nil }
+
+// reloadIfStale re-reads auth.json when another process has rewritten it.
+func (c credentialStore) reloadIfStale() {
+	if c.storage != nil {
+		c.storage.ReloadIfStale()
+	}
+}
+
+// Update runs fn against the credential as stored on disk, under the
+// cross-process auth.json lock, and applies its decision before the lock is
+// released: write=false leaves the row alone, next=nil deletes it. cur is nil
+// when the row is absent or bound to another resource; such a row is never
+// deleted. Requires a persistent store.
+func (c credentialStore) Update(serverName, wantResource string, fn func(cur *oauthCredential) (next *oauthCredential, write bool, err error)) error {
+	if c.storage == nil {
+		return errors.New("credential store is not persistent")
+	}
+	return c.storage.UpdateSlot(storageKey(serverName), func(raw *auth.AuthCredential) (*auth.AuthCredential, bool, error) {
+		cur := decodeCredential(raw, wantResource)
+		next, write, err := fn(cur)
+		if err != nil || !write {
+			return nil, false, err
+		}
+		if next == nil {
+			return nil, cur != nil, nil
+		}
+		row := encodeCredential(serverName, next)
+		return &row, true, nil
+	})
+}
+
+// fingerprint identifies a credential's token material, so a holder can tell
+// whether the stored copy is still the one it last loaded or wrote. "" for nil.
+func fingerprint(oc *oauthCredential) string {
+	if oc == nil || oc.Token == nil {
+		return ""
+	}
+	return oc.Token.AccessToken + "\x00" + oc.Token.RefreshToken
 }
 
 // Delete removes any stored credential for serverName.
