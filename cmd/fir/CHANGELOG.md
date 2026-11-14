@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [1.55.2] - 2026-11-14
+
+### Changed
+
+- Model catalog regenerated: added 2 aggregator models, removed 2 aggregator models, 27 models with changed pricing/limits.
+
 ### Fixed
 
 - MCP: closing a manager cancels and waits for initial server connects still in flight, so none outlives it.
