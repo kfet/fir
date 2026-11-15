@@ -2,9 +2,15 @@
 
 ## [Unreleased]
 
+## [1.56.0] - 2026-11-15
+
 ### Added
 
 - **`reload_resources` extension RPC** (`ctx.reload_resources()`): an agent can reload skills, themes, the system prompt and the model registry itself. Deferred to the end of the current turn; the next turn gets a summary of skills/models added and removed. Settings, extensions and MCP are not touched.
+
+### Changed
+
+- Model catalog regenerated: added `github-copilot/gemini-4-hydrogen`, `huggingface/moonshotai/Kimi-K3.1-Pro`, `huggingface/thinkingmachines/Inkling-2-Small`; removed 6 aggregator models; 10 models with changed pricing/limits (openrouter: deepseek-r1-0528, deepseek-v4.1-flash-1017, granite-4.2-8b, kimi-k2.7-code, nemotron-3.5-super-vl, gpt-5.6-sol, qwen3.5-9b, glm-4.7, +2 more).
 
 ### Fixed
 
