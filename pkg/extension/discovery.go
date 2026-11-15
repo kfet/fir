@@ -14,7 +14,7 @@ import (
 type ExtProcConfig struct {
 	Name          string   // derived from filename or sub-directory name
 	Path          string   // absolute path to the executable
-	Scope         string   // "project", "global", "package", or "builtin"
+	Scope         string   // "project", "global", "package", "session", or "builtin"
 	Origin        string   // precise provenance: "builtin"|"user"|"project"|"package"
 	ID            string   // canonical disambiguated ID: "<sanitized-origin>__<name>"
 	Override      string   // frontmatter override value: "", "true", or "<id>" target

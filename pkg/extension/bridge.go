@@ -666,7 +666,20 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 			rpcErr = &Error{Code: -32000, Message: "reload_extension: an extension cannot reload itself"}
 			break
 		}
-		if err := api.ReloadExtension(p.Name); err != nil {
+		var err error
+		if p.Path != "" {
+			loader, ok := api.(interface {
+				LoadSessionExtension(name, path string) error
+			})
+			if !ok {
+				rpcErr = &Error{Code: -32000, Message: "reload_extension: session-only loading (path) is not supported in this session"}
+				break
+			}
+			err = loader.LoadSessionExtension(p.Name, p.Path)
+		} else {
+			err = api.ReloadExtension(p.Name)
+		}
+		if err != nil {
 			rpcErr = &Error{Code: -32000, Message: err.Error()}
 		} else {
 			result = okTrue

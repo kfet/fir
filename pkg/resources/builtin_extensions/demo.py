@@ -189,6 +189,10 @@ def restart_demo(params: dict, ctx: fir_ext.Context) -> dict:
         "type": "object",
         "properties": {
             "name": {"type": "string", "description": "Extension to reload"},
+            "path": {
+                "type": "string",
+                "description": "Optional script to load into this session only",
+            },
         },
         "required": ["name"],
     },
@@ -196,7 +200,8 @@ def restart_demo(params: dict, ctx: fir_ext.Context) -> dict:
 def reload_ext_demo(params: dict, ctx: fir_ext.Context) -> dict:
     # reload_extension: targeted single-extension reload. Returns a
     # JSON-RPC error for builtins / self-reload, surfaced here as a failure.
-    ctx.reload_extension(params["name"])  # reload_extension
+    # With path, the script is loaded into this session only.
+    ctx.reload_extension(params["name"], params.get("path"))  # reload_extension
     return {"ok": True}
 
 

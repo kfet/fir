@@ -639,6 +639,19 @@ class TestDemoTools(DemoTestCase):
         self.assertIsNotNone(msg, "expected reload_extension call")
         assert msg is not None
         self.assertEqual(msg["params"]["name"], "my-helper")
+        self.assertNotIn("path", msg["params"])
+        fake.stop()
+
+    def test_reload_ext_demo_session_only_path(self) -> None:
+        fake = FakeFir()
+        self.start_demo_ext(fake)
+        fake.send_init()
+        fake.send_tool_call(
+            2, "reload_ext_demo", {"name": "my-helper", "path": "/tmp/my-helper.py"}
+        )
+        msg = fake.wait_for_method("reload_extension")
+        assert msg is not None
+        self.assertEqual(msg["params"], {"name": "my-helper", "path": "/tmp/my-helper.py"})
         fake.stop()
 
     # -- reload_mcp_demo -----------------------------------------------------

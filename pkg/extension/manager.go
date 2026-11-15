@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/kfet/fir/pkg/ai/providers"
 	"github.com/kfet/fir/pkg/extension/sdk"
+	"github.com/kfet/fir/pkg/resources"
 	"github.com/kfet/fir/pkg/sections"
 	"github.com/kfet/fir/pkg/slashcmd"
 )
@@ -66,7 +68,12 @@ type Manager struct {
 	sdkDir              string   // extracted SDK directory
 	extraExtensionDirs  []string // extra dirs from installed packages
 	extraExtensionFiles []string // extra script files from installed packages
-	configDirs          []string // priority-ordered config dirs sent to extensions on init
+	// sessionExtensions maps name -> script path for extensions loaded into
+	// this session only (LoadSessionExtension). They shadow every discovered
+	// extension and are never written to a discovery dir, so no other
+	// session ever sees them.
+	sessionExtensions map[string]string
+	configDirs        []string // priority-ordered config dirs sent to extensions on init
 
 	// fork is the warm Python template used to COW-spawn builtin .py
 	// extensions. It is a process-lifetime singleton shared across all
@@ -231,6 +238,16 @@ func (m *Manager) Start(ctx context.Context, projectDir string, cwd string, api 
 			return m.ReloadOne(ctx, name)
 		})
 	}
+	if r, ok := api.(interface {
+		SetLoadSessionFn(func(name, path string) error)
+	}); ok {
+		r.SetLoadSessionFn(func(name, path string) error {
+			m.mu.Lock()
+			ctx := m.startCtx
+			m.mu.Unlock()
+			return m.LoadSessionExtension(ctx, name, path)
+		})
+	}
 
 	// Wire the loaded-extension lister so extensions can verify (over the
 	// list_extensions RPC) what actually survived discovery + handshake.
@@ -346,7 +363,63 @@ func (m *Manager) discoverAll(projectDir string) ([]ExtProcConfig, error) {
 	if len(extraFiles) > 0 {
 		configs = mergeConfigsByName(configs, ConfigsFromFiles(extraFiles))
 	}
-	return configs, nil
+	return m.overlaySessionExtensions(configs), nil
+}
+
+// overlaySessionExtensions replaces (or adds) every session-only extension
+// in configs. Session extensions shadow builtin, global, project and package
+// ones of the same name.
+func (m *Manager) overlaySessionExtensions(configs []ExtProcConfig) []ExtProcConfig {
+	m.mu.Lock()
+	paths := make([]string, 0, len(m.sessionExtensions))
+	for _, p := range m.sessionExtensions {
+		paths = append(paths, p)
+	}
+	m.mu.Unlock()
+	if len(paths) == 0 {
+		return configs
+	}
+	session := ConfigsFromFiles(paths)
+	byName := make(map[string]bool, len(session))
+	for i := range session {
+		session[i].Scope = "session"
+		session[i].Origin = "session"
+		session[i].ID = resources.MakeResourceID("session", session[i].Name)
+		byName[session[i].Name] = true
+	}
+	out := make([]ExtProcConfig, 0, len(configs)+len(session))
+	for _, c := range configs {
+		if !byName[c.Name] {
+			out = append(out, c)
+		}
+	}
+	return append(out, session...)
+}
+
+// LoadSessionExtension loads the extension script at path into this session
+// only, under name, replacing any running extension of that name. The file
+// is not copied into any discovery dir, so other sessions never load it.
+// The script must be executable, carry comment frontmatter, and its file stem
+// must equal name (the same rule discovery applies).
+func (m *Manager) LoadSessionExtension(ctx context.Context, name, path string) error {
+	if name == "" || path == "" {
+		return fmt.Errorf("load session extension: name and path are required")
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return err
+	}
+	cfgs := ConfigsFromFiles([]string{abs})
+	if len(cfgs) != 1 || cfgs[0].Name != name {
+		return fmt.Errorf("load session extension: %s is not a loadable extension named %q (it must be executable, have comment frontmatter, and be named %s.<ext>)", abs, name, name)
+	}
+	m.mu.Lock()
+	if m.sessionExtensions == nil {
+		m.sessionExtensions = make(map[string]string)
+	}
+	m.sessionExtensions[name] = abs
+	m.mu.Unlock()
+	return m.ReloadOne(ctx, name)
 }
 
 // shouldSkip returns true if the extension should be skipped based on
@@ -720,8 +793,9 @@ func (m *Manager) ReloadOne(ctx context.Context, name string) error {
 		return fmt.Errorf("manager was not started; cannot reload extension %q", name)
 	}
 
-	// 1. Re-discover and locate the target cfg.
-	configs, err := Discover(projectDir)
+	// 1. Re-discover (including package and session-only extensions) and
+	// locate the target cfg.
+	configs, err := m.discoverAll(projectDir)
 	if err != nil {
 		return err
 	}

@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Added
+
+- `forge_tool` proves a new extension in a sandbox `fir -p` sub-agent (caller's provider and model, a real model call, each tool checked visible) before installing it, and returns the sub-agent's error on failure.
+- `forge_tool` `scope: "session"` loads the extension into the calling session only; `reload_extension` takes an optional `path` for session-only loading.
+
+### Fixed
+
+- `forge_tool` refuses tool names providers reject, from a data table: an `mcp_` prefix (fails every Anthropic subscription request), the `mcp__` MCP namespace, and names outside 1-64 `[a-zA-Z0-9_-]`.
+- Targeted extension reload now also finds package-contributed extensions.
+
 ## [1.57.0] - 2026-11-15
 
 ### Added

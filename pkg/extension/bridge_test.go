@@ -39,6 +39,8 @@ type mockBridgeAPI struct {
 	reloadErr       error
 	extensions      []ExtensionInfo
 	reloadFn        func(name string) error
+	loadSessionFn   func(name, path string) error
+	loadSessionArgs [][2]string
 	reloadMCPFn     func() (ReloadMCPResult, error)
 	reloadMCPCalls  int
 	reloadResCalls  int
@@ -106,6 +108,25 @@ func (m *mockBridgeAPI) SetReloadFn(fn func(name string) error) {
 	m.mu.Lock()
 	m.reloadFn = fn
 	m.mu.Unlock()
+}
+
+// SetLoadSessionFn captures the manager-wired session-only loader.
+func (m *mockBridgeAPI) SetLoadSessionFn(fn func(name, path string) error) {
+	m.mu.Lock()
+	m.loadSessionFn = fn
+	m.mu.Unlock()
+}
+
+// LoadSessionExtension records the call and delegates to the wired loader.
+func (m *mockBridgeAPI) LoadSessionExtension(name, path string) error {
+	m.mu.Lock()
+	m.loadSessionArgs = append(m.loadSessionArgs, [2]string{name, path})
+	fn := m.loadSessionFn
+	m.mu.Unlock()
+	if fn == nil {
+		return nil
+	}
+	return fn(name, path)
 }
 
 func (m *mockBridgeAPI) clearTools() {

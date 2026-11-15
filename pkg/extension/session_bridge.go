@@ -44,8 +44,9 @@ type SessionBridge struct {
 	// replaced on every restart, so it never grows past one carry.
 	lastCarried map[string]struct{}
 
-	reloadMu sync.RWMutex
-	reloadFn func(name string) error
+	reloadMu      sync.RWMutex
+	reloadFn      func(name string) error
+	loadSessionFn func(name, path string) error
 
 	reloadMCPMu sync.RWMutex
 	reloadMCPFn func() (ReloadMCPResult, error)
@@ -668,6 +669,26 @@ func (b *SessionBridge) ReloadExtension(name string) error {
 		return fmt.Errorf("extension reload is not supported in this session")
 	}
 	return fn(name)
+}
+
+// SetLoadSessionFn registers the session-only extension loader, wired by the
+// extension Manager at Start so the reload_extension RPC with a path can
+// delegate into Manager.LoadSessionExtension. Pass nil to remove.
+func (b *SessionBridge) SetLoadSessionFn(fn func(name, path string) error) {
+	b.reloadMu.Lock()
+	b.loadSessionFn = fn
+	b.reloadMu.Unlock()
+}
+
+// LoadSessionExtension loads the script at path into this session only.
+func (b *SessionBridge) LoadSessionExtension(name, path string) error {
+	b.reloadMu.RLock()
+	fn := b.loadSessionFn
+	b.reloadMu.RUnlock()
+	if fn == nil {
+		return fmt.Errorf("session-only extension loading is not supported in this session")
+	}
+	return fn(name, path)
 }
 
 // SetListExtensionsFn registers the loaded-extension lister. Wired by the

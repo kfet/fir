@@ -738,6 +738,7 @@ other running extension.
 | Param  | Type   | Notes                                  |
 |--------|--------|----------------------------------------|
 | `name` | string | Required. The extension to reload.     |
+| `path` | string | Optional. Load this script into the calling session only. |
 
 ```json
 {"jsonrpc":"2.0","id":1014,"method":"reload_extension","params":{"name":"my-helper"}}
@@ -751,12 +752,19 @@ registrations, cancels its context, and stops its process. It then
 re-spawns the edited/new version from disk. If the extension's file was
 deleted, the call unloads it (stop-only).
 
+With `path`, fir loads that executable script (frontmatter required, file
+stem must equal `name`) into the calling session only: it shadows any
+discovered extension of the same name, survives later targeted reloads in
+that session, and is never copied into an extensions dir, so no other
+session loads it.
+
 Refused with a JSON-RPC error when:
 
 - `name` is a builtin extension (builtins are never reloadable);
 - `name` is the calling extension itself (self-reload would kill the
   process servicing this RPC);
-- no extension manager is wired for the session.
+- no extension manager is wired for the session;
+- `path` is not an executable, frontmatter-bearing script named `name`.
 
 Response: `{"ok": true}` on success.
 

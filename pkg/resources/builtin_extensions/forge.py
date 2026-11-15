@@ -1,37 +1,138 @@
 #!/usr/bin/env python3
 # ---
 # name: forge
-# description: Author a new fir extension and load it in-session via reload_extension.
+# description: Author a new fir extension, prove it in a sandbox sub-agent, then load it.
 # builtin: true
 # ---
-"""forge — write a new extension to the global config dir and load it live.
+"""forge — author an extension, prove it safe in a sandbox, then load it.
 
 Exposes a single tool, ``forge_tool``, that lets the agent author a brand-new
-fir extension and activate it mid-session. The extension source is written to
-the GLOBAL (user) config dir's ``extensions/`` directory — never the
-project-local ``.fir`` — so it is not subject to the project-local trust prompt
-(which would silently skip it in headless/ACP mode).
+fir extension and activate it mid-session. A bad extension in the global dir
+breaks EVERY live session on the host (e.g. a tool named ``mcp_*`` makes the
+Anthropic subscription API reject every request), so forge never installs
+unproven code:
 
-Before writing, the source is validated and repaired so the file is actually
-DISCOVERABLE: fir only treats a file as an extension when it is executable AND
-carries comment frontmatter (a ``# ---`` block). A file missing frontmatter is
-skipped forever, silently — so forge injects a shebang and a frontmatter block
-when they are absent, and hard-errors on frontmatter that contradicts the
-request (name mismatch, ``builtin: true``, malformed block).
+1. **Static checks** — the source must compile, carry discoverable comment
+   frontmatter (forge injects a shebang and frontmatter when absent and
+   hard-errors on contradicting frontmatter), and every literal tool name
+   must pass ``TOOL_NAME_RULES`` (a data table of names providers reject).
+2. **Sandbox** — the candidate is written to a temp project's
+   ``.fir/extensions/`` next to a tiny probe extension, and ``fir -p`` runs
+   there with the caller's provider and model. The sub-agent must make a
+   real model call with the new tools registered, and the probe must see
+   every tool the candidate declares. The actual tool names are checked
+   against ``TOOL_NAME_RULES`` again (catches dynamically built names).
+   Any failure is returned with the sub-agent's error so the caller can fix
+   the code and retry; nothing is installed.
+3. **Install** — ``scope: "global"`` (default) writes the file to the global
+   (user) config dir's ``extensions/`` — never the project-local ``.fir``, so
+   the trust prompt cannot silently skip it in headless/ACP mode.
+   ``scope: "session"`` loads it into the calling session only
+   (``ctx.reload_extension(name, path)``); no other session ever sees it.
 
-After writing, forge calls ``ctx.reload_extension(name)`` and then VERIFIES via
-``ctx.list_extensions()`` that the extension is actually running. If it is not,
-that is reported as an error rather than as a cheerful "no new tools detected".
+After loading, forge VERIFIES via ``ctx.list_extensions()`` that the
+extension is actually running and reports its new tools, or an error.
 """
 
 from __future__ import annotations
 
+import ast
+import atexit
+import contextlib
+import json
 import os
 import re
+import shutil
+import subprocess
+import tempfile
 
 import fir_ext
 
 _SLUG_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
+
+# Tool names that a provider rejects or mishandles. Data, not code: add a row
+# when a new provider quirk is found. Each rule is (regex, reason). A forged
+# extension is global by default, so it reaches every provider: the rules
+# apply whatever provider the caller uses.
+TOOL_NAME_RULES: list[tuple[str, str]] = [
+    (
+        r"^mcp_(?!_)",
+        "the Anthropic Claude subscription (OAuth) API fails EVERY request that "
+        "carries a tool whose name starts with 'mcp_' (HTTP 400 \"You're out of "
+        'extra usage"), which breaks every session that loads the extension',
+    ),
+    (
+        r"^mcp__",
+        "the 'mcp__<server>__<tool>' namespace belongs to MCP server tools; an "
+        "extension tool there would collide with or impersonate them",
+    ),
+    (
+        r"^(?![a-zA-Z0-9_-]{1,64}$)",
+        "providers (Anthropic, OpenAI, Google) only accept tool names of 1-64 "
+        "characters from [a-zA-Z0-9_-]",
+    ),
+]
+
+# Sandbox sub-agent budget. Generous: it is one short model call, but a cold
+# start loads every global extension first.
+SANDBOX_TIMEOUT_S = 180
+
+_PROBE_NAME = "forgeprobe"
+_PROBE_SOURCE = """#!/usr/bin/env python3
+# ---
+# name: forgeprobe
+# description: forge sandbox probe (records tools seen during a real model call)
+# ---
+import json
+import os
+
+import fir_ext
+
+OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "probe.json")
+
+
+_seen = {}
+
+
+def _write(rec):
+    with open(OUT, "w") as f:
+        json.dump(rec, f)
+
+
+# Snapshot the registered tools just before the model request. RPCs are not
+# safe at message_end: in print mode the host is already exiting by then.
+@fir_ext.on("turn_start")
+def _on_turn_start(params, ctx):
+    _seen["tools"] = sorted(t.get("name", "") for t in ctx.list_tools())
+    _seen["extensions"] = ctx.list_extensions()
+
+
+@fir_ext.on("message_end")
+def _on_message_end(params, ctx):
+    if not params or params.get("role") != "assistant":
+        return
+    reason = params.get("stop_reason", "")
+    if reason in ("error", "aborted"):
+        _write({"model_ok": False, "error": "assistant message ended with stop_reason=" + reason})
+        return
+    rec = {
+        "model_ok": True,
+        "provider": params.get("provider", ""),
+        "model": params.get("model", ""),
+    }
+    rec.update(_seen)
+    _write(rec)
+
+
+@fir_ext.on("provider_error")
+def _on_provider_error(params, ctx):
+    _write({"model_ok": False, "error": (params or {}).get("error_text") or json.dumps(params)})
+
+
+fir_ext.run(name="forgeprobe")
+"""
+
+_SANDBOX_PROMPT = "This is an automated smoke test. Reply with just OK. Do not call any tools."
 
 
 def _global_config_dir() -> str | None:
@@ -224,12 +325,218 @@ def _active_mode(ctx: fir_ext.Context) -> str:
     return str(info.get("mode") or "") if isinstance(info, dict) else ""
 
 
+def _literal_tool_names(code: str) -> list[str]:
+    """Tool names passed as string literals to ``fir_ext.tool(...)`` / ``tool(...)``.
+
+    A static pre-check only; dynamically built names are caught after the
+    sandbox run, from the tools the extension actually registered.
+    """
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return []
+    names = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        fn = node.func
+        if not (
+            (isinstance(fn, ast.Attribute) and fn.attr == "tool")
+            or (isinstance(fn, ast.Name) and fn.id == "tool")
+        ):
+            continue
+        arg = node.args[0] if node.args else None
+        for kw in node.keywords:
+            if kw.arg == "name":
+                arg = kw.value
+        if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+            names.append(arg.value)
+    return names
+
+
+def check_tool_names(names) -> str | None:
+    """Return an error naming every tool that breaks a ``TOOL_NAME_RULES`` row."""
+    problems = []
+    for n in names:
+        for pattern, reason in TOOL_NAME_RULES:
+            if re.search(pattern, n):
+                problems.append(f"tool name {n!r} is rejected: {reason}.")
+                break
+    if not problems:
+        return None
+    return " ".join(problems) + " Rename the tool(s) and retry."
+
+
+def _caller_model(ctx: fir_ext.Context) -> tuple[str, str]:
+    """The calling session's (provider, model id), or ("", "") if unknown."""
+    try:
+        info = ctx.agent_info()
+    except Exception:
+        return "", ""
+    model = info.get("model") if isinstance(info, dict) else None
+    if not isinstance(model, dict):
+        return "", ""
+    return str(model.get("provider") or ""), str(model.get("id") or "")
+
+
+def _fir_bin() -> str | None:
+    return os.environ.get("FIR_BIN") or shutil.which("fir")
+
+
+def _tail(text: str, n: int = 2000) -> str:
+    text = (text or "").strip()
+    return text if len(text) <= n else "..." + text[-n:]
+
+
+_MODES_LINE_RE = re.compile(r"^#\s*modes?\s*:.*$")
+
+
+def _sandbox_copy(source: str) -> str:
+    """``source`` with any frontmatter ``modes:`` line removed.
+
+    The sandbox runs ``fir -p`` (print mode); an extension gated to other
+    modes must still load there so its tools can be proven. Only the
+    frontmatter block is touched.
+    """
+    lines = source.split("\n")
+    start = 1 if lines and lines[0].startswith("#!") else 0
+    if start >= len(lines) or lines[start].strip() != "# ---":
+        return source
+    out = lines[: start + 1]
+    i = start + 1
+    while i < len(lines) and lines[i].strip() != "# ---":
+        if not _MODES_LINE_RE.match(lines[i].strip()):
+            out.append(lines[i])
+        i += 1
+    return "\n".join(out + lines[i:])
+
+
+def run_sandbox(
+    name: str, source: str, provider: str, model: str
+) -> tuple[list[str] | None, str | None]:
+    """Prove ``source`` in a throwaway ``fir -p`` sub-agent.
+
+    Returns ``(tools, None)`` with the tools the candidate registered, or
+    ``(None, error)`` with the sub-agent's error. The sub-agent runs in a
+    fresh temp project whose ``.fir/extensions/`` holds the candidate and the
+    probe; it uses the caller's provider and model, so a provider that
+    rejects the new tools fails here instead of in every live session.
+    """
+    fir = _fir_bin()
+    if not fir:
+        return None, "cannot find the fir binary (FIR_BIN unset and 'fir' not on PATH)"
+    if not provider or not model:
+        return None, "cannot determine the calling session's provider and model for the sandbox run"
+    root = tempfile.mkdtemp(prefix="fir-forge-sandbox-")
+    try:
+        ext_dir = os.path.join(root, ".fir", "extensions")
+        os.makedirs(ext_dir)
+        for fname, text in (
+            (f"{name}.py", _sandbox_copy(source)),
+            (f"{_PROBE_NAME}.py", _PROBE_SOURCE),
+        ):
+            path = os.path.join(ext_dir, fname)
+            with open(path, "w") as f:
+                f.write(text)
+            os.chmod(path, 0o755)  # noqa: S103 — extensions must be executable
+        cmd = [
+            fir,
+            "-p",
+            "--no-session",
+            "--no-mcp",
+            "--provider",
+            provider,
+            "--model",
+            model,
+            "--thinking",
+            "off",
+            _SANDBOX_PROMPT,
+        ]
+        try:
+            proc = subprocess.run(
+                cmd,
+                cwd=root,
+                capture_output=True,
+                text=True,
+                timeout=SANDBOX_TIMEOUT_S,
+                stdin=subprocess.DEVNULL,
+            )
+        except subprocess.TimeoutExpired:
+            return None, f"sandbox sub-agent timed out after {SANDBOX_TIMEOUT_S}s"
+        except OSError as e:
+            return None, f"could not start sandbox sub-agent {fir}: {e}"
+
+        probe = None
+        try:
+            with open(os.path.join(root, ".fir", "probe.json")) as f:
+                probe = json.load(f)
+        except (OSError, ValueError):
+            pass
+        output = _tail((proc.stderr or "") + "\n" + (proc.stdout or ""))
+        if proc.returncode != 0:
+            detail = (probe or {}).get("error") or output
+            return (
+                None,
+                f"sandbox sub-agent ({provider}/{model}) failed with exit code {proc.returncode}: {detail}",
+            )
+        if not probe:
+            return (
+                None,
+                f"sandbox sub-agent made no successful model call (probe saw nothing). Output: {output}",
+            )
+        if not probe.get("model_ok"):
+            return None, f"sandbox model call failed: {probe.get('error') or output}"
+
+        ext = next(
+            (
+                e
+                for e in probe.get("extensions") or []
+                if isinstance(e, dict) and e.get("name") == name
+            ),
+            None,
+        )
+        if ext is None:
+            return None, (
+                f"the extension did not load in the sandbox (it must survive its init "
+                f"handshake). Output: {output}"
+            )
+        declared = [t for t in ext.get("tools") or [] if t]
+        visible = set(probe.get("tools") or [])
+        missing = [t for t in declared if t not in visible]
+        if missing:
+            return (
+                None,
+                f"tools declared but not visible to the model in the sandbox: {', '.join(missing)}",
+            )
+        return declared, None
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+# Names this session loaded with scope "session": a session extension shadows
+# the global one, so a later global forge of the same name must re-point it.
+_session_loaded: set[str] = set()
+# Temp dirs holding session-only extension files; removed when forge exits
+# (the session ends), since nothing else ever loads them.
+_session_dirs: list[str] = []
+
+
+@atexit.register
+def _cleanup_session_dirs() -> None:
+    for d in _session_dirs:
+        shutil.rmtree(d, ignore_errors=True)
+
+
 @fir_ext.tool(
     "forge_tool",
-    "Author a new fir extension and load it live this session. Writes <name>.py "
-    "to the global config dir's extensions/ (adding a shebang and comment "
-    "frontmatter if missing, so the file is actually discoverable), reloads it, "
-    "and verifies it is running — reporting the new tools it exposes, or an error.",
+    "Author a new fir extension and load it live. First proves it in a sandbox: "
+    "a short-lived `fir -p` sub-agent with your provider and model loads it, "
+    "makes a real model call with its tools, and checks each tool is visible; "
+    "tool names providers reject (e.g. the 'mcp_' prefix) are refused. Only then "
+    "installs it: scope 'global' (default) writes <name>.py to the global "
+    "extensions dir (every new session loads it); scope 'session' loads it into "
+    "this session only. On failure returns the sandbox error so you can fix the "
+    "code and retry.",
     parameters={
         "type": "object",
         "properties": {
@@ -241,35 +548,90 @@ def _active_mode(ctx: fir_ext.Context) -> str:
                 "type": "string",
                 "description": "Full Python source of the extension to write.",
             },
+            "scope": {
+                "type": "string",
+                "enum": ["global", "session"],
+                "description": "global (default): install for all sessions. session: load into this session only.",
+            },
         },
         "required": ["name", "code"],
     },
+    timeout=SANDBOX_TIMEOUT_S + 60,
 )
 def forge_tool(params: dict, ctx: fir_ext.Context) -> dict:
     name = (params.get("name") or "").strip()
     code = params.get("code") or ""
+    scope = (params.get("scope") or "global").strip()
 
     if not _SLUG_RE.match(name):
         return _err(f"invalid extension name {name!r}: must match [a-zA-Z0-9_-]+")
-    if name == "forge":
-        return _err("cannot forge an extension named 'forge' (would self-reload)")
-
-    gdir = _global_config_dir()
-    if not gdir:
-        return _err("could not resolve a global config dir to write the extension into")
-
-    ext_dir = os.path.join(gdir, "extensions")
-    try:
-        os.makedirs(ext_dir, exist_ok=True)
-    except OSError as e:
-        return _err(f"could not create extensions dir {ext_dir}: {e}")
-
-    path = os.path.join(ext_dir, f"{name}.py")
+    if name in ("forge", _PROBE_NAME):
+        return _err(f"cannot forge an extension named {name!r} (reserved by forge)")
+    if scope not in ("global", "session"):
+        return _err(f"invalid scope {scope!r}: must be 'global' or 'session'")
 
     prepared, prep_err = _prepare_source(code, name)
     if prep_err:
-        return _err(f"refusing to write {path}: {prep_err}")
+        return _err(f"refusing to install {name}: {prep_err}")
+    name_err = check_tool_names(_literal_tool_names(prepared))
+    if name_err:
+        return _err(f"refusing to install {name}: {name_err}")
     fields, _ = _parse_frontmatter(prepared)
+
+    provider, model = _caller_model(ctx)
+    ctx.report_progress(f"forge: proving {name} in a sandbox sub-agent ({provider}/{model})")
+    sandbox_tools, sb_err = run_sandbox(name, prepared, provider, model)
+    if sb_err:
+        return _err(
+            f"sandbox check failed, nothing installed: {sb_err} (the sandbox also loads "
+            "your other global extensions; if the error names one of them, the fault is "
+            "there, not in this code)"
+        )
+    name_err = check_tool_names(sandbox_tools or [])
+    if name_err:
+        return _err(f"sandbox check failed, nothing installed: {name_err}")
+
+    if scope == "session":
+        target_dir = tempfile.mkdtemp(prefix="fir-forge-session-")
+    else:
+        gdir = _global_config_dir()
+        if not gdir:
+            return _err("could not resolve a global config dir to write the extension into")
+        target_dir = os.path.join(gdir, "extensions")
+    try:
+        os.makedirs(target_dir, exist_ok=True)
+    except OSError as e:
+        return _err(f"could not create extensions dir {target_dir}: {e}")
+    path = os.path.join(target_dir, f"{name}.py")
+    previous = None
+    if scope == "global" and os.path.exists(path):
+        try:
+            with open(path) as f:
+                previous = f.read()
+        except OSError:
+            previous = None
+
+    def fail(text: str) -> dict:
+        # Never leave a file that failed to load where every new session
+        # would pick it up: restore the previous version or remove it.
+        if scope == "session":
+            shutil.rmtree(target_dir, ignore_errors=True)
+            return _err(text)
+        try:
+            if previous is None:
+                os.remove(path)
+                what = "removed it"
+            else:
+                with open(path, "w") as f:
+                    f.write(previous)
+                what = "restored the previous version"
+            # Best effort: the file on disk is already safe; this only
+            # resyncs the live session with it.
+            with contextlib.suppress(Exception):
+                ctx.reload_extension(name)
+        except OSError as e:
+            what = f"could not roll it back ({e}); remove {path} by hand"
+        return _err(f"{text} forge {what}.")
 
     # Snapshot tool names before, so we can report what the new extension added.
     before = {t.get("name") for t in ctx.list_tools()}
@@ -279,12 +641,17 @@ def forge_tool(params: dict, ctx: fir_ext.Context) -> dict:
             f.write(prepared)
         os.chmod(path, 0o755)  # noqa: S103 — extensions must be executable
     except OSError as e:
-        return _err(f"could not write extension to {path}: {e}")
+        return fail(f"could not write extension to {path}: {e}")
 
     try:
-        ctx.reload_extension(name)
+        if scope == "session" or name in _session_loaded:
+            # A session-only load shadows discovery, so a global forge of a
+            # name this session loaded earlier must re-point it too.
+            ctx.reload_extension(name, path)
+        else:
+            ctx.reload_extension(name)
     except Exception as e:  # RuntimeError from a JSON-RPC error (init/handshake)
-        return _err(f"reload_extension({name}) failed: {e}")
+        return fail(f"reload_extension({name}) failed: {e}")
 
     after = {t.get("name") for t in ctx.list_tools()}
     new_tools = sorted(n for n in (after - before) if n)
@@ -292,26 +659,31 @@ def forge_tool(params: dict, ctx: fir_ext.Context) -> dict:
     # Verify the file actually became a LIVE extension. A silent discovery
     # skip used to surface as "no new tools detected", which reads as success.
     loaded, known = _is_loaded(ctx, name)
+    where = "this session only" if scope == "session" else "all new sessions"
 
     if known and not loaded:
         if _mode_gated(fields, _active_mode(ctx)):
             return _ok(
-                f"wrote {path}, but it is not loaded in this session: its frontmatter "
-                f"'modes:' excludes the current mode. The file is valid and will load "
-                "in a session running a declared mode."
+                f"sandbox passed and wrote {path}, but it is not loaded in this session: its "
+                "frontmatter 'modes:' excludes the current mode. The file is valid and will "
+                "load in a session running a declared mode."
             )
-        return _err(
-            f"wrote {path}, but the extension is NOT loaded in this session. fir only "
-            "runs a file that is executable AND has valid comment frontmatter AND is "
-            "not mode-gated out; the extension process must also survive its init "
-            "handshake. Check the file (and the fir log) before retrying."
+        return fail(
+            f"sandbox passed and wrote {path}, but the extension is NOT loaded in this "
+            "session. fir only runs a file that is executable AND has valid comment "
+            "frontmatter AND is not mode-gated out; the extension process must also "
+            "survive its init handshake. Check the fir log before retrying."
         )
 
+    if scope == "session":
+        _session_loaded.add(name)
+        _session_dirs.append(target_dir)
+
     if loaded:
-        state = f"loaded extension '{name}' from {path}"
+        state = f"sandbox passed; loaded extension '{name}' from {path} ({where})"
     else:
         # Host does not expose list_extensions: do not assert either way.
-        state = f"wrote and reloaded extension '{name}' at {path}"
+        state = f"sandbox passed; wrote and reloaded extension '{name}' at {path} ({where})"
 
     if new_tools:
         return _ok(f"{state}. New tools: {', '.join(new_tools)}")

@@ -500,12 +500,15 @@ otherwise noted.
 | ``clear_         | ``{}``                                | ``{ok: true}``            |
 | section``        | Delete this extension's section.      |                           |
 +------------------+---------------------------------------+---------------------------+
-| ``reload_        | ``{name}``                            | ``{ok: true}``            |
+| ``reload_        | ``{name, path?}``                     | ``{ok: true}``            |
 | extension``      | Reload one extension by name: stop    |                           |
 |                  | it, drop only its tools, re-spawn     |                           |
 |                  | the edited/new version (or unload if  |                           |
 |                  | its file was deleted). Builtins and   |                           |
-|                  | self-reload are refused.              |                           |
+|                  | self-reload are refused. With         |                           |
+|                  | ``path``, load that script into this  |                           |
+|                  | session only (shadows same name; not  |                           |
+|                  | written to any extensions dir).       |                           |
 +------------------+---------------------------------------+---------------------------+
 
 -------------------------------------------------------------------------------
@@ -2995,7 +2998,7 @@ class Context:
             params["prepend_context"] = prepend_context
         self._call("restart_session", params)
 
-    def reload_extension(self, name: str) -> None:
+    def reload_extension(self, name: str, path: str | None = None) -> None:
         """Reload exactly one extension by name (targeted single reload).
 
         Stops the named extension's running process (if any), removes only
@@ -3013,8 +3016,16 @@ class Context:
         ----------
         name : str
             The name of the extension to reload.
+        path : str, optional
+            Load the executable script at ``path`` (stem must equal
+            ``name``, frontmatter required) into THIS session only. It
+            shadows any discovered extension of the same name and is never
+            copied into an extensions dir, so other sessions never see it.
         """
-        self._call("reload_extension", {"name": name})
+        params: dict[str, str] = {"name": name}
+        if path:
+            params["path"] = path
+        self._call("reload_extension", params)
 
     def reload_mcp(self) -> dict:
         """Reload MCP server configurations from disk.

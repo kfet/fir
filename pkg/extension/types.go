@@ -169,8 +169,12 @@ type restartSessionParams struct {
 
 // reloadExtensionParams maps to "reload_extension". Name is the extension to
 // reload (re-spawn the edited/new version, or unload if its file was deleted).
+// Path, when set, loads that script into the calling session only (it shadows
+// any discovered extension of the same name and is never written to a
+// discovery dir).
 type reloadExtensionParams struct {
 	Name string `json:"name"`
+	Path string `json:"path,omitempty"`
 }
 
 // ---------------------------------------------------------------------------

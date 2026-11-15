@@ -76,6 +76,7 @@ fir_ext.run(name="<extension-name>")
 | `ctx.set_model(model)` | Change the current model |
 | `ctx.call_tool(name, params=None, timeout=60)` | Call any registered tool by name; returns `{content, is_error}`. Result never enters conversation history. |
 | `ctx.side_query(question, timeout=120)` | Ephemeral side-query LLM call using current session context; returns the response text. Nothing is saved to history. |
+| `ctx.reload_extension(name, path=None)` | Reload one extension; with `path`, load that script into this session only |
 | `ctx.continue_session()` | Trigger the agent to continue without injecting a message |
 | `ctx.set_session_data(key, value)` | Store a key/value pair persisted across `/reexec` |
 | `ctx.get_session_data(key)` | Retrieve a previously stored value |
@@ -91,6 +92,8 @@ Always call `fir_ext.run(name="<name>")` at the end of the script.
 - [ ] Disable an extension with `chmod -x`; a renamed file still loads.
 - [ ] Define tools with `@fir_ext.tool(...)`, slash commands with `@fir_ext.command(...)`, and/or event handlers with `@fir_ext.on(...)`. The init handshake reports them to fir — there is no need to declare them again in frontmatter.
 - [ ] End with `fir_ext.run(name="<name>")`.
+- [ ] Do not start a tool name with `mcp_`: the Anthropic subscription API then fails every request in every session that loads the extension. `mcp__` is the MCP server namespace. Names must be 1-64 chars of `[a-zA-Z0-9_-]`.
+- [ ] To add an extension from inside a session, prefer the builtin `forge_tool`: it proves the code in a sandbox `fir -p` sub-agent with your provider and model before installing, and returns the error if it fails. Use `scope: "session"` to load it into this session only.
 - [ ] **Never put test files in the extensions directory** — use `pkg/resources/testdata/` for Python tests or `pkg/extension/integration/` for Go integration tests.
 - [ ] Test by running fir with `--debug` and checking for init handshake success.
 - [ ] On first use, fir will prompt to trust the extension (project-local only).
