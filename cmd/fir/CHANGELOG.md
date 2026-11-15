@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.58.0] - 2026-11-15
+
 ### Added
 
 - `forge_tool` proves a new extension in a sandbox `fir -p` sub-agent (caller's provider and model, a real model call, each tool checked visible) before installing it, and returns the sub-agent's error on failure.
@@ -11,6 +13,10 @@
 
 - `forge_tool` refuses tool names providers reject, from a data table: an `mcp_` prefix (fails every Anthropic subscription request), the `mcp__` MCP namespace, and names outside 1-64 `[a-zA-Z0-9_-]`.
 - Targeted extension reload now also finds package-contributed extensions.
+
+### Changed
+
+- **Model catalog regenerated**: 1 model with changed pricing/limits (openrouter: qwen/qwen3.5-9b).
 
 ## [1.57.0] - 2026-11-15
 
