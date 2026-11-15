@@ -44,6 +44,9 @@ type RuntimeState struct {
 	// Handle is an external name for the session (e.g. an ACP sessionId);
 	// every save points it at the current transcript, see store.BindHandle.
 	Handle string `json:"handle,omitempty"`
+	// SystemPrompt is the client-supplied appended system prompt (ACP
+	// params.systemPrompt), see AgentSession.SetClientSystemPrompt.
+	SystemPrompt string `json:"systemPrompt,omitempty"`
 }
 
 // ConversationState is the half of SessionState bound to the transcript.
@@ -192,6 +195,9 @@ func (s *AgentSession) restoreState(keepRuntime bool, override func(*SessionStat
 			st.Runtime.Cwd = s.cwd
 		}
 	})
+	if !keepRuntime && s.ClientSystemPrompt() != "" {
+		s.buildSystemPrompt()
+	}
 	s.SaveState()
 }
 

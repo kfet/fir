@@ -90,6 +90,8 @@ func rawMethodHandler(pa *firAgent, wn *writeNotifier) acpsdk.MethodHandler {
 					// session/fork (RFD session-fork). fir extension: _meta.at
 					// forks at an explicit entry id instead of the leaf.
 					"fork": map[string]any{"_meta": map[string]any{"at": true}},
+					// Client-provided system prompt (mode append only).
+					"systemPrompt": systemPromptCapability(),
 				}
 				// fir extension: session/prompt responses carry _meta.leafId,
 				// the turn's leaf entry, accepted as session/fork _meta.at.
@@ -139,10 +141,17 @@ func rawMethodHandler(pa *firAgent, wn *writeNotifier) acpsdk.MethodHandler {
 			if err := json.Unmarshal(params, &p); err != nil {
 				return nil, acpsdk.NewInvalidParams(map[string]any{"error": err.Error()})
 			}
+			spText, spPresent, spErr := parseSystemPrompt(params)
+			if spErr != nil {
+				return nil, acpsdk.NewInvalidParams(map[string]any{"error": spErr.Error()})
+			}
 			resp, err := pa.NewSession(ctx, p)
 			if err != nil {
 				firlog.Error("acp dispatch: session/new failed", "err", err, "cwd", p.Cwd)
 				return nil, toReqErr(err)
+			}
+			if spPresent {
+				pa.applySystemPrompt(string(resp.SessionId), spText)
 			}
 			// Re-attach fields fir sends that the SDK's typed response does
 			// not carry: configOptions, and the legacy "models" object the
@@ -265,10 +274,17 @@ func rawMethodHandler(pa *firAgent, wn *writeNotifier) acpsdk.MethodHandler {
 			if err := json.Unmarshal(params, &p); err != nil {
 				return nil, acpsdk.NewInvalidParams(map[string]any{"error": err.Error()})
 			}
+			spText, spPresent, spErr := parseSystemPrompt(params)
+			if spErr != nil {
+				return nil, acpsdk.NewInvalidParams(map[string]any{"error": spErr.Error()})
+			}
 			childID, entry, err := pa.forkSessionLocal(ctx, p)
 			if err != nil {
 				firlog.Error("acp dispatch: session/fork failed", "err", err, "sessionId", p.SessionId)
 				return nil, toReqErr(err)
+			}
+			if spPresent {
+				pa.applySystemPrompt(childID, spText)
 			}
 			respMap := map[string]any{
 				"sessionId":     childID,
@@ -297,10 +313,21 @@ func rawMethodHandler(pa *firAgent, wn *writeNotifier) acpsdk.MethodHandler {
 				return nil, acpsdk.NewInvalidParams(map[string]any{"error": err.Error()})
 			}
 			firlog.Info("acp dispatch: "+method+" params", "sessionId", p.SessionId, "cwd", p.Cwd)
+			spText, spPresent, spErr := parseSystemPrompt(params)
+			if spErr != nil {
+				return nil, acpsdk.NewInvalidParams(map[string]any{"error": spErr.Error()})
+			}
 			resp, err := pa.resumeSessionLocal(ctx, p)
 			if err != nil {
 				firlog.Error("acp dispatch: "+method+" failed", "err", err, "sessionId", p.SessionId, "cwd", p.Cwd)
 				return nil, toReqErr(err)
+			}
+			if spPresent {
+				sidSP := p.SessionId
+				if resp.SessionId != "" {
+					sidSP = resp.SessionId
+				}
+				pa.applySystemPrompt(sidSP, spText)
 			}
 			rawResp, merr := json.Marshal(resp)
 			if merr != nil {

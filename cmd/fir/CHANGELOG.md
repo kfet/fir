@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- ACP: advertise `sessionCapabilities.systemPrompt` and accept `params.systemPrompt` (mode `append`) on `session/new`, `load`, `resume` and `fork`. The text is appended to the session system prompt (cached), replaces any earlier client prompt instead of piling up, and is saved with the session state so it survives an idle reap.
+
 ## [1.56.0] - 2026-11-15
 
 ### Added

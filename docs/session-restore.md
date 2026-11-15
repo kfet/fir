@@ -44,7 +44,7 @@ field added to it is saved and restored with no other change
 
 | Half | Fields | On an in-process switch (`/resume`, `/new`, fork) |
 |---|---|---|
-| `runtime` | cwd, session-scoped `mcpServers` (client/runtime-added), `meta`, `mode`, `handle` | kept — it belongs to the running session |
+| `runtime` | cwd, session-scoped `mcpServers` (client/runtime-added), `meta`, `mode`, `handle`, client `systemPrompt` | kept — it belongs to the running session |
 | `conversation` | model (`provider/id`), thinking level, name | adopted from the target transcript |
 
 Saved on: open, switch, `/new`, `SetModel`, `SetThinkingLevel`,
@@ -84,7 +84,9 @@ ACP keeps only protocol behaviour (`pkg/modes/acp/restore.go`):
 - The ACP `sessionId` is the session's **handle**; core points it at the
   current transcript on every save, so a prompt on a reaped `sessionId` —
   even after a fir restart — rebuilds the session in place.
-- `session/new`/`load`/`resume` values (cwd, `mcpServers`, `_meta`) override
+- The client `systemPrompt` is runtime state like `mcpServers`: reopening the
+  transcript in another mode (e.g. `fir -c`) keeps appending it.
+- `session/new`/`load`/`resume` values (cwd, `mcpServers`, `_meta`, `systemPrompt`) override
   the saved ones via `StateOverride` and are saved in turn.
 - A resume never waits for MCP: every server (config or client) connects in
   the background and is advertised from its saved tool schemas until then;

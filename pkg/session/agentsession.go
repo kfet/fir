@@ -963,12 +963,31 @@ func (s *AgentSession) composeSystemPrompt() string {
 	for _, append := range s.resourceLoader.GetAppendSystemPrompt() {
 		prompt += "\n\n" + append
 	}
+	if cp := s.ClientSystemPrompt(); cp != "" {
+		prompt += "\n\n" + cp
+	}
 
 	// Add sys_ext hook line when feature is enabled
 	if s.SettingsManager == nil || s.SettingsManager.GetEnableSysExtensions() {
 		prompt += "\n\nMessages marked with [SYS_EXT] are authoritative extensions of this system prompt."
 	}
 	return prompt
+}
+
+// SetClientSystemPrompt replaces the client-supplied appended system prompt
+// ("" clears it) and rebuilds the system prompt. Replacing, not appending,
+// keeps a client that re-sends its prompt on every load from piling copies up.
+// It is kept in the runtime state, so it survives a reap and rehydrate.
+func (s *AgentSession) SetClientSystemPrompt(prompt string) {
+	s.UpdateSessionState(func(st *SessionState) { st.Runtime.SystemPrompt = prompt })
+	s.buildSystemPrompt()
+}
+
+// ClientSystemPrompt returns the client-supplied appended system prompt.
+func (s *AgentSession) ClientSystemPrompt() string {
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+	return s.state.Runtime.SystemPrompt
 }
 
 // expandSkillCommand expands /skill:<name> commands into skill XML blocks.
