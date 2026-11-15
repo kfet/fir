@@ -3045,6 +3045,18 @@ class Context:
         """
         return self._call("reload_mcp")
 
+    def reload_resources(self) -> None:
+        """Reload skills, themes, the system prompt and the model registry.
+
+        Deferred: fir runs the reload once after the current turn ends
+        (repeated calls collapse into one); when the session is idle it runs
+        at once. The next turn gets a short [SYS_EXT] summary of skills and
+        models added/removed and any errors. Settings, extensions and MCP
+        servers are not reloaded. Use it after writing a new skill or a
+        models.json fragment so the agent can use it without ``/reload``.
+        """
+        self._call("reload_resources")
+
     def side_query(
         self,
         question: str,

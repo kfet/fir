@@ -803,6 +803,33 @@ the reload. Both arrays may be empty on a clean reload.
 
 ---
 
+#### `reload_resources`
+
+Reload skills, themes, the system prompt and the model registry
+(models.json, models.d/ fragments, auth.json; live model lists refetch in
+the background). Intended for an agent that has just written a skill or a
+model fragment and wants to use it without a manual `/reload`.
+
+No parameters required.
+
+```json
+{"jsonrpc":"2.0","id":1016,"method":"reload_resources"}
+```
+
+Behaviour: **deferred**. The call only schedules the reload and returns at
+once; fir runs it once after the current turn ends (repeated calls collapse
+into one), or immediately when the session is idle. The system prompt is
+replaced only if its content changed, so the prompt cache survives a no-op
+reload. A `[SYS_EXT]` message listing skills and models added/removed and
+any errors is injected for the next turn.
+
+Not reloaded: settings (so an extension cannot widen its own extension
+allow-list), extensions, MCP servers, the catalog overlay.
+
+Response: `{"ok": true}`. Errors when no session is wired.
+
+---
+
 #### `side_query`
 
 Make a one-shot LLM call using the current session context.  No tools, no

@@ -626,3 +626,52 @@ func TestBridge_ReloadMCP_PropagatesError(t *testing.T) {
 		t.Fatalf("expected propagated error, got %v", resp.Error)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Bridge dispatch arm: reload_resources
+// ---------------------------------------------------------------------------
+
+func TestBridge_ReloadResources_RPC(t *testing.T) {
+	b, extCodec := pipePair(&InitResult{Name: "caller-ext"})
+	api := newMockAPI()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = b.Run(ctx, api) }()
+
+	_ = extCodec.WriteRequest(30, "reload_resources", nil)
+	if resp := mustResponse(t, extCodec); resp.Error != nil {
+		t.Fatalf("unexpected error: %v", resp.Error)
+	}
+	api.mu.Lock()
+	calls := api.reloadResCalls
+	api.mu.Unlock()
+	if calls != 1 {
+		t.Fatalf("expected 1 reload_resources call, got %d", calls)
+	}
+}
+
+func TestBridge_ReloadResources_PropagatesError(t *testing.T) {
+	b, extCodec := pipePair(&InitResult{Name: "caller-ext"})
+	api := newMockAPI()
+	api.mu.Lock()
+	api.reloadResErr = errTestReload
+	api.mu.Unlock()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = b.Run(ctx, api) }()
+
+	_ = extCodec.WriteRequest(31, "reload_resources", nil)
+	resp := mustResponse(t, extCodec)
+	if resp.Error == nil || !strings.Contains(resp.Error.Message, "boom") {
+		t.Fatalf("expected propagated error, got %v", resp.Error)
+	}
+}
+
+func TestSessionBridge_ReloadResources_NilSession(t *testing.T) {
+	if err := (&SessionBridge{}).ReloadResources(); err == nil {
+		t.Fatal("expected error without a session")
+	}
+	if err := (&nopBridgeAPI{}).ReloadResources(); err == nil {
+		t.Fatal("expected error from nop bridge")
+	}
+}

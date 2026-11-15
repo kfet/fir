@@ -380,6 +380,7 @@ class TestDemoInit(DemoTestCase):
                 "restart_demo",
                 "reload_ext_demo",
                 "reload_mcp_demo",
+                "reload_resources_demo",
                 "batch_example",
                 "show_config_dirs",
             },
@@ -649,6 +650,17 @@ class TestDemoTools(DemoTestCase):
         fake.send_tool_call(2, "reload_mcp_demo", {})
         msg = fake.wait_for_method("reload_mcp")
         self.assertIsNotNone(msg, "expected reload_mcp call")
+        fake.stop()
+
+    # -- reload_resources_demo -----------------------------------------------
+
+    def test_reload_resources_demo_calls_reload_resources(self) -> None:
+        fake = FakeFir()
+        self.start_demo_ext(fake)
+        fake.send_init()
+        fake.send_tool_call(2, "reload_resources_demo", {})
+        msg = fake.wait_for_method("reload_resources")
+        self.assertIsNotNone(msg, "expected reload_resources call")
         fake.stop()
 
     # -- batch_example -------------------------------------------------------

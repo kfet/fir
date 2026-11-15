@@ -1,7 +1,7 @@
 ---
 builtin: true
 name: skill-creator
-description: Create, write, add, edit, update, or review a fir skill — author SKILL.md with frontmatter and agent-facing instructions, run the quality checklist, and tell the user to /reload.
+description: Create, write, add, edit, update, or review a fir skill — author SKILL.md with frontmatter and agent-facing instructions, run the quality checklist, and reload skills so it is live next turn.
 override: true
 ---
 
@@ -32,7 +32,7 @@ description: One-line, keyword-rich trigger statement used by the agent to decid
 2. Write the frontmatter — `name` matching the directory, plus a keyword-rich `description`.
 3. Write clear, agent-facing Markdown instructions — no stubs, no TODOs, no user-facing fluff.
 4. Run the review checklist below and fix issues in place.
-5. Tell the user to `/reload`.
+5. Make the skill live: call `ext_reload` with `scope: "resources"` (from an extension: `ctx.reload_resources()`). It reloads skills and the system prompt after this turn; the next turn opens with a summary naming the skill as added, or any load error. Fix any error it reports. If neither is available, tell the user to `/reload`.
 
 ## Catalog pattern (umbrella skills)
 

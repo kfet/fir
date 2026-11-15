@@ -17,7 +17,7 @@ Outbound calls demonstrated (extension → fir):
   set_model · send_message · send_user_message ·
   set_session_data · get_session_data · get_session_file · get_session_name · get_session_id · pending_steers · continue_session · side_query · call_tool ·
   list_tools · list_extensions · available_models ·
-  report_progress · restart_session · reload_extension · reload_mcp ·
+  report_progress · restart_session · reload_extension · reload_mcp · reload_resources ·
   prepend · set_section · clear_section
 
 Inbound surface demonstrated (fir → extension):
@@ -216,6 +216,23 @@ def reload_mcp_demo(params: dict, ctx: fir_ext.Context) -> dict:
     # reload_mcp: re-reads MCP config from disk and reloads servers.
     # Returns a dict with 'collisions' and 'errors' arrays.
     return ctx.reload_mcp()  # reload_mcp
+
+
+@fir_ext.tool(
+    name="reload_resources_demo",
+    description=(
+        "Demonstrate ctx.reload_resources(). Schedules a reload of skills, "
+        "system prompt and model registry after the current turn ends."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {},
+    },
+)
+def reload_resources_demo(params: dict, ctx: fir_ext.Context) -> dict:
+    # reload_resources: deferred; a change summary arrives next turn.
+    ctx.reload_resources()  # reload_resources
+    return {"scheduled": True}
 
 
 @fir_ext.tool(

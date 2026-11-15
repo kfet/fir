@@ -691,6 +691,16 @@ func (b *SessionBridge) ListExtensions() []ExtensionInfo {
 	return fn()
 }
 
+// ReloadResources schedules a deferred skills/system-prompt/model-registry
+// reload on the session (see session.AgentSession.RequestResourceReload).
+func (b *SessionBridge) ReloadResources() error {
+	if b.session == nil {
+		return fmt.Errorf("resource reload is not supported in this session")
+	}
+	b.session.RequestResourceReload()
+	return nil
+}
+
 // SetReloadMCPFn registers the MCP reload handler. It is wired by app.go at
 // session setup so that the inbound reload_mcp RPC can re-read config from
 // disk and apply it to the running MCP manager. Pass nil to remove.

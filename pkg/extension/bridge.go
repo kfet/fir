@@ -682,6 +682,15 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 			result = mcpResult
 		}
 
+	case "reload_resources":
+		// Deferred: the session reloads skills, system prompt and model
+		// registry once the current turn ends.
+		if err := api.ReloadResources(); err != nil {
+			rpcErr = &Error{Code: -32000, Message: err.Error()}
+		} else {
+			result = okTrue
+		}
+
 	default:
 		// Try auth helper RPCs.
 		if result, rpcErr, handled := b.handleAuthHelperRPC(req.Method, req.Params); handled {

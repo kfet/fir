@@ -270,6 +270,13 @@ type AgentSession struct {
 	baseSystemPrompt string
 	sessionDate      string // frozen date for system prompt (YYYY-MM-DD), set once per session
 
+	// resourceReloadPending is set by RequestResourceReload and consumed
+	// (exactly once) when the current turn ends or immediately when idle.
+	resourceReloadPending atomic.Bool
+	// reloadMu serialises Reload and the deferred resource reload, which
+	// can run on an extension RPC goroutine when the session is idle.
+	reloadMu sync.Mutex
+
 	// Bash execution
 	bashCancel   context.CancelFunc
 	bashCancelMu sync.Mutex
@@ -618,6 +625,10 @@ func (s *AgentSession) handleAgentEvent(event agent.AgentEvent) {
 			s.checkAutoCompaction(msg)
 		}
 
+		// An agent-requested resource reload runs once, after the turn
+		// that asked for it, so the prompt never changes mid-turn.
+		s.runPendingResourceReload()
+
 		// Keep the state file current (and next to the transcript, which a
 		// branch or compaction may have moved), so it also refreshes the
 		// handle binding's age.
@@ -921,6 +932,14 @@ func (s *AgentSession) RemoveFollowUp(oneBasedIndex int) (string, bool) {
 // callers from forgetting the SetSystemPrompt half (which historically caused
 // freshly-created sessions to send no system prompt to the LLM on turn one).
 func (s *AgentSession) buildSystemPrompt() {
+	prompt := s.composeSystemPrompt()
+	s.baseSystemPrompt = prompt
+	s.Agent.SetSystemPrompt(prompt)
+}
+
+// composeSystemPrompt renders the system prompt from the current resource
+// loader + settings state without applying it.
+func (s *AgentSession) composeSystemPrompt() string {
 	// Collect skills
 	skills, _ := s.resourceLoader.GetSkills()
 
@@ -949,9 +968,7 @@ func (s *AgentSession) buildSystemPrompt() {
 	if s.SettingsManager == nil || s.SettingsManager.GetEnableSysExtensions() {
 		prompt += "\n\nMessages marked with [SYS_EXT] are authoritative extensions of this system prompt."
 	}
-
-	s.baseSystemPrompt = prompt
-	s.Agent.SetSystemPrompt(prompt)
+	return prompt
 }
 
 // expandSkillCommand expands /skill:<name> commands into skill XML blocks.
@@ -1632,6 +1649,8 @@ func extractUserMessageText(raw json.RawMessage) string {
 
 // Reload reloads resources and rebuilds the system prompt.
 func (s *AgentSession) Reload() error {
+	s.reloadMu.Lock()
+	defer s.reloadMu.Unlock()
 	// Re-read settings from disk first so that resource loader and
 	// callers see updated values (e.g., changed extension lists).
 	if s.SettingsManager != nil {

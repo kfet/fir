@@ -1368,6 +1368,8 @@ func (n *noopBridgeAPI) Introspect() session.Introspection {
 func (n *noopBridgeAPI) GetObservableStore() *store.ObservableStore { return nil }
 func (n *noopBridgeAPI) RestartSession(_, _ string) error           { return nil }
 func (n *noopBridgeAPI) ReloadExtension(_ string) error             { return nil }
+func (n *noopBridgeAPI) ReloadResources() error                     { return nil }
+
 func (n *noopBridgeAPI) ReloadMCP() (extension.ReloadMCPResult, error) {
 	return extension.ReloadMCPResult{}, nil
 }
@@ -1779,6 +1781,32 @@ func TestHandleSlashCommand_Reload(t *testing.T) {
 	msg := getLastAgentMessage(mc.getUpdates())
 	if !strings.Contains(msg, "Reload completed") {
 		t.Errorf("expected reload success message, got: %q", msg)
+	}
+}
+
+func TestHandleSlashCommand_ReloadReportsExtensionError(t *testing.T) {
+	mc := newMockConn()
+	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
+	sess := newMinimalSession(t)
+	defer sess.Close()
+	// A never-started manager refuses Reload.
+	entry := &firSession{
+		termState:       newTerminalState(),
+		session:         sess,
+		extSetup:        &extension.SetupResult{Manager: extension.NewManager(slog.Default())},
+		settingsManager: config.NewInMemorySettingsManager(config.Settings{}),
+	}
+
+	pa.handleSlashCommand("s1", entry, "reload", "")
+	var all strings.Builder
+	for _, u := range mc.getUpdates() {
+		all.WriteString(getLastAgentMessage([]acpsdk.SessionNotification{u}) + "\n")
+	}
+	if !strings.Contains(all.String(), "Extension reload failed") {
+		t.Errorf("expected extension reload error to be reported, got: %s", all.String())
+	}
+	if !strings.Contains(getLastAgentMessage(mc.getUpdates()), "with errors") {
+		t.Errorf("expected partial-failure summary")
 	}
 }
 

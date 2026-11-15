@@ -41,6 +41,8 @@ type mockBridgeAPI struct {
 	reloadFn        func(name string) error
 	reloadMCPFn     func() (ReloadMCPResult, error)
 	reloadMCPCalls  int
+	reloadResCalls  int
+	reloadResErr    error
 	reloadMCPResult ReloadMCPResult
 	reloadMCPErr    error
 	observableStore *store.ObservableStore
@@ -233,6 +235,13 @@ func (m *mockBridgeAPI) SetReloadMCPFn(fn func() (ReloadMCPResult, error)) {
 	m.mu.Lock()
 	m.reloadMCPFn = fn
 	m.mu.Unlock()
+}
+
+func (m *mockBridgeAPI) ReloadResources() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.reloadResCalls++
+	return m.reloadResErr
 }
 
 func (m *mockBridgeAPI) ReloadMCP() (ReloadMCPResult, error) {

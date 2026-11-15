@@ -108,6 +108,12 @@ type BridgeAPI interface {
 	// detected (when multiple config files define the same server name)
 	// and any errors from individual server starts/restarts.
 	ReloadMCP() (ReloadMCPResult, error)
+	// ReloadResources schedules a reload of skills, themes, the system
+	// prompt and the model registry. Deferred: it runs once after the
+	// current turn ends (repeated calls collapse); a change summary is
+	// injected for the next turn. Settings, extensions and MCP servers are
+	// not touched.
+	ReloadResources() error
 	// ListExtensions returns one entry per extension currently running in
 	// this session (name, canonical ID, scope, path, registered tools).
 	// Extensions use it to verify that a file they just wrote actually

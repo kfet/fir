@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`reload_resources` extension RPC** (`ctx.reload_resources()`): an agent can reload skills, themes, the system prompt and the model registry itself. Deferred to the end of the current turn; the next turn gets a summary of skills/models added and removed. Settings, extensions and MCP are not touched.
+
+### Fixed
+
+- ACP `/reload` now reports an extension reload failure instead of ignoring it.
+
 ## [1.55.2] - 2026-11-14
 
 ### Changed

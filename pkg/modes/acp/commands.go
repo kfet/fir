@@ -416,6 +416,7 @@ func cmdChangelog(ctx *commandContext, args string) {
 
 func cmdReload(ctx *commandContext, _ string) {
 	entry := ctx.entry
+	partial := false
 	if err := entry.session.Reload(); err != nil {
 		ctx.sendMessage(fmt.Sprintf("Reload failed: %v", err))
 		return
@@ -424,12 +425,16 @@ func cmdReload(ctx *commandContext, _ string) {
 		if entry.extSetup.Manager != nil {
 			entry.extSetup.Manager.SetAllowedNames(resolveEnabledExtensions(ctx.agent.options.EnabledExtensions, entry.settingsManager))
 		}
-		_ = entry.extSetup.Reload(context.Background())
+		if err := entry.extSetup.Reload(context.Background()); err != nil {
+			ctx.sendMessage(fmt.Sprintf("Extension reload failed: %v", err))
+			partial = true
+		}
 	}
 	// Reload MCP servers: re-read configs from disk and apply the diff.
 	// If no manager existed (no MCPs at startup), create one now if configs appear.
 	if err := session.ReloadMCP(context.Background(), &entry.mcpManager, entry.session, entry.cwd, ctx.agent.options.MCPConfig, nil); err != nil {
 		ctx.sendMessage(fmt.Sprintf("MCP reload failed: %v", err))
+		partial = true
 	}
 	entry.mcpStatus = mcp.StatusFunc(entry.mcpManager)
 	// Re-read provider credentials and the model catalog from disk (auth.json,
@@ -440,6 +445,10 @@ func cmdReload(ctx *commandContext, _ string) {
 		entry.modelRegistry.Refresh()
 	}
 	ctx.agent.sendAvailableCommands(ctx.sessionID)
+	if partial {
+		ctx.sendMessage("Reload completed with errors (see above).")
+		return
+	}
 	ctx.sendMessage("Reload completed successfully.")
 }
 
