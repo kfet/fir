@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -103,5 +104,31 @@ func TestApplyAgentDirFlagOverridesEnvAndStripsArgs(t *testing.T) {
 		if os.Args[i] != wantArgs[i] {
 			t.Fatalf("os.Args=%v, want %v", os.Args, wantArgs)
 		}
+	}
+}
+
+// fir sessions owns --cwd as a filter; the global chdir must leave it alone
+// and still honour -C.
+func TestApplyChdirFlagLeavesSessionsCwd(t *testing.T) {
+	origArgs := os.Args
+	origWd, _ := os.Getwd()
+	t.Cleanup(func() { os.Args = origArgs; _ = os.Chdir(origWd) })
+
+	os.Args = []string{"fir", "sessions", "search", "--cwd", "/nonexistent-x", "pat"}
+	if err := applyChdirFlag(); err != nil {
+		t.Fatalf("applyChdirFlag: %v", err)
+	}
+	if len(os.Args) != 6 || os.Args[3] != "--cwd" {
+		t.Fatalf("--cwd stripped: %v", os.Args)
+	}
+
+	dir := t.TempDir()
+	os.Args = []string{"fir", "sessions", "search", "--cwd=/p", "-C", dir, "pat"}
+	if err := applyChdirFlag(); err != nil {
+		t.Fatalf("applyChdirFlag: %v", err)
+	}
+	want := []string{"fir", "sessions", "search", "--cwd=/p", "pat"}
+	if strings.Join(os.Args, " ") != strings.Join(want, " ") {
+		t.Fatalf("os.Args=%v, want %v", os.Args, want)
 	}
 }

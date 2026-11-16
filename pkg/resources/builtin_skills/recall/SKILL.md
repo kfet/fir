@@ -63,6 +63,23 @@ read around the match. No bookmark hit? Search transcripts, narrowest first:
 dir, every store), then add `--since 720h` without `--cwd`, then everything. Refine terms, widen the tier, iterate — a few rounds,
 not dozens. Archive transcripts are read-only: read them, never write there.
 
+## 3a. Check, ground, correct — a bookmark can be stale
+
+A bookmark is true as of its date, not now. When it gives a value that can
+change (port, host, path, version, timeout, config, a decision), check before
+you answer: search the transcripts of sessions NEWER than the bookmark's
+session for the same terms, bookmarked or not. A complete-looking slice is
+the trap here: later sessions often change a value without bookmarking it.
+
+```bash
+fir sessions search --kind transcript -i 'term1|term2' --cwd "$REPO" | head -40   # newest first: hits above the bookmark's session are newer
+```
+
+Answer with the newest grounded value and cite both ("45s per s7 on 11-09;
+was 300s per s3 bookmark"). If the live system is cheap to check (a file, a
+command), check it too. On a contradiction, `bookmark()` your reply with note
+prefix `correct:` so the next recall finds the fix.
+
 ## 3b. Capability question? Grep the repo that would hold it
 
 Sessions record work; repos record what shipped. Pick the likely repo beside this one

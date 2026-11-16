@@ -66,8 +66,14 @@ func parseChdirFlag(args []string) (dir string, idx, consume int, found bool, er
 // Supports `-C dir`, `-C=dir`, `--cwd[=dir]`, and `--directory[=dir]`.
 // Only the first occurrence is honoured.
 func applyChdirFlag() error {
+	args := os.Args[1:]
+	// `fir sessions` owns its own --cwd (a filter, not a chdir); stripping it
+	// here silently turned `sessions search --cwd X` into an all-store scan.
+	if len(args) > 0 && args[0] == "sessions" {
+		args = shortChdirOnly(args)
+	}
 	// Skip os.Args[0] (program name).
-	dir, idx, consume, found, err := parseChdirFlag(os.Args[1:])
+	dir, idx, consume, found, err := parseChdirFlag(args)
 	if err != nil {
 		return err
 	}
@@ -81,6 +87,19 @@ func applyChdirFlag() error {
 	start := idx + 1
 	os.Args = append(os.Args[:start], os.Args[start+consume:]...)
 	return nil
+}
+
+// shortChdirOnly returns a copy of args with the long --cwd/--directory forms
+// masked (same length, so indices still map to os.Args): `fir sessions` uses
+// --cwd as its own filter flag, so only -C chdirs there.
+func shortChdirOnly(args []string) []string {
+	out := append([]string(nil), args...)
+	for i, a := range out {
+		if a == "--cwd" || a == "--directory" || strings.HasPrefix(a, "--cwd=") || strings.HasPrefix(a, "--directory=") {
+			out[i] = "\x00"
+		}
+	}
+	return out
 }
 
 // parseAgentDirFlag scans args for `--agent-dir <dir>` or `--agent-dir=<dir>`.

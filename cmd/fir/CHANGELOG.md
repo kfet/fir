@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- `fir sessions --cwd` reaches the subcommand as a filter instead of being taken by the global `-C/--cwd` flag, so cwd-scoped session search no longer scans every store.
+
+### Changed
+
+- `recall` skill: before trusting a bookmark for a value that can change, search newer transcripts for the same terms, answer with the newest grounded value, and write a `correct:` bookmark on contradiction.
+
 ## [1.58.0] - 2026-11-15
 
 ### Added
