@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.59.0] - 2026-11-16
+
 ### Added
 
 - The `handoff` extension publishes a short `[SYS_EXT]` memory section: it says that future sessions know only what is marked, and when to mark (decisions, rules, corrections, and findings in tool output). In a probe on haiku-5.5 and sonnet-5.5 it raised balanced marking accuracy from 70.8 to 79.5.
