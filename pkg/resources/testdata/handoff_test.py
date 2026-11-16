@@ -953,5 +953,137 @@ class TestPinTool(unittest.TestCase):
         self.assertEqual(rows[0]["_bookmark_note"], "good")
 
 
+class TestAutoMark(unittest.TestCase):
+    """Turn-end auto-mark hook: config gate, turn rendering, verbatim check."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.mkdtemp()
+        self.handoff = _load_handoff(self.tmp)
+        self.session_file = os.path.join(self.tmp, "20250522_sess.jsonl")
+        self.bm_path = os.path.join(self.tmp, "bookmarks-sess.jsonl")
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _write(self, msgs) -> None:
+        rows = [{"id": "sess", "model": "test"}]
+        for i, m in enumerate(msgs):
+            rows.append(
+                {
+                    "type": "message",
+                    "id": f"e{i}",
+                    "timestamp": f"2025-05-22T14:0{i}:00",
+                    "message": m,
+                }
+            )
+        _write_jsonl(self.session_file, rows)
+
+    def _ctx(self, reply: str = "", **kw):
+        return _StubContext(
+            session_file=self.session_file, session_id="sess", side_query_reply=reply, **kw
+        )
+
+    def _on(self, spec: str = "openrouter/cheap-model"):
+        return mock.patch.object(fir_ext, "load_config", return_value={"autoMark": spec})
+
+    def _tool_turn(self) -> None:
+        self._write(
+            [
+                {"role": "assistant", "content": [{"type": "text", "text": "Which format?"}]},
+                {"role": "user", "content": "csv. tests are flaky, find out why"},
+                {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "toolCall",
+                            "name": "bash",
+                            "arguments": {"command": "go test -race"},
+                        }
+                    ],
+                },
+                {
+                    "role": "toolResult",
+                    "content": [{"type": "text", "text": "WARNING: DATA RACE in cache.Store.Put"}],
+                },
+            ]
+        )
+
+    def test_off_by_default(self) -> None:
+        self._tool_turn()
+        ctx = self._ctx("DATA RACE ||| root cause")
+        with mock.patch.object(fir_ext, "load_config", return_value=None):
+            self.assertEqual(self.handoff._automark(ctx), 0)
+        self.assertEqual(ctx.side_query_calls, [])
+
+    def test_off_value(self) -> None:
+        self._tool_turn()
+        ctx = self._ctx("DATA RACE ||| root cause")
+        with self._on("off"):
+            self.assertEqual(self.handoff._automark(ctx), 0)
+        self.assertEqual(ctx.side_query_calls, [])
+
+    def test_marks_tool_finding_context_free(self) -> None:
+        self._tool_turn()
+        ctx = self._ctx("DATA RACE in cache.Store.Put ||| flaky tests root cause: race")
+        with self._on():
+            self.assertEqual(self.handoff._automark(ctx), 1)
+        kw = ctx.side_query_kwargs[0]
+        self.assertEqual(
+            (kw["provider"], kw["model"], kw["effort"], kw["messages"]),
+            ("openrouter", "cheap-model", "off", []),
+        )
+        q = ctx.side_query_calls[0]
+        self.assertIn("Which format?", q)  # the question the user answers
+        self.assertIn("[tool result]", q)
+        rows = _read_jsonl(self.bm_path)
+        self.assertEqual(rows[0]["_bookmark_note"], "auto: flaky tests root cause: race")
+
+    def test_non_verbatim_quote_dropped(self) -> None:
+        self._tool_turn()
+        ctx = self._ctx("a data race was found ||| paraphrase")
+        with self._on():
+            self.assertEqual(self.handoff._automark(ctx), 0)
+        self.assertFalse(os.path.exists(self.bm_path))
+
+    def test_quote_from_previous_turn_dropped(self) -> None:
+        self._tool_turn()
+        ctx = self._ctx("Which format? ||| old question")
+        with self._on():
+            self.assertEqual(self.handoff._automark(ctx), 0)
+
+    def test_openrouter_rejects_effort_off_retries(self) -> None:
+        self._tool_turn()
+        calls = []
+
+        class Ctx(_StubContext):
+            def side_query(self, question, **kw):
+                calls.append(kw.get("effort"))
+                if kw.get("effort") == "off":
+                    raise RuntimeError("side-query: 400: reasoning_effort: Invalid option")
+                return "DATA RACE ||| root cause"
+
+        ctx = Ctx(session_file=self.session_file, session_id="sess")
+        with self._on():
+            self.assertEqual(self.handoff._automark(ctx), 1)
+        self.assertEqual(calls, ["off", None])
+
+    def test_skip_turn_without_tool_or_reply(self) -> None:
+        self._write([{"role": "user", "content": "let me think"}])
+        ctx = self._ctx("let me think ||| x")
+        with self._on():
+            self.assertEqual(self.handoff._automark(ctx), 0)
+        self.assertEqual(ctx.side_query_calls, [])
+
+    def test_bare_model_spec(self) -> None:
+        with self._on("m1"):
+            self.assertEqual(self.handoff._automark_model(), ("", "m1"))
+
+    def test_agent_end_swallows_errors(self) -> None:
+        self._tool_turn()
+        ctx = self._ctx(raise_on_side_query=True)
+        with self._on():
+            self.handoff.on_agent_end({}, ctx)  # must not raise
+
+
 if __name__ == "__main__":
     unittest.main()

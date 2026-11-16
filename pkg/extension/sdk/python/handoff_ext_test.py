@@ -387,9 +387,10 @@ class TestInit(_BookmarkBase):
         # that repairs pre-existing (v1) bookmarks files whose entries
         # self-matched the bookmark call. The card itself still survives
         # /reexec via the cards file read on session construct.
+        # agent_end drives the turn-end auto-mark hook (off unless configured).
         result = self.init_result["result"]
         events = result.get("events", [])
-        self.assertEqual(events, ["session_start"])
+        self.assertEqual(sorted(events), ["agent_end", "session_start"])
 
     def test_bookmark_description_mentions_all_turn_types(self) -> None:
         result = self.init_result["result"]

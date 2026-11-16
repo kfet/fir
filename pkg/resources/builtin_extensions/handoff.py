@@ -290,26 +290,25 @@ _BOOKMARK_PARAMS: dict[str, Any] = {
 # pin: argless reflex tool
 # ---------------------------------------------------------------------------
 
-_PIN_DESCRIPTION = """📌 pin — always call this the moment the \
-conversation produces something worth keeping.
+_PIN_DESCRIPTION = "📌 pin — mark a moment worth keeping. No arguments.\n\nCall pin in the same response as your next action whenever the user decides, chooses, states a rule or preference, or corrects you, or a tool result shows a root cause, gotcha, measurement or milestone. Not for routine turns. Free; a moment you do not pin is lost."
 
-Whenever the latest turn contains ANY of the following, call pin (no \
-arguments) BEFORE you write your reply:
-- a decision or choice being finalized ("we'll go with…", "decision \
-is final", "let's commit to…")
-- a constraint, rule, or requirement stated ("must never…", \
-"always…", "the rule is…")
-- a root cause or key finding ("we found it", "the cause is…", \
-"turns out…", a bug's fix)
-- a non-obvious fact or gotcha about the code or system
-- a plan locked in or a milestone reached
+# ---------------------------------------------------------------------------
+# memory trigger: persistent SYS_EXT section
+# ---------------------------------------------------------------------------
 
-This is not optional. Do not deliberate and do not explain — just \
-call pin, then continue answering. Pinning is free and harmless; a \
-separate branch later decides what (if anything) to actually keep \
-and where to anchor it — including turns from earlier in the \
-session. Failing to pin loses the moment permanently, so when in \
-doubt, pin."""
+# Tool descriptions alone left tool-output findings unmarked (autoresearch
+# on branch autoresearch/bookmark-prompt: 73.3 -> 79.5 balanced accuracy,
+# haiku-5.5 + sonnet-5.5). A short system-prompt section did better than
+# any description text. Says what memory is for and when to mark; the
+# model still judges what is worth keeping.
+_MEMORY_SECTION = """MEMORY: future sessions know only what you mark with pin or bookmark; \
+the rest is lost.
+Mark, in the same response as your next action, when the user decides, \
+picks an option, sets a rule or preference, or corrects you, or when a tool \
+result reveals something new: a root cause, a gotcha, a measurement, a milestone.
+Most turns need no mark. A file listing, git status, a question or thanks is \
+not worth keeping."""
+
 
 _PIN_PARAMS: dict[str, Any] = {
     "type": "object",
@@ -342,6 +341,53 @@ chit-chat, restated context, and anything already obvious.
 
 Output ONLY the lines (or SKIP). No preamble, no commentary, no \
 numbering, no code fences."""
+
+
+# Prompt for the turn-end auto-mark hook (see ``on_agent_end``). A cheap model
+# reads ONLY the last turn, context-free, and returns the same line protocol
+# as the pin branch. ``{turn}`` is replaced with the rendered turn.
+_AUTOMARK_PROMPT = """You keep the memory of a coding agent. A future \
+session finds past work only by grep over short bookmarks: a verbatim \
+quote from the transcript plus a one-line note. Below is the last turn.
+
+The agent itself marks most of what the user says. Your job is the \
+rest, what the agent tends to miss:
+- what TOOL RESULTS revealed: a root cause, a host or build gotcha, a \
+measurement or benchmark number that answers the user's question, a \
+milestone such as the full suite passing;
+- the agent's own conclusions;
+- a user message that picks one of several numbered options the agent \
+offered, or sets a standing preference for all future replies or work.
+Do not mark routine output (file listings, git status, plans, questions) \
+or a short user answer that only lets the work go on.
+
+For each mark, output one line:
+<quote> ||| <note>
+
+- quote: a short substring (under 100 chars) copied EXACTLY from the turn.
+- note: name the subject first, then the fact, with the words a future \
+search would use, e.g. 'flaky tests root cause: data race in cache.Store \
+Put/Get (store.go:88)'.
+- Most turns need no mark. Then output exactly: SKIP
+
+Output only the lines or SKIP.
+
+--- previous agent message (context only; never quote it) ---
+{context}
+--- turn ---
+{turn}
+--- end ---"""
+
+
+def _side_query_no_think(ctx: fir_ext.Context, question: str, **kw: Any) -> str:
+    """side_query with thinking off; retry with the default effort when the
+    provider rejects ``off`` (OpenRouter 400s on reasoning_effort=off)."""
+    try:
+        return ctx.side_query(question, effort="off", **kw)
+    except Exception as exc:
+        if "effort" not in str(exc):
+            raise
+    return ctx.side_query(question, **kw)
 
 
 def _parse_pin_branch(out: str) -> list[tuple[str, str]]:
@@ -1000,7 +1046,7 @@ def pin(params: dict, ctx: fir_ext.Context) -> dict:
         # effort="off": the branch is mechanical quote-extraction, not
         # reasoning. It also sidesteps a 400 when the session has extended
         # thinking enabled (side_query would inherit a budget_tokens < 1024).
-        out = ctx.side_query(_PIN_BRANCH_PROMPT, timeout=120, effort="off")
+        out = _side_query_no_think(ctx, _PIN_BRANCH_PROMPT, timeout=120)
     except Exception as exc:  # pragma: no cover - defensive
         return _ok(f"📌 noted (branch unavailable: {exc})")
 
@@ -1017,6 +1063,136 @@ def pin(params: dict, ctx: fir_ext.Context) -> dict:
     if written == 0:
         return _ok(f"📌 noted ({len(pairs)} candidate(s), none anchored)")
     return _ok(f"📌 bookmarked {written} turn(s)")
+
+
+# ---------------------------------------------------------------------------
+# Turn-end auto-mark hook
+# ---------------------------------------------------------------------------
+#
+# Agents mark what the user says but miss findings in tool output (measured:
+# both haiku and sonnet never pinned a root cause, gotcha, benchmark or
+# milestone seen in a tool result). This hook closes that gap with no new
+# store and no offline job: at agent_end a cheap model reads ONLY the last
+# turn, context-free, and returns ``quote ||| note`` lines, which go through
+# the same ``_write_bookmark`` path as the tool (verbatim, one kind).
+#
+# Off unless ``bookmarks.json`` names a model: {"autoMark": "provider/model"}.
+# The model is config, never code.
+
+_AUTOMARK_CONFIG = "bookmarks.json"
+_AUTOMARK_TOOL_RESULT_CAP = 2000
+_AUTOMARK_TURN_CAP = 12000
+
+
+def _automark_model() -> tuple[str, str] | None:
+    """Return (provider, model) from bookmarks.json ``autoMark``, or None (off)."""
+    cfg = fir_ext.load_config(_AUTOMARK_CONFIG) or {}
+    spec = cfg.get("autoMark") if isinstance(cfg, dict) else None
+    if not isinstance(spec, str) or spec.strip().lower() in ("", "off", "none"):
+        return None
+    provider, _, model = spec.strip().partition("/")
+    if not model:
+        return ("", provider)
+    return (provider, model)
+
+
+def _block_texts(content: Any) -> list[tuple[str, str]]:
+    """(kind, text) pairs from a message content (str or block list)."""
+    if isinstance(content, str):
+        return [("text", content)]
+    out: list[tuple[str, str]] = []
+    for b in content if isinstance(content, list) else []:
+        if not isinstance(b, dict):
+            continue
+        if b.get("type") == "text" and b.get("text"):
+            out.append(("text", b["text"]))
+        elif b.get("type") == "toolCall":
+            out.append(("call", f"{b.get('name', '')} {json.dumps(b.get('arguments'))[:300]}"))
+    return out
+
+
+def _render_last_turn(transcript_path: str) -> tuple[str, str]:
+    """Render the last turn as ``(context, turn)``.
+
+    ``context`` is the assistant text right before the last user message: it
+    holds the question or options the user answers, but it belongs to the
+    previous turn and must not be marked again. ``turn`` is everything from
+    the last user message on. ``turn`` is "" when it has no tool result and
+    no assistant text (nothing the agent would miss).
+    """
+    try:
+        with open(transcript_path, "rb") as f:
+            lines = f.read().splitlines()
+    except OSError:
+        return ("", "")
+    msgs: list[dict] = []
+    for line in lines:
+        try:
+            obj = json.loads(line)
+        except (ValueError, TypeError):
+            continue
+        m = obj.get("message") if isinstance(obj, dict) and obj.get("type") == "message" else None
+        if isinstance(m, dict) and m.get("role") in ("user", "assistant", "toolResult"):
+            msgs.append(m)
+    users = [i for i, m in enumerate(msgs) if m["role"] == "user"]
+    if not users:
+        return ("", "")
+    last = users[-1]
+    context = ""
+    if last > 0 and msgs[last - 1]["role"] == "assistant":
+        context = "\n".join(
+            t for k, t in _block_texts(msgs[last - 1].get("content")) if k == "text"
+        )
+    parts: list[str] = []
+    substantive = False
+    for m in msgs[last:]:
+        for kind, text in _block_texts(m.get("content")):
+            if m["role"] == "toolResult":
+                parts.append("[tool result]\n" + text[:_AUTOMARK_TOOL_RESULT_CAP])
+                substantive = True
+            elif kind == "call":
+                parts.append("[assistant tool call] " + text)
+            else:
+                parts.append(f"[{m['role']}]\n" + text)
+                substantive = substantive or m["role"] == "assistant"
+    if not substantive:
+        return ("", "")
+    return (context[-_AUTOMARK_TOOL_RESULT_CAP:], "\n\n".join(parts)[-_AUTOMARK_TURN_CAP:])
+
+
+def _automark(ctx: fir_ext.Context) -> int:
+    """Run the hook once for the turn that just ended. Returns marks written."""
+    target = _automark_model()
+    if target is None:
+        return 0
+    transcript = ctx.get_session_file()
+    if not transcript or not _bookmarks_path(ctx):
+        return 0
+    context, turn = _render_last_turn(transcript)
+    if not turn:
+        return 0
+    provider, model = target
+    out = _side_query_no_think(
+        ctx,
+        _AUTOMARK_PROMPT.replace("{context}", context or "(none)").replace("{turn}", turn),
+        timeout=60,
+        model=model,
+        provider=provider or None,
+        messages=[],
+    )
+    written = 0
+    for quote, note in _parse_pin_branch(out):
+        if quote in turn and not _write_bookmark(ctx, quote, "auto: " + note).get("is_error"):
+            written += 1
+    return written
+
+
+@fir_ext.on("agent_end")
+def on_agent_end(params: Any, ctx: fir_ext.Context) -> None:
+    """Turn-end auto-mark hook (off unless configured). Never raises."""
+    del params
+    with contextlib.suppress(Exception):
+        _automark(ctx)
 
 
 # Provenance header placed above every briefing. The briefing rides in an
@@ -1209,6 +1385,8 @@ def on_session_start(params: Any, ctx: fir_ext.Context) -> None:
 
     See ``_run_migration_once`` and the migration block above.
     """
+    with contextlib.suppress(Exception):
+        ctx.set_section(_MEMORY_SECTION)
     del params
     session_file = ""
     with contextlib.suppress(Exception):
