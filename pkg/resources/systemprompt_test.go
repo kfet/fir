@@ -222,3 +222,10 @@ func TestBuildSystemPrompt_RecallBeforeDenying(t *testing.T) {
 		t.Error("default prompt must tell the agent to run recall before denying a capability")
 	}
 }
+
+func TestBuildSystemPrompt_PromptOptimizeGuideline(t *testing.T) {
+	prompt := BuildSystemPrompt(BuildSystemPromptOptions{Cwd: "/x"})
+	if !strings.Contains(prompt, "Load the prompt-optimize skill before you write a prompt") {
+		t.Error("default prompt must tell the agent to load prompt-optimize before writing prompt text")
+	}
+}

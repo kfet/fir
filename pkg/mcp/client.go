@@ -776,14 +776,12 @@ func (m *Manager) startServer(ctx context.Context, name string, cfg ServerConfig
 	if err != nil {
 		return nil, err
 	}
-	ready, ok := m.installSession(ctx, name, session, tools, caps)
-	if !ok {
+	if !m.installSession(ctx, name, session, tools, caps) {
 		// Close (or a Reload that removed this server) got here first, and
 		// already snapshotted the sessions it would close. installSession has
 		// closed this one; returning it would strand it.
 		return nil, fmt.Errorf("mcp %s: connect completed after shutdown", name)
 	}
-	close(ready)
 	firlog.Info("mcp connected", "server", name, "tools", len(tools))
 
 	// Start (or restart) the auto-reconnect loop for this server. The loop
@@ -1106,7 +1104,7 @@ func (m *Manager) tryReconnect(ctx context.Context, name string) bool {
 }
 
 // installSession stores a freshly dialled session into the entry under its
-// lock and returns the ready chan the caller must close to wake waiters.
+// lock and closes the entry's ready chan to wake waiters.
 //
 // It reports false — having closed the session itself — when the session must
 // not be installed, because nobody else would ever close it and a stranded
@@ -1123,11 +1121,8 @@ func (m *Manager) tryReconnect(ctx context.Context, name string) bool {
 //     fresh loop. ctx.Err() tells us we are the stale caller.
 //   - Reload (server removed): the entry is gone entirely, so withEntry
 //     reports false.
-func (m *Manager) installSession(ctx context.Context, name string, sess *sdk.ClientSession, tools []agent.AgentTool, caps *sdk.ServerCapabilities) (chan struct{}, bool) {
-	var (
-		ready     chan struct{}
-		installed bool
-	)
+func (m *Manager) installSession(ctx context.Context, name string, sess *sdk.ClientSession, tools []agent.AgentTool, caps *sdk.ServerCapabilities) bool {
+	var installed bool
 	found := m.withEntry(name, func(e *serverEntry) {
 		if ctx.Err() != nil {
 			return
@@ -1143,36 +1138,33 @@ func (m *Manager) installSession(ctx context.Context, name string, sess *sdk.Cli
 		e.caps = caps
 		e.err = nil
 		e.attempt = 0
-		// Ensure ready is open before the caller closes it to signal
-		// "session installed". It is already closed on re-entry from Reload
-		// after a previous successful connect.
+		// Close ready under the lock: Close also closes it under the lock, so
+		// closing it after unlock could double-close. It is already closed
+		// on re-entry from Reload after a previous successful connect.
 		select {
 		case <-e.ready:
-			e.ready = make(chan struct{})
 		default:
+			close(e.ready)
 		}
-		ready = e.ready
 	})
 	if !found || !installed {
 		if err := sess.Close(); err != nil {
 			firlog.Debug("MCP: closing session that could no longer be installed", "server", name, "err", err)
 		}
-		return nil, false
+		return false
 	}
-	return ready, true
+	return true
 }
 
 // installReconnectedSession atomically installs a freshly dialled session,
-// closes the entry's ready chan to wake waiters, clears any previous error,
+// wakes waiters, clears any previous error,
 // and fires onToolsChanged. Reports whether the session was installed; when it
 // was not, the session has been closed and the caller must not treat the
 // reconnect as successful.
 func (m *Manager) installReconnectedSession(ctx context.Context, name string, sess *sdk.ClientSession, tools []agent.AgentTool, caps *sdk.ServerCapabilities) bool {
-	ready, ok := m.installSession(ctx, name, sess, tools, caps)
-	if !ok {
+	if !m.installSession(ctx, name, sess, tools, caps) {
 		return false
 	}
-	close(ready)
 	if notify := m.loadOnToolsChanged(); notify != nil {
 		notify(m.allTools())
 	}
