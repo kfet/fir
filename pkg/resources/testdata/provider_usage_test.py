@@ -531,6 +531,13 @@ class HealthTest(unittest.TestCase):
         self.assertFalse(self.mod._apply_config({"enabled": False}))
         self.assertTrue(self.mod._apply_config(None))
 
+    def test_endpoint_poll_seconds_config(self):
+        self.assertEqual(self.mod.HEADER_POLL_SECONDS, 21600)
+        self.assertTrue(self.mod._apply_config({"endpoint_poll_seconds": 3600}))
+        self.assertEqual(self.mod.HEADER_POLL_SECONDS, 3600.0)
+        self.mod._apply_config({"endpoint_poll_seconds": -1})
+        self.assertEqual(self.mod.HEADER_POLL_SECONDS, 3600.0)
+
     def test_frontmatter_is_builtin(self):
         src = pathlib.Path(self.mod.__file__).read_text()
         self.assertIn("# builtin: true", src)

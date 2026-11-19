@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Changed
+- provider_usage: Anthropic usage endpoint is polled every 6h (was 30m) while response-header readings are fresh; configurable via `endpoint_poll_seconds`.
+
 ## [1.59.0] - 2026-11-16
 
 ### Added

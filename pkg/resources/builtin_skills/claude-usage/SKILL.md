@@ -44,7 +44,7 @@ bash "$SKILL_DIR/scripts/usage.sh" --cached
 The cache is fed from two sources:
 
 - **Response headers (preferred, live).** Every Claude subscription response carries account-wide `anthropic-ratelimit-unified-*` headers (5h/7d utilization, resets). Each fir session's turns update the cache from them (`headers_at`), so it reflects usage from *every* machine on the account, as of the last turn anywhere.
-- **The usage endpoint** (`fetched_at`), polled at most every 5 minutes — only every 30 minutes while header readings are fresh. It adds windows the headers lack (per-model weekly, `extra_usage`).
+- **The usage endpoint** (`fetched_at`), polled at most every 5 minutes — only every 6 hours while header readings are fresh (`endpoint_poll_seconds` in `provider-usage.json`). It adds windows the headers lack (per-model weekly, `extra_usage`).
 
 `--cached` prints the age of each source to stderr, e.g. `(cache: response headers 1m ago, usage endpoint 12m ago)`. Use a live call only when both are old or the user asks for one.
 

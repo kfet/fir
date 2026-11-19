@@ -41,15 +41,16 @@ endpoint returns — Anthropic subscription responses carry account-wide
 account. Each reading updates the shared cache (``headers_at``, ``headers``)
 and appends to a short time-series (``anthropic-usage-series.json``). While
 header readings are fresh the endpoint is polled only every
-``HEADER_POLL_SECONDS``. A rise of ``burst_points`` (default 3) in 5-hour
-utilization within ``burst_window_seconds`` (default 600) inside one window —
-typically many idle sessions waking at once after a reset, each paying a
-cold prompt cache — raises a burst alert (section + exactly-once announce).
+``endpoint_poll_seconds`` (default 21600, 6 hours); with no fresh headers it
+is polled every ``CACHE_SECONDS_TTL`` (5 minutes). A rise of ``burst_points``
+(default 3) in 5-hour utilization within ``burst_window_seconds`` (default
+600) inside one window — typically many idle sessions waking at once after a
+reset, each paying a cold prompt cache — raises a burst alert (section + exactly-once announce).
 
 Config: ``provider-usage.json`` in any fir config dir, e.g.
 ``{"enabled": true, "warn_levels": [80, 95], "stale_after_seconds": 600,
 "refresh_grace_minutes": 15, "login_max_age_days": 0, "burst_points": 3,
-"burst_window_seconds": 600}``. ``"enabled": false``
+"burst_window_seconds": 600, "endpoint_poll_seconds": 21600}``. ``"enabled": false``
 turns the extension off entirely.
 """
 
@@ -111,7 +112,7 @@ ALERT_MEMORY = 7 * 24 * 3600  # how long an announced health alert stays claimed
 # -- header feed ----------------------------------------------------------------
 # While header readings are fresher than CACHE_SECONDS_TTL, the usage endpoint
 # is polled only this often (it still supplies windows headers lack).
-HEADER_POLL_SECONDS = 1800
+HEADER_POLL_SECONDS = 6 * 3600.0  # config: endpoint_poll_seconds
 SERIES_MAX_AGE = 6 * 3600  # how much time-series history to keep
 SERIES_MAX_LEN = 500
 BURST_POINTS = 3.0  # 5-hour utilization rise (percentage points) ...
@@ -1104,7 +1105,7 @@ def _anthropic_credential(slot: str = DEFAULT_SLOT) -> dict | None:
 def _apply_config(cfg: dict | None) -> bool:
     """Apply ``provider-usage.json`` overrides; return False when disabled."""
     global WARN_LEVELS, STALE_AFTER_SECONDS, REFRESH_GRACE_MINUTES, LOGIN_MAX_AGE_DAYS
-    global BURST_POINTS, BURST_WINDOW_SECONDS
+    global BURST_POINTS, BURST_WINDOW_SECONDS, HEADER_POLL_SECONDS
     if not isinstance(cfg, dict):
         return True
     levels = cfg.get("warn_levels")
@@ -1118,6 +1119,7 @@ def _apply_config(cfg: dict | None) -> bool:
         ("login_max_age_days", "LOGIN_MAX_AGE_DAYS"),
         ("burst_points", "BURST_POINTS"),
         ("burst_window_seconds", "BURST_WINDOW_SECONDS"),
+        ("endpoint_poll_seconds", "HEADER_POLL_SECONDS"),
     ):
         v = cfg.get(key)
         if isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0:
