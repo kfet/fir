@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.61.0] - 2026-11-19
+
 ### Added
 - settings.json `disabledExtensions`: persistent denylist (global and project unioned, plus `-d`); the way to switch off one builtin extension.
 
