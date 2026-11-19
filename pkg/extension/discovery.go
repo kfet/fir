@@ -280,6 +280,12 @@ func scanExtDir(dir, scope string, byName map[string]ExtProcConfig) error {
 			}
 			isDir = target.IsDir()
 		}
+		if looksDisabled(e.Name()) {
+			firlog.Warn("extension skipped: name looks disabled",
+				"path", filepath.Join(dir, e.Name()), "scope", scope,
+				"hint", "rename it back (e.g. foo.py) to load it")
+			continue
+		}
 		if isDir {
 			// Sub-directory: directory name is the extension name.
 			name := e.Name()
@@ -385,6 +391,31 @@ func isExecutableFile(path string) bool {
 // This intentionally strips only one extension: "foo.tar.gz" becomes "foo.tar".
 // For extension naming this is sufficient since executable extensions use
 // single extensions like .py, .sh, or no extension at all.
+// scriptSuffixes are extension-entry suffixes. One of them followed by
+// another suffix (foo.py.bak, gcal.py.migrated-to-mcp) means the file was
+// renamed away from its runnable name.
+var scriptSuffixes = []string{".py", ".sh", ".js", ".mjs", ".ts"}
+
+// disableSuffixes are final suffixes that state "do not load".
+var disableSuffixes = []string{".disabled", ".bak", ".orig", ".old", "~"}
+
+// looksDisabled reports whether an extensions-dir entry name shows that the
+// user renamed it to turn it off. Case-insensitive.
+func looksDisabled(name string) bool {
+	n := strings.ToLower(name)
+	for _, s := range disableSuffixes {
+		if strings.HasSuffix(n, s) {
+			return true
+		}
+	}
+	for _, s := range scriptSuffixes {
+		if i := strings.Index(n, s+"."); i > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 func stripExt(name string) string {
 	ext := filepath.Ext(name)
 	if ext != "" {
