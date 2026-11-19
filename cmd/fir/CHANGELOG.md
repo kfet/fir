@@ -3,6 +3,10 @@
 ## [Unreleased]
 
 ### Changed
+
+- `aside` advisor guidance: judgement calls (which option, is the approach sound, is the work good enough) now go to the advisor via `escalate`, not to the user. Ask the user only for facts only they hold: intent, preferences, credentials, approval for irreversible or external actions.
+
+### Changed
 - Extension discovery skips entries renamed to look disabled (`foo.py.bak`, `gcal.py.migrated-to-mcp`, `*.disabled`, `*.bak`, `*.orig`, `*.old`, `*~`) and logs a warning.
 
 ## [1.59.1] - 2026-11-19
