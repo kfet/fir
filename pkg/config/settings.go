@@ -112,6 +112,7 @@ type Settings struct {
 	TurnCache1h            *bool                    `json:"turnCache1h,omitempty"`
 	Packages               []any                    `json:"packages,omitempty"`
 	Extensions             []string                 `json:"extensions,omitempty"`
+	DisabledExtensions     []string                 `json:"disabledExtensions,omitempty"`
 	ExtensionPaths         []string                 `json:"extensionPaths,omitempty"`
 	Skills                 []string                 `json:"skills,omitempty"`
 	Themes                 []string                 `json:"themes,omitempty"`
@@ -174,6 +175,9 @@ func deepMergeSettings(base, overrides Settings) Settings {
 	if overrides.Extensions != nil {
 		r.Extensions = overrides.Extensions
 	}
+	// Denylist: union, so a project cannot re-enable a globally disabled
+	// extension by accident, and either level can switch one off.
+	r.DisabledExtensions = unionStrings(r.DisabledExtensions, overrides.DisabledExtensions)
 	if overrides.ExtensionPaths != nil {
 		r.ExtensionPaths = overrides.ExtensionPaths
 	}
@@ -1025,6 +1029,34 @@ func (sm *SettingsManager) GetEnabledExtensions() []string {
 	defer sm.mu.RUnlock()
 	out := make([]string, len(sm.settings.Extensions))
 	copy(out, sm.settings.Extensions)
+	return out
+}
+
+// GetDisabledExtensions returns the settings.json "disabledExtensions"
+// denylist (global and project, unioned). Names match `fir -d <name>`;
+// builtins included.
+func (sm *SettingsManager) GetDisabledExtensions() []string {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	return append([]string(nil), sm.settings.DisabledExtensions...)
+}
+
+// UnionNames returns a followed by the items of b not already present.
+func UnionNames(a, b []string) []string { return unionStrings(a, b) }
+
+// unionStrings returns a followed by the items of b not already present.
+func unionStrings(a, b []string) []string {
+	if len(b) == 0 {
+		return a
+	}
+	seen := make(map[string]bool, len(a)+len(b))
+	out := make([]string, 0, len(a)+len(b))
+	for _, s := range append(append([]string(nil), a...), b...) {
+		if !seen[s] {
+			seen[s] = true
+			out = append(out, s)
+		}
+	}
 	return out
 }
 

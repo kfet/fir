@@ -227,7 +227,7 @@ func setupSession(args *Args, deferExtensions bool) (*sessionSetup, error) {
 			Mode:          resolveExtensionMode(args),
 			Version:       version,
 			EnabledNames:  resolveEnabledExtensions(args, settingsManager),
-			DisabledNames: args.DisabledExtensions,
+			DisabledNames: resolveDisabledExtensions(args, settingsManager),
 			ExtraSources:  extension.ResolveExtraSources(cwd, settingsManager, rl.GetPackageExtensionPaths()),
 			ConfigDirs:    extensionConfigDirs(cwd),
 		}
@@ -1157,6 +1157,13 @@ func resolveEnabledExtensions(args *Args, sm *config.SettingsManager) []string {
 	return names
 }
 
+// resolveDisabledExtensions merges CLI -d / --disable-extension names with
+// the settings.json "disabledExtensions" denylist. A denylist wins over the
+// allowlist, so this is the persistent way to switch off a builtin.
+func resolveDisabledExtensions(args *Args, sm *config.SettingsManager) []string {
+	return config.UnionNames(args.DisabledExtensions, sm.GetDisabledExtensions())
+}
+
 // runAcpMode runs ACP mode over stdin/stdout.
 func runAcpMode(args *Args) error {
 	acpmode.SetVersion(version)
@@ -1309,6 +1316,7 @@ func runInteractiveMode(args *Args, noticeCh <-chan string) error {
 				mode.SetBeforeExtensionReload(func() error {
 					if es.Manager != nil {
 						es.Manager.SetAllowedNames(resolveEnabledExtensions(args, setup.settingsManager))
+						es.Manager.SetDisabledNames(resolveDisabledExtensions(args, setup.settingsManager))
 					}
 					return nil
 				})

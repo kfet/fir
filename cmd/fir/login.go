@@ -465,7 +465,7 @@ func startLoginSession(args *Args) (func(), error) {
 			Mode:          "login",
 			Version:       version,
 			EnabledNames:  resolveEnabledExtensions(args, settingsManager),
-			DisabledNames: args.DisabledExtensions,
+			DisabledNames: resolveDisabledExtensions(args, settingsManager),
 			ExtraSources:  extension.ResolveExtraSources(cwd, settingsManager, rl.GetPackageExtensionPaths()),
 			ConfigDirs:    extensionConfigDirs(cwd),
 		}

@@ -197,6 +197,17 @@ fir embeds a set of extensions in the binary; they are discovered automatically
 at lowest priority (a same-named project or global extension shadows them).
 List them with `fir extensions`, and extract one for customisation with
 `fir extensions install <name>`. Disable one for a run with `-d <name>`.
+To disable one persistently, list it in settings.json:
+
+```json
+{ "disabledExtensions": ["lessons"] }
+```
+
+The global (`~/.config/fir/settings.json`) and project (`.fir/settings.json`)
+lists are unioned with `-d`. A denylist wins over the `extensions` allowlist.
+Settings edits apply on the next session or `/reload`. In ACP mode the
+settings denylist does not cover auth-provider extensions; use `-d` for those.
+Do not `chmod -x` or delete files in the builtin cache: fir re-extracts it.
 
 #### `handoff-nudger`
 

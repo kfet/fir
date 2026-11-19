@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Added
+- settings.json `disabledExtensions`: persistent denylist (global and project unioned, plus `-d`); the way to switch off one builtin extension.
+
+### Changed
+- Lessons split out of the `mood` builtin into a new `lessons` builtin (`lesson_*` tools, lessons section, promotion from the bets ledger). Disable it alone with `-d lessons` or `"disabledExtensions": ["lessons"]`; mood clears its legacy section. Store path unchanged.
+
 ## [1.60.0] - 2026-11-19
 
 ### Changed
@@ -10,7 +16,6 @@
 
 ### Changed
 - Extension discovery skips entries renamed to look disabled (`foo.py.bak`, `gcal.py.migrated-to-mcp`, `*.disabled`, `*.bak`, `*.orig`, `*.old`, `*~`) and logs a warning.
-
 ## [1.59.1] - 2026-11-19
 
 ### Changed

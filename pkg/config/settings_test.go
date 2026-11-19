@@ -553,3 +553,22 @@ func TestSettingsManager_GetExtensionIdleStop(t *testing.T) {
 	assert.Equal(t, time.Duration(0), NewInMemorySettingsManager(Settings{ExtensionIdleStopMinutes: &zero}).GetExtensionIdleStop())
 	assert.Equal(t, time.Duration(0), NewInMemorySettingsManager(Settings{ExtensionIdleStopMinutes: &neg}).GetExtensionIdleStop())
 }
+
+func TestDeepMergeSettings_DisabledExtensionsUnion(t *testing.T) {
+	got := deepMergeSettings(
+		Settings{DisabledExtensions: []string{"lessons", "mood"}},
+		Settings{DisabledExtensions: []string{"mood", "notify"}},
+	).DisabledExtensions
+	want := []string{"lessons", "mood", "notify"}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got %v, want %v", got, want)
+		}
+	}
+	if got := deepMergeSettings(Settings{DisabledExtensions: []string{"x"}}, Settings{}).DisabledExtensions; len(got) != 1 {
+		t.Fatalf("project without key must keep global denylist, got %v", got)
+	}
+}
