@@ -2,15 +2,19 @@
 
 ## [Unreleased]
 
+## [1.62.1] - 2026-11-19
+
+### Changed
+- The default system prompt now tells the agent to load the `prompt-optimize` skill before it writes prompt text (prompts, tool and skill descriptions, skills, agent instructions, briefs). The skill now sets the goal (fewest words, most effect) and requires a test on the cheapest latest-generation model, with positive, edge and negative probes, before the text ships.
+- Model catalog regenerated: 1 model with changed pricing/limits.
+
+### Fixed
+- MCP: fix a "close of closed channel" panic when `Close` raced a server finishing its connect.
+
 ## [1.62.0] - 2026-11-19
 
 ### Added
 - settings.json `disabledExtensionSuffixes` adds suffixes to the built-in list (`.disabled`, `.bak`, `.orig`, `.old`, `~`); extensions-dir entries ending in one are skipped.
-### Changed
-- The default system prompt now tells the agent to load the `prompt-optimize` skill before it writes prompt text (prompts, tool and skill descriptions, skills, agent instructions, briefs). The skill now sets the goal (fewest words, most effect) and requires a test on the cheapest latest-generation model, with positive, edge and negative probes, before the text ships.
-
-### Fixed
-- MCP: fix a "close of closed channel" panic when `Close` raced a server finishing its connect.
 
 ## [1.61.0] - 2026-11-19
 
