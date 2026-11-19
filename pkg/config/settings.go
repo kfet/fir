@@ -95,34 +95,35 @@ type DebugLogSettings struct {
 
 // Settings is the full settings schema.
 type Settings struct {
-	DefaultProvider        string                   `json:"defaultProvider,omitempty"`
-	DefaultModel           string                   `json:"defaultModel,omitempty"`
-	DefaultThinkingLevel   string                   `json:"defaultThinkingLevel,omitempty"`
-	Transport              string                   `json:"transport,omitempty"`
-	SteeringMode           string                   `json:"steeringMode,omitempty"`
-	FollowUpMode           string                   `json:"followUpMode,omitempty"`
-	Theme                  string                   `json:"theme,omitempty"`
-	Compaction             *CompactionSettings      `json:"compaction,omitempty"`
-	BranchSummary          *BranchSummarySettings   `json:"branchSummary,omitempty"`
-	Retry                  *RetrySettings           `json:"retry,omitempty"`
-	HideThinkingBlock      *bool                    `json:"hideThinkingBlock,omitempty"`
-	ShellPath              string                   `json:"shellPath,omitempty"`
-	ShellCommandPrefix     string                   `json:"shellCommandPrefix,omitempty"`
-	CollapseChangelog      *bool                    `json:"collapseChangelog,omitempty"`
-	TurnCache1h            *bool                    `json:"turnCache1h,omitempty"`
-	Packages               []any                    `json:"packages,omitempty"`
-	Extensions             []string                 `json:"extensions,omitempty"`
-	DisabledExtensions     []string                 `json:"disabledExtensions,omitempty"`
-	ExtensionPaths         []string                 `json:"extensionPaths,omitempty"`
-	Skills                 []string                 `json:"skills,omitempty"`
-	Themes                 []string                 `json:"themes,omitempty"`
-	EnableSkillCommands    *bool                    `json:"enableSkillCommands,omitempty"`
-	EnableSysExtensions    *bool                    `json:"enableSysExtensions,omitempty"`
-	Terminal               *TerminalSettings        `json:"terminal,omitempty"`
-	Images                 *ImageSettings           `json:"images,omitempty"`
-	EnabledModels          []string                 `json:"enabledModels,omitempty"`
-	ThinkingBudgets        *ThinkingBudgetsSettings `json:"thinkingBudgets,omitempty"`
-	AutocompleteMaxVisible *int                     `json:"autocompleteMaxVisible,omitempty"`
+	DefaultProvider           string                   `json:"defaultProvider,omitempty"`
+	DefaultModel              string                   `json:"defaultModel,omitempty"`
+	DefaultThinkingLevel      string                   `json:"defaultThinkingLevel,omitempty"`
+	Transport                 string                   `json:"transport,omitempty"`
+	SteeringMode              string                   `json:"steeringMode,omitempty"`
+	FollowUpMode              string                   `json:"followUpMode,omitempty"`
+	Theme                     string                   `json:"theme,omitempty"`
+	Compaction                *CompactionSettings      `json:"compaction,omitempty"`
+	BranchSummary             *BranchSummarySettings   `json:"branchSummary,omitempty"`
+	Retry                     *RetrySettings           `json:"retry,omitempty"`
+	HideThinkingBlock         *bool                    `json:"hideThinkingBlock,omitempty"`
+	ShellPath                 string                   `json:"shellPath,omitempty"`
+	ShellCommandPrefix        string                   `json:"shellCommandPrefix,omitempty"`
+	CollapseChangelog         *bool                    `json:"collapseChangelog,omitempty"`
+	TurnCache1h               *bool                    `json:"turnCache1h,omitempty"`
+	Packages                  []any                    `json:"packages,omitempty"`
+	Extensions                []string                 `json:"extensions,omitempty"`
+	DisabledExtensions        []string                 `json:"disabledExtensions,omitempty"`
+	DisabledExtensionSuffixes []string                 `json:"disabledExtensionSuffixes,omitempty"`
+	ExtensionPaths            []string                 `json:"extensionPaths,omitempty"`
+	Skills                    []string                 `json:"skills,omitempty"`
+	Themes                    []string                 `json:"themes,omitempty"`
+	EnableSkillCommands       *bool                    `json:"enableSkillCommands,omitempty"`
+	EnableSysExtensions       *bool                    `json:"enableSysExtensions,omitempty"`
+	Terminal                  *TerminalSettings        `json:"terminal,omitempty"`
+	Images                    *ImageSettings           `json:"images,omitempty"`
+	EnabledModels             []string                 `json:"enabledModels,omitempty"`
+	ThinkingBudgets           *ThinkingBudgetsSettings `json:"thinkingBudgets,omitempty"`
+	AutocompleteMaxVisible    *int                     `json:"autocompleteMaxVisible,omitempty"`
 	// ExtensionIdleStopMinutes stops forked extension children after this
 	// many idle minutes; they resume on the next prompt. 0 turns it off.
 	ExtensionIdleStopMinutes *int                      `json:"extensionIdleStopMinutes,omitempty"`
@@ -178,6 +179,7 @@ func deepMergeSettings(base, overrides Settings) Settings {
 	// Denylist: union, so a project cannot re-enable a globally disabled
 	// extension by accident, and either level can switch one off.
 	r.DisabledExtensions = unionStrings(r.DisabledExtensions, overrides.DisabledExtensions)
+	r.DisabledExtensionSuffixes = unionStrings(r.DisabledExtensionSuffixes, overrides.DisabledExtensionSuffixes)
 	if overrides.ExtensionPaths != nil {
 		r.ExtensionPaths = overrides.ExtensionPaths
 	}
@@ -1039,6 +1041,15 @@ func (sm *SettingsManager) GetDisabledExtensions() []string {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 	return append([]string(nil), sm.settings.DisabledExtensions...)
+}
+
+// GetDisabledExtensionSuffixes returns the settings.json
+// "disabledExtensionSuffixes" list (global and project, unioned). They add to
+// the built-in defaults; an extensions-dir entry ending in one is skipped.
+func (sm *SettingsManager) GetDisabledExtensionSuffixes() []string {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	return append([]string(nil), sm.settings.DisabledExtensionSuffixes...)
 }
 
 // UnionNames returns a followed by the items of b not already present.

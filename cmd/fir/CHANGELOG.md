@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Added
+- settings.json `disabledExtensionSuffixes` adds suffixes to the built-in list (`.disabled`, `.bak`, `.orig`, `.old`, `~`); extensions-dir entries ending in one are skipped.
+
 ## [1.61.0] - 2026-11-19
 
 ### Added

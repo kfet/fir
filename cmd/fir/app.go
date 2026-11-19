@@ -1161,6 +1161,7 @@ func resolveEnabledExtensions(args *Args, sm *config.SettingsManager) []string {
 // the settings.json "disabledExtensions" denylist. A denylist wins over the
 // allowlist, so this is the persistent way to switch off a builtin.
 func resolveDisabledExtensions(args *Args, sm *config.SettingsManager) []string {
+	extension.SetExtraDisableSuffixes(sm.GetDisabledExtensionSuffixes())
 	return config.UnionNames(args.DisabledExtensions, sm.GetDisabledExtensions())
 }
 

@@ -209,6 +209,15 @@ Settings edits apply on the next session or `/reload`. In ACP mode the
 settings denylist does not cover auth-provider extensions; use `-d` for those.
 Do not `chmod -x` or delete files in the builtin cache: fir re-extracts it.
 
+Discovery also skips extensions-dir entries renamed to look disabled:
+`foo.py.bak`, `gcal.py.migrated-to-mcp` (a script suffix followed by another),
+or a name ending in `.disabled`, `.bak`, `.orig`, `.old` or `~`. Add your own
+suffixes (case-insensitive; global and project lists are unioned):
+
+```json
+{ "disabledExtensionSuffixes": [".off", ".migrated"] }
+```
+
 #### `handoff-nudger`
 
 Watches context usage after every turn and, once it crosses a threshold, injects

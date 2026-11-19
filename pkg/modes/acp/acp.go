@@ -408,6 +408,7 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd, transcrip
 		pa.mu.Unlock()
 		// Don't re-start auth-provider extensions; they're already running
 		// from Initialize and their auth providers are globally registered.
+		extension.SetExtraDisableSuffixes(result.SettingsManager.GetDisabledExtensionSuffixes())
 		disabled := config.UnionNames(pa.options.DisabledExtensions, result.SettingsManager.GetDisabledExtensions())
 		disabled = append(disabled, authExtNames...)
 		extSetup, err := extension.Setup(result.Session, extension.SetupOptions{

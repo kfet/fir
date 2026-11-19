@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	firlog "github.com/kfet/fir/pkg/log"
 	"github.com/kfet/fir/pkg/resources"
@@ -396,14 +397,37 @@ func isExecutableFile(path string) bool {
 // renamed away from its runnable name.
 var scriptSuffixes = []string{".py", ".sh", ".js", ".mjs", ".ts"}
 
-// disableSuffixes are final suffixes that state "do not load".
-var disableSuffixes = []string{".disabled", ".bak", ".orig", ".old", "~"}
+// defaultDisableSuffixes are final suffixes that state "do not load".
+var defaultDisableSuffixes = []string{".disabled", ".bak", ".orig", ".old", "~"}
+
+var (
+	disableSuffixesMu sync.RWMutex
+	disableSuffixes   = defaultDisableSuffixes
+)
+
+// SetExtraDisableSuffixes adds user suffixes (settings.json
+// "disabledExtensionSuffixes") to the defaults. Each call replaces the
+// previous extras. Empty entries are ignored; matching is case-insensitive.
+func SetExtraDisableSuffixes(extra []string) {
+	out := append([]string(nil), defaultDisableSuffixes...)
+	for _, s := range extra {
+		if s = strings.ToLower(strings.TrimSpace(s)); s != "" {
+			out = append(out, s)
+		}
+	}
+	disableSuffixesMu.Lock()
+	disableSuffixes = out
+	disableSuffixesMu.Unlock()
+}
 
 // looksDisabled reports whether an extensions-dir entry name shows that the
 // user renamed it to turn it off. Case-insensitive.
 func looksDisabled(name string) bool {
 	n := strings.ToLower(name)
-	for _, s := range disableSuffixes {
+	disableSuffixesMu.RLock()
+	suffixes := disableSuffixes
+	disableSuffixesMu.RUnlock()
+	for _, s := range suffixes {
 		if strings.HasSuffix(n, s) {
 			return true
 		}

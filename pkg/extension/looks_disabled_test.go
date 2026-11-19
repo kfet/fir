@@ -20,6 +20,21 @@ func TestLooksDisabled(t *testing.T) {
 	}
 }
 
+func TestSetExtraDisableSuffixes(t *testing.T) {
+	t.Cleanup(func() { SetExtraDisableSuffixes(nil) })
+	if looksDisabled("gcal.off") {
+		t.Fatal("gcal.off disabled before config")
+	}
+	SetExtraDisableSuffixes([]string{" .OFF ", ""})
+	if !looksDisabled("gcal.off") || !looksDisabled("gcal.bak") {
+		t.Fatal("extra suffix or default lost")
+	}
+	SetExtraDisableSuffixes(nil)
+	if looksDisabled("gcal.off") {
+		t.Fatal("extras not replaced")
+	}
+}
+
 func TestScanExtDir_SkipsDisabled(t *testing.T) {
 	dir := t.TempDir()
 	body := []byte("#!/usr/bin/env python3\n# ---\n# name: x\n# ---\n")
