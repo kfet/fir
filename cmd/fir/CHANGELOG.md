@@ -2,7 +2,10 @@
 
 ## [Unreleased]
 
+## [1.59.1] - 2026-11-19
+
 ### Changed
+- Model catalog regenerated: added gpt-6.2-astra / gpt-6.2-sol (Bedrock, Azure) +19 more (+20 on aggregators); removed opencode glm-5.x and free-tier models (+9 on aggregators); 42 models with changed pricing/limits.
 - provider_usage: Anthropic usage endpoint is polled every 6h (was 30m) while response-header readings are fresh; configurable via `endpoint_poll_seconds`.
 
 ## [1.59.0] - 2026-11-16
