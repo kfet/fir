@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [1.62.3] - 2026-11-20
+
+### Changed
+
+- review-and-fix: the sweep rule now targets similar, systemic issues and no longer says how to search.
+
 ## [1.62.2] - 2026-11-20
 
 ### Changed

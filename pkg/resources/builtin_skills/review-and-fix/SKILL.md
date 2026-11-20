@@ -58,9 +58,8 @@ advisor before exiting the loop.
 ## Fix
 
 Fix all issues found this pass, including from other authors or features. Use the
-advisor for guidance. Before you fix an issue, grep the codebase for the same
-pattern and fix every instance: a bug in one place is often copied elsewhere,
-and fixing one copy leaves the rest. For bugs, write a failing test first, then fix.
+advisor for guidance. An issue may be systemic: before you fix it, look for
+similar issues and fix them all. For bugs, write a failing test first, then fix.
 
 ## Writing
 
