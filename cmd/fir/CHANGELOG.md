@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- review-and-fix: before fixing an issue, sweep the codebase for the same pattern and fix every instance.
+
 ## [1.62.1] - 2026-11-19
 
 ### Changed
