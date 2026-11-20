@@ -2,9 +2,12 @@
 
 ## [Unreleased]
 
+## [1.62.2] - 2026-11-20
+
 ### Changed
 
 - review-and-fix: before fixing an issue, sweep the codebase for the same pattern and fix every instance.
+- Model catalog regenerated: added `huggingface/tencent/Hy4`; removed `opencode/gemini-3-flash`, `opencode/gemini-3.1-pro`, `xai/grok-build-0.1`; 42 models with changed pricing/limits.
 
 ## [1.62.1] - 2026-11-19
 
