@@ -179,9 +179,9 @@ _Updated 2026-09-16, after the package-discovery / literal-`apiKey` /
     - Runtime fallback chain (bun → node → npx tsx) and the `PATH` augmentation
     - Non-pi-mono JS/TS passthrough
 
-18. ~~**Clean up old SDK cache dirs**~~ — done. `pkg/cache.SweepAged` ages out
-    unclaimed `<cache>/fir/sdks/<hash>/` trees (14 days), alongside the same
-    pass for builtin skills and extensions.
+18. ~~**Clean up old SDK cache dirs**~~ — done. `pkg/cache.Sweep` deletes
+    older `<cache>/fir/sdks/<hash>/` trees that no running fir holds a lock
+    on, alongside the same pass for builtin skills and extensions.
 
 18b. **Make discovery read-only again — stable `sdks/current` symlink.**
     `autoDiscover` currently *writes* to package directories: it re-points stale

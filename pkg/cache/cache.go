@@ -85,15 +85,6 @@ func legacyDotCacheDir(sub string) (string, bool) {
 	return legacy, true
 }
 
-// Claim marks dir as in use by this process by refreshing its mtime, so
-// that SweepAged treats "old" as "not claimed by any recent process"
-// rather than "extracted long ago". Best-effort: a cache directory on a
-// read-only or exotic filesystem is still perfectly usable.
-func Claim(dir string) {
-	now := time.Now()
-	_ = os.Chtimes(dir, now, now)
-}
-
 // SweepAged removes immediate subdirectories of base that match, are
 // older than maxAge, and are not keep.
 //

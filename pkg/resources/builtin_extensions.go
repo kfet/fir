@@ -216,7 +216,7 @@ var builtinExtensionsCacheDir = func() (string, error) { return cache.Dir("built
 // where extensions were extracted before they moved under the cache dir
 // alongside skills and SDKs.
 func sweepStaleBuiltinExtensions(base, keep string) {
-	cache.SweepAged(base, keep, cache.MaxAge, cache.NotDotted)
+	cache.Sweep(base, keep)
 	cache.SweepLegacy("builtin-extensions", filepath.Join(os.TempDir(), "fir-builtin-extensions"))
 }
 
@@ -231,10 +231,11 @@ func extractBuiltinExtensionsTo(cacheBase string) (string, error) {
 	hash := BuiltinExtensionsHash()
 	dir := filepath.Join(cacheBase, hash)
 	sentinel := filepath.Join(dir, ".complete")
+	cache.Hold(dir)
 
 	if info, err := os.Stat(dir); err == nil && info.IsDir() {
 		if _, sErr := os.Stat(sentinel); sErr == nil {
-			cache.Claim(dir)
+			cache.Stamp(dir)
 			return dir, nil
 		}
 		// Directory exists but is incomplete — remove and re-extract.
@@ -292,6 +293,7 @@ func extractBuiltinExtensionsTo(cacheBase string) (string, error) {
 		return "", fmt.Errorf("rename builtin extensions dir: %w", err)
 	}
 	success = true
+	cache.Stamp(dir)
 	return dir, nil
 }
 

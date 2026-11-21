@@ -26,7 +26,7 @@ func defaultCacheDir() (string, error) { return cache.Dir("sdks") }
 // a new hash and nothing ever deleted the old one, so this directory
 // grew one full SDK copy per version, forever.
 func sweepStale(base, keep string) {
-	cache.SweepAged(base, keep, cache.MaxAge, cache.NotDotted)
+	cache.Sweep(base, keep)
 	cache.SweepLegacy("sdks")
 }
 
@@ -74,10 +74,11 @@ func EnsureExtracted() (string, error) {
 	}
 
 	dir := filepath.Join(base, hash)
+	cache.Hold(dir)
 
 	// If the directory already exists, the SDK is up to date.
 	if _, err := os.Stat(dir); err == nil {
-		cache.Claim(dir)
+		cache.Stamp(dir)
 		go sweepStale(base, dir)
 		return dir, nil
 	}
@@ -137,6 +138,7 @@ func EnsureExtracted() (string, error) {
 		return "", fmt.Errorf("sdk: rename: %w", err)
 	}
 	success = true
+	cache.Stamp(dir)
 
 	go sweepStale(base, dir)
 	return dir, nil

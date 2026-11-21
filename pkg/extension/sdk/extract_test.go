@@ -56,8 +56,8 @@ func TestEnsureExtractedIdempotent(t *testing.T) {
 
 	// Only one directory (plus no stale temp dirs).
 	entries, _ := os.ReadDir(tmp)
-	if len(entries) != 1 {
-		t.Errorf("expected 1 cache entry, got %d", len(entries))
+	if len(entries) != 2 { // the tree and its lock file
+		t.Errorf("expected 2 cache entries, got %d", len(entries))
 	}
 }
 

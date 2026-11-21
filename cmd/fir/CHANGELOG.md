@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- Extracted builtin skills, extensions and SDKs no longer outlive the fir that uses them. Each running fir holds a lock on its tree; a starting fir deletes older trees that no fir holds, and never a newer one. This replaces the 14-day age sweep, which let a long-running or resumed session read a stale builtin skill after an update.
+
 ## [1.62.3] - 2026-11-20
 
 ### Changed

@@ -62,25 +62,6 @@ func TestDir_ReportsPlatformResolutionFailure(t *testing.T) {
 		t.Fatal("Dir with an unresolvable cache dir = nil error")
 	}
 }
-
-func TestClaim_RefreshesMtime(t *testing.T) {
-	dir := t.TempDir()
-	old := time.Now().Add(-30 * 24 * time.Hour)
-	if err := os.Chtimes(dir, old, old); err != nil {
-		t.Fatal(err)
-	}
-	Claim(dir)
-	info, err := os.Stat(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if time.Since(info.ModTime()) > time.Minute {
-		t.Fatalf("mtime not refreshed: %v", info.ModTime())
-	}
-	// A directory that does not exist is not an error worth surfacing.
-	Claim(filepath.Join(dir, "gone"))
-}
-
 func TestNotDotted(t *testing.T) {
 	for name, want := range map[string]bool{"abc": true, ".extract-1": false, "": false} {
 		if got := NotDotted(name); got != want {

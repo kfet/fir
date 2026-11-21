@@ -86,11 +86,10 @@ func extractBuiltinSkillsTo() (string, error) {
 		return "", fmt.Errorf("hash builtin skills: %w", err)
 	}
 	dir := filepath.Join(base, hash)
+	cache.Hold(dir)
 
-	// Already extracted: claim it (mtime = last use, which is what the
-	// collector below ages out on) and use it as-is.
 	if _, statErr := os.Stat(dir); statErr == nil {
-		cache.Claim(dir)
+		cache.Stamp(dir)
 		go sweepStaleBuiltinSkills(base, dir)
 		return dir, nil
 	}
@@ -154,18 +153,16 @@ func extractBuiltinSkillsTo() (string, error) {
 		return "", fmt.Errorf("extract builtin skills: rename: %w", err)
 	}
 	success = true
+	cache.Stamp(dir)
 	go sweepStaleBuiltinSkills(base, dir)
 	return dir, nil
 }
 
-// sweepStaleBuiltinSkills collects extracted trees nobody has claimed in
-// a while: older hashes under the cache dir, plus the legacy per-process
-// $TMPDIR extractions that earlier fir versions left behind. Both are
-// aged out rather than deleted eagerly, because a long-running session
-// started by an older binary still holds absolute paths into its tree.
-// Best-effort throughout: a failure here is not worth failing a session.
+// sweepStaleBuiltinSkills deletes older trees no running fir holds (see
+// cache.Sweep), plus the legacy per-process $TMPDIR extractions that
+// earlier fir versions left behind. Best-effort throughout.
 func sweepStaleBuiltinSkills(base, keep string) {
-	cache.SweepAged(base, keep, cache.MaxAge, cache.NotDotted)
+	cache.Sweep(base, keep)
 	cache.SweepLegacy("builtin-skills")
 	// The pre-cache extractions were per-process dirs sitting directly in
 	// $TMPDIR, not trees under one base, so they are matched by name.

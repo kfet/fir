@@ -255,9 +255,12 @@ func TestSweepStaleBuiltinExtensions_CollectsOldTreesAndTheLegacyLocation(t *tes
 		return p
 	}
 
-	keep := mk(base, "aaaaaaaaaaaaaaaa", 30*24*time.Hour)
-	fresh := mk(base, "bbbbbbbbbbbbbbbb", time.Hour)
-	stale := mk(base, "cccccccccccccccc", 30*24*time.Hour)
+	keep := mk(base, "aaaaaaaaaaaaaaaa", 2*time.Hour)
+	fresh := mk(base, "bbbbbbbbbbbbbbbb", time.Hour) // newer than keep: never touched
+	stale := mk(base, "cccccccccccccccc", 3*time.Hour)
+	if err := os.WriteFile(stale+".lock", nil, 0o644); err != nil { // a tree from a fir with locks
+		t.Fatal(err)
+	}
 	legacyRoot := filepath.Join(tmp, "fir-builtin-extensions")
 	legacyOld := mk(legacyRoot, "dddddddddddddddd", 30*24*time.Hour)
 	legacyNew := mk(legacyRoot, "eeeeeeeeeeeeeeee", time.Hour)

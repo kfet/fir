@@ -348,7 +348,8 @@ func TestExtractBuiltinSkills_IsContentAddressedAndStable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 1 {
+	// The tree and its lock file.
+	if len(entries) != 2 {
 		var names []string
 		for _, e := range entries {
 			names = append(names, e.Name())
@@ -378,9 +379,12 @@ func TestSweepStaleBuiltinSkills_CollectsOldTreesOnly(t *testing.T) {
 		return p
 	}
 
-	keep := mk(base, "aaaaaaaaaaaaaaaa", 0)
-	fresh := mk(base, "bbbbbbbbbbbbbbbb", time.Hour)
-	stale := mk(base, "cccccccccccccccc", 30*24*time.Hour)
+	keep := mk(base, "aaaaaaaaaaaaaaaa", 2*time.Hour)
+	fresh := mk(base, "bbbbbbbbbbbbbbbb", time.Hour) // newer than keep: never touched
+	stale := mk(base, "cccccccccccccccc", 3*time.Hour)
+	if err := os.WriteFile(stale+".lock", nil, 0o644); err != nil { // a tree from a fir with locks
+		t.Fatal(err)
+	}
 	legacyOld := mk(tmp, "fir-builtin-skills-123456", 30*24*time.Hour)
 	legacyNew := mk(tmp, "fir-builtin-skills-654321", time.Hour)
 	unrelated := mk(tmp, "something-else-999", 30*24*time.Hour)
@@ -398,11 +402,10 @@ func TestSweepStaleBuiltinSkills_CollectsOldTreesOnly(t *testing.T) {
 		}
 	}
 
-	// The claimed tree survives even when its mtime is ancient, because
-	// extraction refreshes the mtime on claim and the sweep skips it.
-	staleButClaimed := mk(base, "dddddddddddddddd", 30*24*time.Hour)
-	sweepStaleBuiltinSkills(base, staleButClaimed)
-	if _, err := os.Stat(staleButClaimed); err != nil {
-		t.Errorf("claimed tree collected despite being the keep target: %v", err)
+	// The own tree survives even when it is the oldest.
+	oldest := mk(base, "dddddddddddddddd", 30*24*time.Hour)
+	sweepStaleBuiltinSkills(base, oldest)
+	if _, err := os.Stat(oldest); err != nil {
+		t.Errorf("own tree collected: %v", err)
 	}
 }
