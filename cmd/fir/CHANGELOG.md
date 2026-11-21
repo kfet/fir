@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- Tests no longer extract into or sweep the real fir cache, which could delete the builtin trees of running fir sessions.
+
 ## [1.62.4] - 2026-11-20
 
 ### Fixed

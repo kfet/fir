@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"testing"
 	"time"
 )
 
@@ -22,6 +23,10 @@ var (
 	homeDir      = os.UserHomeDir
 	userCacheDir = os.UserCacheDir
 	statDir      = os.Stat
+	isTest       = testing.Testing
+	// testCacheBase is shared by all test binaries of one run, so a
+	// package's tests reuse one extraction.
+	testCacheBase = filepath.Join(os.TempDir(), "fir-test-cache")
 )
 
 const (
@@ -57,6 +62,11 @@ const (
 // explicit instruction — the same reasoning by which fir already
 // honours $XDG_CONFIG_HOME for its agent dir on every platform.
 func Dir(sub string) (string, error) {
+	// A test binary never touches the real cache: its sweeps would delete
+	// the trees of running fir sessions.
+	if isTest() && os.Getenv("XDG_CACHE_HOME") == "" {
+		return filepath.Join(testCacheBase, "fir", sub), nil
+	}
 	if xdg := os.Getenv("XDG_CACHE_HOME"); filepath.IsAbs(xdg) {
 		return filepath.Join(xdg, "fir", sub), nil
 	}

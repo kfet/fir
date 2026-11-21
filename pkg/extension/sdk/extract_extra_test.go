@@ -144,21 +144,6 @@ func TestDefaultCacheDir(t *testing.T) {
 	}
 }
 
-// TestDefaultCacheDirNoCacheRoot pins that an unresolvable cache root is an
-// error naming the cause, not an extraction into the working directory.
-func TestDefaultCacheDirNoCacheRoot(t *testing.T) {
-	t.Setenv("XDG_CACHE_HOME", "")
-	t.Setenv("HOME", "")
-
-	_, err := defaultCacheDir()
-	if err == nil {
-		t.Fatal("expected an error with no resolvable cache root")
-	}
-	if !strings.Contains(err.Error(), "resolve user cache dir") {
-		t.Errorf("unexpected error: %v", err)
-	}
-}
-
 // TestEnsureExtractedPropagatesCacheDirError pins that the failure surfaces
 // from EnsureExtracted rather than being swallowed into a bad path.
 func TestEnsureExtractedPropagatesCacheDirError(t *testing.T) {

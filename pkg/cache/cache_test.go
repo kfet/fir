@@ -9,6 +9,24 @@ import (
 	"time"
 )
 
+// TestDir_TestBinaryUsesTempCache: a test never extracts into or sweeps
+// the real cache of running sessions.
+func TestDir_TestBinaryUsesTempCache(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", "")
+	got, err := Dir("sdks")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(testCacheBase, "fir", "sdks"); got != want {
+		t.Fatalf("Dir = %q, want %q", got, want)
+	}
+}
+
+func notTest(t *testing.T) {
+	isTest = func() bool { return false }
+	t.Cleanup(func() { isTest = testing.Testing })
+}
+
 func TestDir_PrefersXDGCacheHome(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", "/xdg")
 	got, err := Dir("sdks")
@@ -24,6 +42,7 @@ func TestDir_PrefersXDGCacheHome(t *testing.T) {
 // canonical on Linux only — on macOS the OS's cache directory is
 // ~/Library/Caches. Dir must ask os.UserCacheDir rather than assume.
 func TestDir_DefersToThePlatformCacheDir(t *testing.T) {
+	notTest(t)
 	t.Setenv("XDG_CACHE_HOME", "")
 	userCacheDir = func() (string, error) { return "/Users/someone/Library/Caches", nil }
 	t.Cleanup(func() { userCacheDir = os.UserCacheDir })
@@ -40,6 +59,7 @@ func TestDir_DefersToThePlatformCacheDir(t *testing.T) {
 // A relative $XDG_CACHE_HOME is invalid per the spec and must not be
 // joined onto anything; the platform answer wins.
 func TestDir_IgnoresRelativeXDGCacheHome(t *testing.T) {
+	notTest(t)
 	t.Setenv("XDG_CACHE_HOME", "relative/cache")
 	userCacheDir = func() (string, error) { return "/platform", nil }
 	t.Cleanup(func() { userCacheDir = os.UserCacheDir })
@@ -54,6 +74,7 @@ func TestDir_IgnoresRelativeXDGCacheHome(t *testing.T) {
 }
 
 func TestDir_ReportsPlatformResolutionFailure(t *testing.T) {
+	notTest(t)
 	t.Setenv("XDG_CACHE_HOME", "")
 	userCacheDir = func() (string, error) { return "", errors.New("no cache dir") }
 	t.Cleanup(func() { userCacheDir = os.UserCacheDir })
@@ -139,6 +160,7 @@ func TestSweepAged_SkipsEntriesThatVanish(t *testing.T) {
 // ~/.cache/fir/<sub> is no longer the cache dir, so it is now an
 // abandoned location that nothing else will ever clean.
 func TestSweepLegacy_CollectsTheOldDotCacheLocation(t *testing.T) {
+	notTest(t)
 	home := t.TempDir()
 	homeDir = func() (string, error) { return home, nil }
 	t.Cleanup(func() { homeDir = os.UserHomeDir })
@@ -176,6 +198,7 @@ func TestSweepLegacy_CollectsTheOldDotCacheLocation(t *testing.T) {
 // location and the live one are the same path, and sweeping it would
 // delete trees in current use.
 func TestSweepLegacy_NoOpsWhenDotCacheIsTheRealCacheDir(t *testing.T) {
+	notTest(t)
 	home := t.TempDir()
 	homeDir = func() (string, error) { return home, nil }
 	userCacheDir = func() (string, error) { return filepath.Join(home, ".cache"), nil }
@@ -204,6 +227,7 @@ func TestSweepLegacy_NoOpsWhenDotCacheIsTheRealCacheDir(t *testing.T) {
 // An unresolvable home means there is no legacy path to reason about,
 // not a reason to fail.
 func TestSweepLegacy_SurvivesAnUnresolvableHome(t *testing.T) {
+	notTest(t)
 	homeDir = func() (string, error) { return "", errors.New("no home") }
 	t.Cleanup(func() { homeDir = os.UserHomeDir })
 	SweepLegacy("sdks")
@@ -212,6 +236,7 @@ func TestSweepLegacy_SurvivesAnUnresolvableHome(t *testing.T) {
 // Nor is an unresolvable cache dir: with no current path to compare
 // against, ~/.cache cannot be shown to be abandoned.
 func TestSweepLegacy_SurvivesAnUnresolvableCacheDir(t *testing.T) {
+	notTest(t)
 	home := t.TempDir()
 	homeDir = func() (string, error) { return home, nil }
 	userCacheDir = func() (string, error) { return "", errors.New("nope") }
