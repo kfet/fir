@@ -80,7 +80,7 @@ class TestStaticURLDrift(unittest.TestCase):
 
 
 class TestPersonalAccountGuidance(unittest.TestCase):
-    """Free/personal accounts moved to Antigravity; login must say so."""
+    """fir tries every account; the Antigravity hint appears only after Google fails."""
 
     def setUp(self):
         _load_spec(_PROVIDER_ID)
@@ -89,36 +89,40 @@ class TestPersonalAccountGuidance(unittest.TestCase):
         self.mod = gemini_cli_auth
         self.ctx = mock.Mock()
 
-    def _discover(self, env, tier="free-tier"):
-        resp = (
-            200,
-            {
-                "allowedTiers": [{"id": tier, "isDefault": True}],
-                "done": True,
-                "response": {"cloudaicompanionProject": {"id": "p1"}},
-            },
-        )
+    def _discover(self, env, tier="free-tier", responses=None):
+        if responses is None:
+            ok = (
+                200,
+                {
+                    "allowedTiers": [{"id": tier, "isDefault": True}],
+                    "done": True,
+                    "response": {"cloudaicompanionProject": {"id": "p1"}},
+                },
+            )
+            responses = [ok, ok]
         with (
             mock.patch.dict(os.environ, env, clear=True),
-            mock.patch.object(self.mod, "_http_post_json", return_value=resp) as post,
+            mock.patch.object(self.mod, "_http_post_json", side_effect=responses) as post,
         ):
             try:
                 return self.mod._discover_project("tok", self.ctx), post
             except RuntimeError as e:
                 return e, post
 
-    def test_free_tier_without_project_points_to_antigravity(self):
-        err, post = self._discover({})
-        self.assertIsInstance(err, RuntimeError)
-        self.assertIn("google-antigravity", str(err))
-        self.assertIn("GOOGLE_CLOUD_PROJECT", str(err))
-        self.assertEqual(post.call_count, 1)  # no onboarding attempted
+    def test_free_tier_onboards_without_project(self):
+        got, post = self._discover({})
+        self.assertEqual(got, "p1")
+        self.assertEqual(post.call_count, 2)
+        body = post.call_args_list[1].args[1]
+        self.assertEqual(body["tierId"], "free-tier")
+        self.assertNotIn("cloudaicompanionProject", body)
+        self.assertNotIn("duetProject", body["metadata"])
 
-    def test_free_tier_with_project_still_points_to_antigravity(self):
-        err, post = self._discover({"GOOGLE_CLOUD_PROJECT": "p1"})
-        self.assertIsInstance(err, RuntimeError)
-        self.assertIn("google-antigravity", str(err))
-        self.assertEqual(post.call_count, 1)
+    def test_free_tier_ignores_env_project_in_onboard(self):
+        got, post = self._discover({"GOOGLE_CLOUD_PROJECT": "envp"})
+        self.assertEqual(got, "p1")
+        body = post.call_args_list[1].args[1]
+        self.assertNotIn("cloudaicompanionProject", body)
 
     def test_standard_tier_onboards_with_project(self):
         got, post = self._discover({"GOOGLE_CLOUD_PROJECT": "p1"}, tier="standard-tier")
@@ -127,10 +131,40 @@ class TestPersonalAccountGuidance(unittest.TestCase):
         self.assertEqual(body["cloudaicompanionProject"], "p1")
         self.assertEqual(body["metadata"]["duetProject"], "p1")
 
-    def test_spec_name_mentions_standard_enterprise_and_antigravity(self):
-        name = _load_spec(_PROVIDER_ID)["name"]
-        self.assertIn("Standard/Enterprise", name)
-        self.assertIn("google-antigravity", name)
+    def test_onboard_failure_keeps_google_error_and_adds_hint(self):
+        load = (200, {"allowedTiers": [{"id": "free-tier", "isDefault": True}]})
+        fail = (400, {"error": {"message": "google says no"}})
+        err, _ = self._discover({}, responses=[load, fail])
+        self.assertIsInstance(err, RuntimeError)
+        self.assertIn("onboardUser failed (400)", str(err))
+        self.assertIn("google says no", str(err))
+        self.assertIn("fir login google-antigravity", str(err))
+
+    def test_load_failure_adds_hint(self):
+        err, _ = self._discover({}, responses=[(403, {"error": {"message": "denied"}})])
+        self.assertIn("loadCodeAssist failed (403)", str(err))
+        self.assertIn("denied", str(err))
+        self.assertIn("google-antigravity", str(err))
+
+    def test_poll_failure_adds_hint(self):
+        with mock.patch.object(self.mod, "_http_get_json", return_value=(500, {"e": 1})):
+            with self.assertRaises(RuntimeError) as cm:
+                self.mod._poll_operation("op", {}, self.ctx)
+        self.assertIn("poll operation failed (500)", str(cm.exception))
+        self.assertIn("google-antigravity", str(cm.exception))
+
+    def test_non_json_http_error_adds_hint(self):
+        import email.message
+        import io
+        import urllib.error
+
+        body = io.BytesIO(b"<html>denied</html>")
+        err = urllib.error.HTTPError("https://x", 403, "no", email.message.Message(), body)
+        with mock.patch("urllib.request.urlopen", side_effect=err):
+            with self.assertRaises(RuntimeError) as cm:
+                self.mod._http_post_json("https://x", {}, {})
+        self.assertIn("HTTP 403: <html>denied</html>", str(cm.exception))
+        self.assertIn("google-antigravity", str(cm.exception))
 
 
 if __name__ == "__main__":

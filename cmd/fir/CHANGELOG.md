@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- gemini-cli login no longer refuses free-tier accounts up front: it onboards them as before and, only if a Google call fails, appends a hint about Google's 2026-06-18 move of personal accounts to `google-antigravity`.
+
 ## [1.63.1] - 2026-11-21
 
 ### Fixed

@@ -13,11 +13,10 @@ standard token exchange — handled in the ``auth/post_exchange`` hook. On
 refresh, the same hook receives the previous credentials and forwards the
 project ID through unchanged.
 
-Since 2026-06-18 Google serves free and Google AI Pro/Ultra personal
-accounts through Antigravity, not Gemini CLI. "Sign in with Google" here
-still works for Gemini Code Assist Standard/Enterprise users with a GCP
-project (set GOOGLE_CLOUD_PROJECT). Personal accounts should use the
-google-antigravity provider.
+fir does not pre-judge which accounts Google accepts: it always tries the
+login, and only when a Google call fails does it append a hint that Google
+moved free and Google AI Pro/Ultra personal accounts to Antigravity
+(google-antigravity provider) on 2026-06-18.
 """
 
 from __future__ import annotations
@@ -63,7 +62,7 @@ _API_HEADERS = {
 
 fir_ext.declare_oauth_provider(
     provider_id="google-gemini-cli",
-    name="Google Gemini CLI (Code Assist Standard/Enterprise; personal accounts: google-antigravity)",
+    name="Google Gemini CLI (personal accounts may need google-antigravity)",
     client_id=_CLIENT_ID,
     client_secret=_CLIENT_SECRET,
     authorize_url="https://accounts.google.com/o/oauth2/v2/auth",
@@ -86,6 +85,18 @@ fir_ext.declare_oauth_provider(
 # ---------------------------------------------------------------------------
 
 
+_ANTIGRAVITY_HINT = (
+    "Hint: on 2026-06-18 Google moved free and Google AI Pro/Ultra personal "
+    "accounts from Gemini CLI to Antigravity; if this is such an account, try "
+    "`fir login google-antigravity`."
+)
+
+
+def _google_error(msg: str) -> RuntimeError:
+    """Wrap a failed Google call's error text with the Antigravity hint."""
+    return RuntimeError(f"{msg}\n{_ANTIGRAVITY_HINT}")
+
+
 def _http_post_json(url: str, body: dict, headers: dict[str, str]) -> tuple[int, dict]:
     """POST JSON and return (status_code, parsed_json)."""
     if not url.startswith(("http:", "https:")):
@@ -102,7 +113,7 @@ def _http_post_json(url: str, body: dict, headers: dict[str, str]) -> tuple[int,
         try:
             return e.code, json.loads(body_bytes)
         except (json.JSONDecodeError, ValueError):
-            raise RuntimeError(f"HTTP {e.code}: {body_bytes.decode(errors='replace')}") from e
+            raise _google_error(f"HTTP {e.code}: {body_bytes.decode(errors='replace')}") from e
 
 
 def _http_get_json(url: str, headers: dict[str, str]) -> tuple[int, dict]:
@@ -120,7 +131,7 @@ def _http_get_json(url: str, headers: dict[str, str]) -> tuple[int, dict]:
         try:
             return e.code, json.loads(body_bytes)
         except (json.JSONDecodeError, ValueError):
-            raise RuntimeError(f"HTTP {e.code}: {body_bytes.decode(errors='replace')}") from e
+            raise _google_error(f"HTTP {e.code}: {body_bytes.decode(errors='replace')}") from e
 
 
 def _get_user_email(access_token: str) -> str:
@@ -169,10 +180,10 @@ def _poll_operation(
             time.sleep(5)
         status, data = _http_get_json(f"{_CODE_ASSIST_ENDPOINT}/v1internal/{op_name}", headers)
         if status != 200:
-            raise RuntimeError(f"poll operation failed ({status}): {json.dumps(data)}")
+            raise _google_error(f"poll operation failed ({status}): {json.dumps(data)}")
         if data.get("done"):
             return data
-    raise RuntimeError(f"operation {op_name} timed out after {max_attempts} attempts")
+    raise _google_error(f"operation {op_name} timed out after {max_attempts} attempts")
 
 
 def _discover_project(access_token: str, ctx: fir_ext.AuthContext) -> str:
@@ -203,7 +214,7 @@ def _discover_project(access_token: str, ctx: fir_ext.AuthContext) -> str:
         if _is_vpc_sc_affected(data):
             data = {"currentTier": {"id": _TIER_STANDARD}}
         else:
-            raise RuntimeError(f"loadCodeAssist failed ({status}): {json.dumps(data)}")
+            raise _google_error(f"loadCodeAssist failed ({status}): {json.dumps(data)}")
 
     if "currentTier" in data:
         project = data.get("cloudaicompanionProject", "")
@@ -221,15 +232,7 @@ def _discover_project(access_token: str, ctx: fir_ext.AuthContext) -> str:
     allowed_tiers = [t for t in data.get("allowedTiers", []) if isinstance(t, dict)]
     tier_id = _get_default_tier(allowed_tiers)
 
-    if tier_id == _TIER_FREE:
-        raise RuntimeError(
-            "Gemini CLI no longer serves free or Google AI Pro/Ultra personal "
-            "accounts (moved to Antigravity on 2026-06-18): use "
-            "`fir login google-antigravity`. Gemini CLI login needs a Gemini "
-            "Code Assist Standard/Enterprise license on a GCP project "
-            "(set GOOGLE_CLOUD_PROJECT)."
-        )
-    if not env_project:
+    if tier_id != _TIER_FREE and not env_project:
         raise RuntimeError(
             "This account requires setting the GOOGLE_CLOUD_PROJECT or "
             "GOOGLE_CLOUD_PROJECT_ID environment variable. "
@@ -244,16 +247,17 @@ def _discover_project(access_token: str, ctx: fir_ext.AuthContext) -> str:
             "ideType": "IDE_UNSPECIFIED",
             "platform": "PLATFORM_UNSPECIFIED",
             "pluginType": "GEMINI",
-            "duetProject": env_project,
         },
-        "cloudaicompanionProject": env_project,
     }
+    if tier_id != _TIER_FREE and env_project:
+        onboard_body["cloudaicompanionProject"] = env_project
+        onboard_body["metadata"]["duetProject"] = env_project
 
     status, lro_data = _http_post_json(
         f"{_CODE_ASSIST_ENDPOINT}/v1internal:onboardUser", onboard_body, headers
     )
     if status != 200:
-        raise RuntimeError(f"onboardUser failed ({status}): {json.dumps(lro_data)}")
+        raise _google_error(f"onboardUser failed ({status}): {json.dumps(lro_data)}")
 
     if not lro_data.get("done"):
         op_name = lro_data.get("name", "")

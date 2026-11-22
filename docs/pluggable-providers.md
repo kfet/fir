@@ -2,7 +2,7 @@
 
 Design + audit notes from the provider→extension migration (landed in commit 5c45f663).
 
-> **Account note:** since 2026-06-18 Google serves free and Google AI Pro/Ultra personal accounts through Antigravity (`google-antigravity`). `google-gemini-cli` remains for Gemini Code Assist Standard/Enterprise users with a GCP project.
+> **Account note:** since 2026-06-18 Google serves free and Google AI Pro/Ultra personal accounts through Antigravity (`google-antigravity`). `google-gemini-cli` still tries every account; if Google rejects the login, the error suggests `google-antigravity`.
 
 ---
 
