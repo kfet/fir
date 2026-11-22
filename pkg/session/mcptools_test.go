@@ -61,3 +61,14 @@ func TestMCPAdvertised_UpdatesSavedList(t *testing.T) {
 		t.Errorf("offline a = %v", got)
 	}
 }
+
+// An unconnected server with nothing saved must not count as a change:
+// the spurious nil -> {} write raced concurrent state updates and lost them.
+func TestSameMCPTools_NilEqualsEmpty(t *testing.T) {
+	if !sameMCPTools(nil, map[string][]ai.Tool{}) {
+		t.Fatal("nil and empty saved tool maps must compare equal")
+	}
+	if sameMCPTools(nil, map[string][]ai.Tool{"a": nil}) {
+		t.Fatal("a server entry is a change")
+	}
+}

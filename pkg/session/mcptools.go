@@ -18,41 +18,49 @@ import (
 // Saved entries for servers no longer configured are dropped. Servers are
 // visited in name order so the result is deterministic.
 func (s *AgentSession) mcpAdvertised(live map[string][]agent.AgentTool) []agent.AgentTool {
-	saved := s.SessionState().Runtime.McpTools
-	next := make(map[string][]ai.Tool, len(live))
 	names := make([]string, 0, len(live))
 	for name := range live {
 		names = append(names, name)
 	}
 	sort.Strings(names)
 
+	// Read the saved schemas and write the new ones under one lock: a
+	// concurrent state update between the read and the write would
+	// otherwise be lost.
 	var out []agent.AgentTool
-	for _, name := range names {
-		tools := live[name]
-		if tools == nil {
-			if schemas, ok := saved[name]; ok {
-				next[name] = schemas
-				for _, t := range schemas {
-					out = append(out, offlineMCPTool(name, t))
+	changed := false
+	s.updateStateNoSave(func(st *SessionState) {
+		saved := st.Runtime.McpTools
+		next := make(map[string][]ai.Tool, len(live))
+		for _, name := range names {
+			tools := live[name]
+			if tools == nil {
+				if schemas, ok := saved[name]; ok {
+					next[name] = schemas
+					for _, t := range schemas {
+						out = append(out, offlineMCPTool(name, t))
+					}
 				}
+				continue
 			}
-			continue
-		}
-		schemas := make([]ai.Tool, len(tools))
-		for i, t := range tools {
-			schemas[i] = t.Tool
-		}
-		next[name] = schemas
-		out = append(out, tools...)
-	}
-
-	if !sameMCPTools(saved, next) {
-		s.UpdateSessionState(func(st *SessionState) {
-			if len(next) == 0 {
-				next = nil
+			schemas := make([]ai.Tool, len(tools))
+			for i, t := range tools {
+				schemas[i] = t.Tool
 			}
-			st.Runtime.McpTools = next
-		})
+			next[name] = schemas
+			out = append(out, tools...)
+		}
+		if sameMCPTools(saved, next) {
+			return
+		}
+		if len(next) == 0 {
+			next = nil
+		}
+		st.Runtime.McpTools = next
+		changed = true
+	})
+	if changed {
+		s.SaveState()
 	}
 	return out
 }
@@ -61,6 +69,9 @@ func (s *AgentSession) mcpAdvertised(live map[string][]agent.AgentTool) []agent.
 func sameMCPTools(a, b map[string][]ai.Tool) bool {
 	if len(a) != len(b) {
 		return false
+	}
+	if len(a) == 0 {
+		return true // nil and empty are the same saved state
 	}
 	ja, errA := json.Marshal(a)
 	jb, errB := json.Marshal(b)

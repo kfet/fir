@@ -2,7 +2,7 @@
 
 Design + audit notes from the provider→extension migration (landed in commit 5c45f663).
 
-> **Historical note:** the `google-gemini-cli` provider (and its `gemini-cli-auth` extension) described below was removed after Google retired Gemini CLI / Code Assist for individuals on 2026-06-18. `google-antigravity` is the remaining Cloud Code Assist provider.
+> **Account note:** since 2026-06-18 Google serves free and Google AI Pro/Ultra personal accounts through Antigravity (`google-antigravity`). `google-gemini-cli` remains for Gemini Code Assist Standard/Enterprise users with a GCP project.
 
 ---
 

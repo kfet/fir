@@ -2,7 +2,11 @@
 
 ## [Unreleased]
 
+### Added
+- **`google-gemini-cli` provider is back.** Gemini CLI "Sign in with Google" still works for Gemini Code Assist Standard/Enterprise (GCP project) users. Personal accounts (free, Google AI Pro/Ultra) should keep using `google-antigravity`; login says so. OAuth client, scopes and endpoints checked against gemini-cli v0.70.0.
+
 ### Fixed
+- A session's saved MCP tool schemas could be lost when an MCP server failed to connect while the state was being updated; the read and write now happen under one lock.
 - Tests no longer extract into or sweep the real fir cache, which could delete the builtin trees of running fir sessions.
 
 ## [1.62.4] - 2026-11-20

@@ -30,9 +30,6 @@ import (
 func runLogin(providerID string, opts auth.LoginOptions) error {
 	provider := ai.GetOAuthProvider(providerID)
 	if provider == nil {
-		if why, ok := retiredProviders[providerID]; ok {
-			return fmt.Errorf("OAuth provider %s is %s", providerID, why)
-		}
 		providers := ai.GetOAuthProviders()
 		fmt.Fprintf(os.Stderr, "Unknown OAuth provider: %s\n\nAvailable providers:\n", providerID)
 		for _, p := range providers {
@@ -246,13 +243,6 @@ func runLoginUse(args []string) error {
 	return nil
 }
 
-// retiredProviders maps provider ids fir no longer ships to a short reason.
-// Stored credentials for them are kept untouched (never a crash) but flagged
-// in account listings so users know to remove them.
-var retiredProviders = map[string]string{
-	"google-gemini-cli": "retired: Google ended Gemini CLI / Code Assist for individuals; use google-antigravity",
-}
-
 // printStoredAccounts lists every stored account slot, marking the default.
 func printStoredAccounts(authStorage *auth.AuthStorage) {
 	accts := authStorage.AllAccounts()
@@ -264,9 +254,6 @@ func printStoredAccounts(authStorage *auth.AuthStorage) {
 		tag := ""
 		if a.AccountID == "" {
 			tag = " (default)"
-		}
-		if why, ok := retiredProviders[a.Provider]; ok {
-			tag += fmt.Sprintf(" (%s; remove with: fir logout %s)", why, a.SlotKey)
 		}
 		fmt.Printf("  %s  [%s]  %s%s\n", a.SlotKey, a.Type, a.DisplayName(), tag)
 	}
