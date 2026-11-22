@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [1.63.2] - 2026-11-21
+
+### Changed
+- Model catalog regenerated: 4 models with changed pricing/limits (openrouter: minimax/minimax-m3.1-flash, particle-ai/particle-1, qwen/qwen3.8-27b, ~moonshotai/kimi-latest).
+
 ### Fixed
 - gemini-cli login no longer refuses free-tier accounts up front: it onboards them as before and, only if a Google call fails, appends a hint about Google's 2026-06-18 move of personal accounts to `google-antigravity`.
 
