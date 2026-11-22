@@ -2,7 +2,10 @@
 
 ## [Unreleased]
 
+## [1.63.4] - 2026-11-22
+
 ### Changed
+- **Model catalog regenerated**: added `opencode-go/longcat-2.5`; removed `opencode-go/longcat-2.0`, `opencode-go/longcat-2.5-free`, `opencode/longcat-2.5-free`; changed pricing/limits — openrouter: minimax/minimax-m3.1-flash, moonshotai/kimi-k3.1-pro, openai/gpt-oss-20b, tencent/hy4-preview, z-ai/glm-4.7, z-ai/glm-5.1, ~deepseek/deepseek-pro-latest.
 - provider-usage never calls Anthropic's `/api/oauth/usage` endpoint; usage comes only from inference response headers, and a new session shows the last cached reading with its age (`☁ 5h 4% · 12m ago`). The `stale_after_seconds` and `endpoint_poll_seconds` settings are gone (ignored if present).
 
 ### Fixed
