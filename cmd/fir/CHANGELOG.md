@@ -2,8 +2,13 @@
 
 ## [Unreleased]
 
+## [1.63.0] - 2026-11-21
+
 ### Added
 - **`google-gemini-cli` provider is back.** Gemini CLI "Sign in with Google" still works for Gemini Code Assist Standard/Enterprise (GCP project) users. Personal accounts (free, Google AI Pro/Ultra) should keep using `google-antigravity`; login says so. OAuth client, scopes and endpoints checked against gemini-cli v0.70.0; the model list now matches it (adds Gemini 3.5/3.8 Flash and 3.1/3.5 Flash Lite).
+
+### Changed
+- **Model catalog regenerated**: added 1 aggregator model, removed 2 aggregator models; 9 models with changed pricing/limits (opencode: deepseek-v4.1-flash, glm-5.3; openrouter: deepseek/deepseek-v4.1-flash, minimax/minimax-m3.1-flash, ~moonshotai/kimi-latest, qwen/qwen3.5-27b, qwen/qwen3.8-2.4t-a95b, tencent/hy3).
 
 ### Fixed
 - A session's saved MCP tool schemas could be lost when an MCP server failed to connect while the state was being updated; the read and write now happen under one lock.
