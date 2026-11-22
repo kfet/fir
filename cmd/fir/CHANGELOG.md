@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- Release CI no longer fails when the fir-dist mirror is caught mid-upload (only LICENSE published yet).
+
 ## [1.63.0] - 2026-11-21
 
 ### Added

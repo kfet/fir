@@ -52,18 +52,18 @@ func TestDistkitAssetNameParity(t *testing.T) {
 		t.Skipf("cannot reach %s/%s releases API: %v", repoOwner, repoName, err)
 	}
 	t.Logf("%s/%s latest = %s, assets = %v", repoOwner, repoName, tag, assets)
-	if len(assets) == 0 {
-		// A release is created before its assets upload; CI for the release
-		// commit runs during that window. Nothing to compare yet.
-		t.Skipf("%s/%s %s has no assets yet (upload in progress)", repoOwner, repoName, tag)
-	}
-
 	published := make(map[string]bool, len(assets))
 	for _, a := range assets {
 		published[a] = true
 	}
 
 	cfg := DistkitConfig("v0.0.0")
+	if !uploadStarted(cfg, tag, published) {
+		// A release is created before its assets upload, and the mirror
+		// uploads them one by one; CI for the release commit runs during
+		// that window. Nothing to compare until a binary or the manifest lands.
+		t.Skipf("%s/%s %s has no binaries yet (upload in progress): %v", repoOwner, repoName, tag, assets)
+	}
 	for _, p := range releasePlatforms {
 		name := renderAssetName(cfg, tag, p.goos, p.goarch)
 		if !published[name] {
@@ -77,6 +77,20 @@ func TestDistkitAssetNameParity(t *testing.T) {
 	if !published[cfg.ChecksumsAsset] {
 		t.Errorf("distkit expects checksum manifest %q, not published in %s", cfg.ChecksumsAsset, tag)
 	}
+}
+
+// uploadStarted reports whether any asset distkit needs (a platform binary or
+// the checksum manifest) is published; LICENSE and notices do not count.
+func uploadStarted(cfg distkit.Config, tag string, published map[string]bool) bool {
+	if published[cfg.ChecksumsAsset] {
+		return true
+	}
+	for _, p := range releasePlatforms {
+		if published[renderAssetName(cfg, tag, p.goos, p.goarch)] {
+			return true
+		}
+	}
+	return false
 }
 
 // renderAssetName renders the asset name for an arbitrary platform. distkit's
@@ -169,4 +183,18 @@ func latestReleaseAssets(ctx context.Context) (string, []string, error) {
 		names = append(names, a.Name)
 	}
 	return payload.TagName, names, nil
+}
+
+func TestUploadStarted(t *testing.T) {
+	cfg := DistkitConfig("v0.0.0")
+	if uploadStarted(cfg, "v1.0.0", map[string]bool{"LICENSE": true}) {
+		t.Error("LICENSE alone must count as upload in progress")
+	}
+	if !uploadStarted(cfg, "v1.0.0", map[string]bool{cfg.ChecksumsAsset: true}) {
+		t.Error("checksum manifest means the upload started")
+	}
+	p := releasePlatforms[0]
+	if !uploadStarted(cfg, "v1.0.0", map[string]bool{renderAssetName(cfg, "v1.0.0", p.goos, p.goarch): true}) {
+		t.Error("a platform binary means the upload started")
+	}
 }
