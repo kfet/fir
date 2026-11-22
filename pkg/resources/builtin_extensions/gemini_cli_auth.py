@@ -216,28 +216,20 @@ def _discover_project(access_token: str, ctx: fir_ext.AuthContext) -> str:
         else:
             raise _google_error(f"loadCodeAssist failed ({status}): {json.dumps(data)}")
 
-    if "currentTier" in data:
+    current = data.get("currentTier")
+    if isinstance(current, dict):
         project = data.get("cloudaicompanionProject", "")
         if project and isinstance(project, str):
             return project
         if env_project or data["currentTier"].get("id") == _TIER_FREE:
             return env_project
-        raise RuntimeError(
-            "This account requires setting the GOOGLE_CLOUD_PROJECT or "
-            "GOOGLE_CLOUD_PROJECT_ID environment variable. "
-            "See https://goo.gle/gemini-cli-auth-docs#workspace-gca"
-        )
-
-    # User needs onboarding
-    allowed_tiers = [t for t in data.get("allowedTiers", []) if isinstance(t, dict)]
-    tier_id = _get_default_tier(allowed_tiers)
-
-    if tier_id != _TIER_FREE and not env_project:
-        raise RuntimeError(
-            "This account requires setting the GOOGLE_CLOUD_PROJECT or "
-            "GOOGLE_CLOUD_PROJECT_ID environment variable. "
-            "See https://goo.gle/gemini-cli-auth-docs#workspace-gca"
-        )
+        # Google reported a tier but no project. Do not decide for Google:
+        # ask it to onboard this tier and let it answer.
+        tier_id = current.get("id") or _TIER_LEGACY
+    else:
+        allowed_tiers = [t for t in data.get("allowedTiers", []) if isinstance(t, dict)]
+        tier_id = _get_default_tier(allowed_tiers)
+    load_reply = json.dumps(data)
 
     ctx.progress("Provisioning Cloud Code Assist project (this may take a moment)...")
 
@@ -271,7 +263,21 @@ def _discover_project(access_token: str, ctx: fir_ext.AuthContext) -> str:
         if proj_id:
             return proj_id
 
-    return env_project
+    if env_project:
+        return env_project
+    reasons = "; ".join(
+        f"{t.get('tierId', '?')}: {t.get('reasonMessage', '')}"
+        for t in data.get("ineligibleTiers", [])
+        if isinstance(t, dict) and t.get("reasonMessage")
+    )
+    raise _google_error(
+        (f"Google says: {reasons}\n" if reasons else "")
+        + "Google did not return a Cloud Code Assist project for this account "
+        f"(tier {tier_id}). loadCodeAssist: {load_reply}; onboardUser: "
+        f"{json.dumps(lro_data)}. If your license is tied to a Google Cloud "
+        "project, set GOOGLE_CLOUD_PROJECT. "
+        "See https://goo.gle/gemini-cli-auth-docs#workspace-gca"
+    )
 
 
 # ---------------------------------------------------------------------------

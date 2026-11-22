@@ -163,6 +163,59 @@ class TestPersonalAccountGuidance(unittest.TestCase):
         self.assertIn("google says no", str(err))
         self.assertIn("fir login google-antigravity", str(err))
 
+    def test_current_tier_without_project_calls_onboard(self):
+        load = (200, {"currentTier": {"id": "standard-tier"}})
+        ok = (200, {"done": True, "response": {"cloudaicompanionProject": {"id": "p9"}}})
+        got, post = self._discover({}, responses=[load, ok])
+        self.assertEqual(got, "p9")
+        self.assertEqual(post.call_count, 2)
+        self.assertIn("onboardUser", post.call_args_list[1].args[0])
+        self.assertEqual(post.call_args_list[1].args[1]["tierId"], "standard-tier")
+
+    def test_vpc_sc_without_env_project_calls_onboard(self):
+        load = (403, {"error": {"details": [{"reason": "SECURITY_POLICY_VIOLATED"}]}})
+        ok = (200, {"done": True, "response": {"cloudaicompanionProject": {"id": "p7"}}})
+        got, post = self._discover({}, responses=[load, ok])
+        self.assertEqual(got, "p7")
+        self.assertEqual(post.call_args_list[1].args[1]["tierId"], "standard-tier")
+
+    def test_current_tier_without_id_onboards_legacy(self):
+        load = (200, {"currentTier": {}})
+        ok = (200, {"done": True, "response": {"cloudaicompanionProject": {"id": "p8"}}})
+        got, post = self._discover({}, responses=[load, ok])
+        self.assertEqual(got, "p8")
+        self.assertEqual(post.call_args_list[1].args[1]["tierId"], "legacy-tier")
+
+    def test_standard_tier_without_env_project_calls_onboard(self):
+        got, post = self._discover({}, tier="standard-tier")
+        self.assertEqual(got, "p1")
+        self.assertEqual(post.call_count, 2)
+        body = post.call_args_list[1].args[1]
+        self.assertEqual(body["tierId"], "standard-tier")
+        self.assertNotIn("cloudaicompanionProject", body)
+
+    def test_empty_project_reports_google_reason(self):
+        load = (
+            200,
+            {
+                "allowedTiers": [{"id": "free-tier", "isDefault": True}],
+                "ineligibleTiers": [
+                    {
+                        "tierId": "free-tier",
+                        "reasonCode": "UNSUPPORTED_CLIENT",
+                        "reasonMessage": "not eligible here",
+                    }
+                ],
+            },
+        )
+        empty = (200, {"done": True, "response": {}})
+        err, post = self._discover({}, responses=[load, empty])
+        self.assertIsInstance(err, RuntimeError)
+        self.assertEqual(post.call_count, 2)
+        self.assertIn("Google says: free-tier: not eligible here", str(err))
+        self.assertIn("GOOGLE_CLOUD_PROJECT", str(err))
+        self.assertIn("google-antigravity", str(err))
+
     def test_load_failure_adds_hint(self):
         err, _ = self._discover({}, responses=[(403, {"error": {"message": "denied"}})])
         self.assertIn("loadCodeAssist failed (403)", str(err))
