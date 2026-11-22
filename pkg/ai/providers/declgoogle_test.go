@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/kfet/fir/pkg/ai"
@@ -730,5 +731,25 @@ func TestResolveHeaders_OSArchSubst(t *testing.T) {
 	ua := hdrs["User-Agent"]
 	if !strings.Contains(ua, "/") || strings.Contains(ua, "${") {
 		t.Errorf("expected substituted UA, got %q", ua)
+	}
+}
+
+func TestStreamDeclGoogle_EmptyProjectReachesServer(t *testing.T) {
+	var hit atomic.Bool
+	server := tryNewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hit.Store(true)
+		http.Error(w, `{"error":{"message":"google decides"}}`, http.StatusForbidden)
+	}))
+	defer server.Close()
+
+	creds, _ := json.Marshal(map[string]string{"token": "tok", "projectId": ""})
+	model := &ai.Model{ID: "gemini-2.0-flash", Provider: "test-decl-google-a", API: "test-decl-google-a", BaseURL: server.URL}
+	stream := StreamDeclGoogle(context.Background(), model, ai.Context{Messages: []ai.Message{ai.NewUserMsg("hi", 0)}}, &ai.StreamOptions{APIKey: string(creds)})
+	var last ai.AssistantMessageEvent
+	for ev := range stream.Events {
+		last = ev
+	}
+	if !hit.Load() {
+		t.Fatalf("request with empty project never reached Google; last event: %+v", last.Error)
 	}
 }

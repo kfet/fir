@@ -607,7 +607,9 @@ func streamDeclGoogle(
 		return fmt.Errorf("Google Cloud Code Assist requires OAuth authentication. Use /login to authenticate")
 	}
 	creds := parseGoogleCreds(apiKeyRaw)
-	if creds["access_token"] == "" || creds["project_id"] == "" {
+	// An empty project ID is Google's call to reject, not ours; only a
+	// missing field means the credentials are malformed.
+	if _, ok := creds["project_id"]; !ok || creds["access_token"] == "" {
 		return fmt.Errorf("invalid Google Cloud Code Assist credentials. Use /login to re-authenticate")
 	}
 

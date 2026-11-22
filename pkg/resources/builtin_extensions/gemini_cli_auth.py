@@ -220,7 +220,7 @@ def _discover_project(access_token: str, ctx: fir_ext.AuthContext) -> str:
         project = data.get("cloudaicompanionProject", "")
         if project and isinstance(project, str):
             return project
-        if env_project:
+        if env_project or data["currentTier"].get("id") == _TIER_FREE:
             return env_project
         raise RuntimeError(
             "This account requires setting the GOOGLE_CLOUD_PROJECT or "

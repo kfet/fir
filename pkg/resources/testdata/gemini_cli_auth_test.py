@@ -118,6 +118,29 @@ class TestPersonalAccountGuidance(unittest.TestCase):
         self.assertNotIn("cloudaicompanionProject", body)
         self.assertNotIn("duetProject", body["metadata"])
 
+    def test_free_tier_login_succeeds_with_onboarded_project(self):
+        load = (200, {"allowedTiers": [{"id": "free-tier", "isDefault": True}]})
+        onboard = (
+            200,
+            {"done": True, "response": {"cloudaicompanionProject": {"id": "goog-proj"}}},
+        )
+        params = {"token": {"access_token": "a", "refresh_token": "r", "expires_at": 10**13}}
+        with (
+            mock.patch.dict(os.environ, {}, clear=True),
+            mock.patch.object(self.mod, "_http_post_json", side_effect=[load, onboard]),
+            mock.patch.object(self.mod, "_get_user_email", return_value="u@example.com"),
+        ):
+            creds = self.mod.post_exchange(params, self.ctx)
+        self.assertEqual(creds["extra"]["projectId"], "goog-proj")
+        self.assertEqual(creds["access"], "a")
+        self.assertIsNone(self.mod.list_models({}, self.ctx))
+
+    def test_free_current_tier_without_project_is_accepted(self):
+        load = (200, {"currentTier": {"id": "free-tier"}})
+        got, post = self._discover({}, responses=[load])
+        self.assertEqual(got, "")
+        self.assertEqual(post.call_count, 1)
+
     def test_free_tier_ignores_env_project_in_onboard(self):
         got, post = self._discover({"GOOGLE_CLOUD_PROJECT": "envp"})
         self.assertEqual(got, "p1")
