@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.63.3] - 2026-11-21
+
 ### Fixed
 - gemini-cli login accepts a free-tier account Google already serves even when it has no project, instead of demanding `GOOGLE_CLOUD_PROJECT`.
 - Cloud Code Assist requests no longer refuse an empty project ID locally; Google decides.
