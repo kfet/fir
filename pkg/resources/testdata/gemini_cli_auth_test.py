@@ -89,8 +89,15 @@ class TestPersonalAccountGuidance(unittest.TestCase):
         self.mod = gemini_cli_auth
         self.ctx = mock.Mock()
 
-    def _discover(self, env):
-        resp = (200, {"allowedTiers": [{"id": "free-tier", "isDefault": True}]})
+    def _discover(self, env, tier="free-tier"):
+        resp = (
+            200,
+            {
+                "allowedTiers": [{"id": tier, "isDefault": True}],
+                "done": True,
+                "response": {"cloudaicompanionProject": {"id": "p1"}},
+            },
+        )
         with (
             mock.patch.dict(os.environ, env, clear=True),
             mock.patch.object(self.mod, "_http_post_json", return_value=resp) as post,
@@ -106,6 +113,19 @@ class TestPersonalAccountGuidance(unittest.TestCase):
         self.assertIn("google-antigravity", str(err))
         self.assertIn("GOOGLE_CLOUD_PROJECT", str(err))
         self.assertEqual(post.call_count, 1)  # no onboarding attempted
+
+    def test_free_tier_with_project_still_points_to_antigravity(self):
+        err, post = self._discover({"GOOGLE_CLOUD_PROJECT": "p1"})
+        self.assertIsInstance(err, RuntimeError)
+        self.assertIn("google-antigravity", str(err))
+        self.assertEqual(post.call_count, 1)
+
+    def test_standard_tier_onboards_with_project(self):
+        got, post = self._discover({"GOOGLE_CLOUD_PROJECT": "p1"}, tier="standard-tier")
+        self.assertEqual(got, "p1")
+        body = post.call_args_list[1].args[1]
+        self.assertEqual(body["cloudaicompanionProject"], "p1")
+        self.assertEqual(body["metadata"]["duetProject"], "p1")
 
     def test_spec_name_mentions_standard_enterprise_and_antigravity(self):
         name = _load_spec(_PROVIDER_ID)["name"]

@@ -150,7 +150,7 @@ func TestCLI_ModelThinkingLevelSuffix(t *testing.T) {
 // the migration:
 //
 //  1. CLI model resolution ran before extensions registered, so
-//     `--provider google-gemini-cli --model gemini-2.5-flash` failed with
+//     `--provider google-gemini-cli --model gemini-3-flash` failed with
 //     `Unknown provider "google-gemini-cli"` in -p / non-interactive mode.
 //
 //  2. ModelRegistry.Refresh() (called via refreshSessionModel after auth
@@ -172,7 +172,7 @@ func TestCLI_ExtShippedProviderResolves(t *testing.T) {
 		provider string
 		model    string
 	}{
-		{"gemini-cli", "google-gemini-cli", "gemini-2.5-flash"},
+		{"gemini-cli", "google-gemini-cli", "gemini-3-flash"},
 		{"antigravity", "google-antigravity", "gemini-3-flash"},
 	}
 	// Strings that, if present, indicate one of the two regressions has

@@ -3,7 +3,7 @@
 ## [Unreleased]
 
 ### Added
-- **`google-gemini-cli` provider is back.** Gemini CLI "Sign in with Google" still works for Gemini Code Assist Standard/Enterprise (GCP project) users. Personal accounts (free, Google AI Pro/Ultra) should keep using `google-antigravity`; login says so. OAuth client, scopes and endpoints checked against gemini-cli v0.70.0.
+- **`google-gemini-cli` provider is back.** Gemini CLI "Sign in with Google" still works for Gemini Code Assist Standard/Enterprise (GCP project) users. Personal accounts (free, Google AI Pro/Ultra) should keep using `google-antigravity`; login says so. OAuth client, scopes and endpoints checked against gemini-cli v0.70.0; the model list now matches it (adds Gemini 3.5/3.8 Flash and 3.1/3.5 Flash Lite).
 
 ### Fixed
 - A session's saved MCP tool schemas could be lost when an MCP server failed to connect while the state was being updated; the read and write now happen under one lock.

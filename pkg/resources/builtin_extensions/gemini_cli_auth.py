@@ -63,7 +63,7 @@ _API_HEADERS = {
 
 fir_ext.declare_oauth_provider(
     provider_id="google-gemini-cli",
-    name="Google Cloud Code Assist (Gemini CLI) - Standard/Enterprise GCP projects; personal accounts: use google-antigravity",
+    name="Google Gemini CLI (Code Assist Standard/Enterprise; personal accounts: google-antigravity)",
     client_id=_CLIENT_ID,
     client_secret=_CLIENT_SECRET,
     authorize_url="https://accounts.google.com/o/oauth2/v2/auth",
@@ -221,12 +221,13 @@ def _discover_project(access_token: str, ctx: fir_ext.AuthContext) -> str:
     allowed_tiers = [t for t in data.get("allowedTiers", []) if isinstance(t, dict)]
     tier_id = _get_default_tier(allowed_tiers)
 
-    if tier_id == _TIER_FREE and not env_project:
+    if tier_id == _TIER_FREE:
         raise RuntimeError(
             "Gemini CLI no longer serves free or Google AI Pro/Ultra personal "
-            "accounts (moved to Antigravity on 2026-06-18). Use "
-            "`fir login google-antigravity`, or set GOOGLE_CLOUD_PROJECT to a "
-            "GCP project with Gemini Code Assist Standard/Enterprise."
+            "accounts (moved to Antigravity on 2026-06-18): use "
+            "`fir login google-antigravity`. Gemini CLI login needs a Gemini "
+            "Code Assist Standard/Enterprise license on a GCP project "
+            "(set GOOGLE_CLOUD_PROJECT)."
         )
     if not env_project:
         raise RuntimeError(
@@ -243,11 +244,10 @@ def _discover_project(access_token: str, ctx: fir_ext.AuthContext) -> str:
             "ideType": "IDE_UNSPECIFIED",
             "platform": "PLATFORM_UNSPECIFIED",
             "pluginType": "GEMINI",
+            "duetProject": env_project,
         },
+        "cloudaicompanionProject": env_project,
     }
-    if tier_id != _TIER_FREE and env_project:
-        onboard_body["cloudaicompanionProject"] = env_project
-        onboard_body["metadata"]["duetProject"] = env_project
 
     status, lro_data = _http_post_json(
         f"{_CODE_ASSIST_ENDPOINT}/v1internal:onboardUser", onboard_body, headers
@@ -267,13 +267,7 @@ def _discover_project(access_token: str, ctx: fir_ext.AuthContext) -> str:
         if proj_id:
             return proj_id
 
-    if env_project:
-        return env_project
-
-    raise RuntimeError(
-        "Could not discover or provision a Google Cloud project. "
-        "Try setting the GOOGLE_CLOUD_PROJECT or GOOGLE_CLOUD_PROJECT_ID environment variable."
-    )
+    return env_project
 
 
 # ---------------------------------------------------------------------------
@@ -341,7 +335,7 @@ def list_models(params: dict, ctx: fir_ext.AuthContext) -> list[str] | None:
 
     The Cloud Code Assist API exposes retrieveUserQuota which returns quota
     buckets per model, but only for the user's tier — models outside the
-    tier (e.g. gemini-2.0-flash, gemini-3.1-*) are omitted even though
+    tier (e.g. preview models) are omitted even though
     they may still work. Returning None keeps permissive mode so no valid
     models are accidentally filtered out.
     """
@@ -359,7 +353,7 @@ def list_models(params: dict, ctx: fir_ext.AuthContext) -> list[str] | None:
 #
 #   - pkg/ai/providers/register_gemini_cli.go (Api + DeclGoogleConfig)
 #   - pkg/ai/provider_registry_builtins.go (RegisteredProvider record)
-#   - cmd/generate-models/main.go + pkg/ai/models_generated.go (7 models)
+#   - cmd/generate-models/main.go + pkg/ai/models_generated.go (model catalogue)
 #
 # fir's core retains only the generic StreamDeclGoogle adapter; nothing
 # in non-extension code mentions "gemini-cli" any more.
@@ -426,34 +420,15 @@ fir_ext.register_provider(
         default_model_id="gemini-3.1-pro-preview",
         oauth_provider_id="google-gemini-cli",
         env_keys=fir_ext.EnvKeys(authenticated=True),
+        # Model ids track gemini-cli packages/core/src/config/models.ts (v0.70.0).
+        # Limits for the 3.5/3.8 ids are assumed, not probed against cloudcode-pa.
         models=[
-            _gemini_cli_model(
-                "gemini-2.0-flash",
-                "Gemini 2.0 Flash (Cloud Code Assist)",
-                reasoning=False,
-                max_tokens=8192,
-                swe_score=42.1,
-            ),
-            _gemini_cli_model(
-                "gemini-2.5-flash",
-                "Gemini 2.5 Flash (Cloud Code Assist)",
-                reasoning=True,
-                max_tokens=65535,
-                swe_score=47.3,
-            ),
             _gemini_cli_model(
                 "gemini-2.5-pro",
                 "Gemini 2.5 Pro (Cloud Code Assist)",
                 reasoning=True,
                 max_tokens=65535,
                 swe_score=57.6,
-            ),
-            _gemini_cli_model(
-                "gemini-3-flash-preview",
-                "Gemini 3 Flash Preview (Cloud Code Assist)",
-                reasoning=True,
-                max_tokens=65535,
-                swe_score=76.2,
             ),
             _gemini_cli_model(
                 "gemini-3-pro-preview",
@@ -463,17 +438,49 @@ fir_ext.register_provider(
                 swe_score=76.2,
             ),
             _gemini_cli_model(
-                "gemini-3.1-flash-light-preview",
-                "Gemini 3.1 Flash Light Preview (Cloud Code Assist)",
-                reasoning=True,
-                max_tokens=65535,
-            ),
-            _gemini_cli_model(
                 "gemini-3.1-pro-preview",
                 "Gemini 3.1 Pro Preview (Cloud Code Assist)",
                 reasoning=True,
                 max_tokens=65535,
                 swe_score=80.6,
+            ),
+            _gemini_cli_model(
+                "gemini-3-flash",
+                "Gemini 3 Flash (Cloud Code Assist)",
+                reasoning=True,
+                max_tokens=65535,
+                swe_score=76.2,
+            ),
+            _gemini_cli_model(
+                "gemini-3-flash-preview",
+                "Gemini 3 Flash Preview (Cloud Code Assist)",
+                reasoning=True,
+                max_tokens=65535,
+                swe_score=76.2,
+            ),
+            _gemini_cli_model(
+                "gemini-3.5-flash",
+                "Gemini 3.5 Flash (Cloud Code Assist)",
+                reasoning=True,
+                max_tokens=65535,
+            ),
+            _gemini_cli_model(
+                "gemini-3.8-flash",
+                "Gemini 3.8 Flash (Cloud Code Assist)",
+                reasoning=True,
+                max_tokens=65535,
+            ),
+            _gemini_cli_model(
+                "gemini-3.1-flash-lite",
+                "Gemini 3.1 Flash Lite (Cloud Code Assist)",
+                reasoning=True,
+                max_tokens=65535,
+            ),
+            _gemini_cli_model(
+                "gemini-3.5-flash-lite",
+                "Gemini 3.5 Flash Lite (Cloud Code Assist)",
+                reasoning=True,
+                max_tokens=65535,
             ),
         ],
     )
