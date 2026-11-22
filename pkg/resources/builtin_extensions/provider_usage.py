@@ -5,10 +5,20 @@
 # builtin: true
 # modes: tui, acp
 # ---
-"""Periodically fetch Anthropic and/or Poe usage stats and display in the status bar.
+"""Show Anthropic and/or Poe usage in the status bar.
 
-Refreshes every 5 minutes. Uses a shared file cache with flock so multiple
-fir sessions avoid redundant API calls and respect rate limits together.
+Anthropic numbers come only from inference response headers — the
+``/api/oauth/usage`` endpoint is never called (it intermittently rejects
+tokens that still work for inference, which raised false auth alerts).
+``message_end`` / ``provider_error`` carry the provider's HTTP
+``response_headers``; per-provider parsers (``HEADER_PARSERS``) turn the
+account-wide ``anthropic-ratelimit-unified-*`` headers into usage windows.
+Each reading updates a per-host shared cache (flock'd, ``headers_at``,
+``headers``) and a short time-series (``anthropic-usage-series.json``). A
+session shows the last cached reading with its age (``☁ 5h 4% · 12m ago``),
+or nothing until a first reading lands. Poe's balance is fetched from its API
+through the same flock'd cache, once per ``CACHE_SECONDS_TTL`` across sessions,
+backing off exponentially on failure.
 
 Early warning (all modes): when a usage window crosses a warning level
 (80% / 95%) the extension publishes a short ``set_section`` so the agent
@@ -16,49 +26,33 @@ sees it on every turn, and announces each crossing exactly once per window
 reset — a ``notify`` in the TUI, a turn-triggering message in ACP (where
 ``notify`` and the status bar have no surface). A flock'd state file in the
 shared cache dir makes "exactly once" hold across every concurrent session.
+A rise of ``burst_points`` (default 3) in 5-hour utilization within
+``burst_window_seconds`` (default 600) inside one window — typically many idle
+sessions waking at once after a reset — is detected by ``_burst_alerts``; it is
+kept out of the refresh loop since v1.46.4 (in the prompt it stalled subagents).
 
 Also listens for ``provider_error`` and, when a Claude subscription (OAuth)
-account hits a usage limit, notifies the user when that limit resets — reusing
-the cache this extension already maintains, so the error path stays local.
+account hits a usage limit, notifies the user when that limit resets.
 
-Health alerts (same section + exactly-once announce): fresh usage could not
-be fetched for longer than ``stale_after_seconds`` (default 2x the cache TTL)
-or the endpoint rejected the token (401/403); the stored Anthropic OAuth
-access token is past expiry by more than ``refresh_grace_minutes`` (fir's
-refresh is failing — log in again); the login is older than
-``login_max_age_days`` (off by default; the clock starts when a login is first
-observed — delete ``anthropic-login-seen.json`` after re-login to reset it).
-
-Load is bounded: one HTTP fetch per TTL across *all* sessions (flock'd shared
-cache), and every failure — 429, auth, network — backs off exponentially, so
-a broken endpoint is never re-polled by each session every cycle.
-
-Header feed (zero cost): ``message_end`` / ``provider_error`` carry the
-provider's HTTP ``response_headers``. Per-provider parsers
-(``HEADER_PARSERS``) turn quota headers into the same window shape the usage
-endpoint returns — Anthropic subscription responses carry account-wide
-``anthropic-ratelimit-unified-*`` headers covering every machine on the
-account. Each reading updates the shared cache (``headers_at``, ``headers``)
-and appends to a short time-series (``anthropic-usage-series.json``). While
-header readings are fresh the endpoint is polled only every
-``endpoint_poll_seconds`` (default 21600, 6 hours); with no fresh headers it
-is polled every ``CACHE_SECONDS_TTL`` (5 minutes). A rise of ``burst_points``
-(default 3) in 5-hour utilization within ``burst_window_seconds`` (default
-600) inside one window — typically many idle sessions waking at once after a
-reset, each paying a cold prompt cache — raises a burst alert (section + exactly-once announce).
+Credential health (section + exactly-once notify in the TUI; section only in
+ACP, never a triggered turn): the stored Anthropic OAuth access token is past
+expiry by more than ``refresh_grace_minutes`` (fir's refresh is failing — log
+in again); the login is older than ``login_max_age_days`` (off by default;
+the clock starts when a login is first observed — delete
+``anthropic-login-seen.json`` after re-login to reset it).
 
 Config: ``provider-usage.json`` in any fir config dir, e.g.
-``{"enabled": true, "warn_levels": [80, 95], "stale_after_seconds": 600,
-"refresh_grace_minutes": 15, "login_max_age_days": 0, "burst_points": 3,
-"burst_window_seconds": 600, "endpoint_poll_seconds": 21600}``. ``"enabled": false``
-turns the extension off entirely.
+``{"enabled": true, "warn_levels": [80, 95], "refresh_grace_minutes": 15,
+"login_max_age_days": 0, "burst_points": 3, "burst_window_seconds": 600}``.
+Unknown keys (e.g. the retired ``stale_after_seconds`` /
+``endpoint_poll_seconds``) are ignored. ``"enabled": false`` turns the
+extension off entirely.
 """
 
 from __future__ import annotations
 
 import contextlib
 import fcntl
-import hashlib
 import json
 import os
 import random
@@ -76,7 +70,7 @@ import fir_ext
 REFRESH_INTERVAL_SECONDS = 30  # how frequently to refresh stats from cache
 CACHE_SECONDS_TTL = 300  # seconds — shared across all fir sessions
 BACKOFF_BASE = 120  # initial backoff after 429 (seconds)
-BACKOFF_MAX = 3600  # max backoff (60 minutes — oauth/usage can 429 for 30min+)
+BACKOFF_MAX = 3600  # max backoff (60 minutes)
 
 # -- rate-limit reset reporting ---------------------------------------------
 # A window's utilization at or above this is taken as the plausible cause of a
@@ -104,15 +98,11 @@ _RESET_ISO_RE = re.compile(r'"resets?_?[aA]t"\s*:\s*"(\d{4}-\d{2}-\d{2}[Tt][^"]+
 # -- early warning ------------------------------------------------------------
 # Utilization levels (percent) that each announce once per window reset.
 WARN_LEVELS = (80.0, 95.0)
-STALE_AFTER_SECONDS = 2 * CACHE_SECONDS_TTL
 REFRESH_GRACE_MINUTES = 15.0
 LOGIN_MAX_AGE_DAYS = 0.0  # 0 disables the login-age warning
 ALERT_MEMORY = 7 * 24 * 3600  # how long an announced health alert stays claimed
 
 # -- header feed ----------------------------------------------------------------
-# While header readings are fresher than CACHE_SECONDS_TTL, the usage endpoint
-# is polled only this often (it still supplies windows headers lack).
-HEADER_POLL_SECONDS = 6 * 3600.0  # config: endpoint_poll_seconds
 SERIES_MAX_AGE = 6 * 3600  # how much time-series history to keep
 SERIES_MAX_LEN = 500
 BURST_POINTS = 3.0  # 5-hour utilization rise (percentage points) ...
@@ -124,9 +114,6 @@ _K_FETCHED_AT = "fetched_at"
 _K_BACKOFF_UNTIL = "backoff_until"
 _K_BACKOFF_DURATION = "backoff_duration"
 _K_DATA = "data"
-_K_FIRST_FAILURE = "first_failure_at"
-_K_AUTH_ERROR = "auth_error"
-_K_AUTH_KEY = "auth_key"
 _K_RATE_LIMITED = "rate_limited"
 _K_HEADERS_AT = "headers_at"
 _K_HEADERS = "headers"
@@ -157,7 +144,7 @@ def _config_search_paths() -> list[str]:
 class CacheResult:
     """Wraps cached data with staleness / rate-limit metadata."""
 
-    __slots__ = ("data", "is_auth_error", "is_rate_limited", "is_stale")
+    __slots__ = ("data", "is_rate_limited", "is_stale")
 
     def __init__(
         self,
@@ -165,25 +152,17 @@ class CacheResult:
         *,
         is_stale: bool = False,
         is_rate_limited: bool = False,
-        is_auth_error: bool = False,
     ):
         self.data = data
         self.is_stale = is_stale
         self.is_rate_limited = is_rate_limited
-        self.is_auth_error = is_auth_error
 
     def status_suffix(self) -> str:
-        if self.is_auth_error:
-            return " ⚠ auth"
         if self.is_rate_limited:
             return " ⚠ rate-limited"
         if self.is_stale:
             return " ⚠ stale"
         return ""
-
-
-class AuthError(Exception):
-    """Raised when the API rejects the credential (HTTP 401/403)."""
 
 
 class RateLimitedError(Exception):
@@ -232,8 +211,6 @@ def _http_get_json(url: str, headers: dict) -> dict:
             with contextlib.suppress(Exception):
                 retry_after = float(e.headers.get("Retry-After", ""))
             raise RateLimitedError(retry_after) from e
-        if e.code in (401, 403):
-            raise AuthError(str(e.code)) from e
         raise
 
 
@@ -242,69 +219,30 @@ def _http_get_json(url: str, headers: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def _cached_fetch(cache_name: str, fetch_fn, key: str = "") -> CacheResult:
-    """Fetch data using a shared file cache with flock to prevent thundering herd.
-
-    ``key`` fingerprints the credential: an auth-error backoff recorded for one
-    credential does not hold back a fetch with a new one (e.g. after re-login).
-    """
+def _cached_fetch(cache_name: str, fetch_fn) -> CacheResult:
+    """Fetch data using a shared file cache with flock to prevent thundering herd."""
     cd = _cache_dir()
     cache_file = cd / f"{cache_name}-cache.json"
     lock_file = cd / f"{cache_name}-cache.lock"
     cd.mkdir(parents=True, exist_ok=True)
 
-    def _is_fresh(cached: dict) -> bool:
-        age = time.time() - cached.get(_K_FETCHED_AT, 0)
-        if age < CACHE_SECONDS_TTL:
-            return True
-        # Fresh header readings keep the windows current; poll less often.
-        headers_age = time.time() - cached.get(_K_HEADERS_AT, 0)
-        return headers_age < CACHE_SECONDS_TTL and age < HEADER_POLL_SECONDS
-
     def _is_backed_off(cached: dict) -> bool:
-        if cached.get(_K_AUTH_ERROR) and cached.get(_K_AUTH_KEY, "") != key:
-            return False
         return time.time() < cached.get(_K_BACKOFF_UNTIL, 0)
-
-    def _effective_backoff_duration(cached: dict) -> float:
-        return cached.get(_K_BACKOFF_DURATION, 0) if _is_backed_off(cached) else 0
-
-    def _write_cache(obj: dict) -> None:
-        tmp_path = None
-        try:
-            tmp_fd, tmp_path = tempfile.mkstemp(dir=str(cd), suffix=".tmp")
-            with os.fdopen(tmp_fd, "w") as tmp_f:
-                json.dump(obj, tmp_f)
-            os.replace(tmp_path, str(cache_file))
-            tmp_path = None
-        except Exception:
-            if tmp_path:
-                with contextlib.suppress(OSError):
-                    os.unlink(tmp_path)
 
     def _cache_to_result(cached: dict | None) -> CacheResult | None:
         """Convert cached dict to CacheResult if usable, else None to signal refetch needed."""
         if not cached:
             return None
-        headers_fresh = time.time() - cached.get(_K_HEADERS_AT, 0) < CACHE_SECONDS_TTL
         if _is_backed_off(cached):
-            if headers_fresh and not cached.get(_K_AUTH_ERROR) and cached.get(_K_DATA):
-                # Endpoint backed off, but header readings keep data live.
-                return CacheResult(cached[_K_DATA])
             return CacheResult(
                 cached.get(_K_DATA),
                 is_stale=True,
                 is_rate_limited=bool(cached.get(_K_RATE_LIMITED)),
-                is_auth_error=bool(cached.get(_K_AUTH_ERROR)),
             )
-        if _is_fresh(cached) and cached.get(_K_DATA) is not None:
+        age = time.time() - cached.get(_K_FETCHED_AT, 0)
+        if age < CACHE_SECONDS_TTL and cached.get(_K_DATA) is not None:
             return CacheResult(cached[_K_DATA])
         return None
-
-    def _stale_result(cached: dict | None) -> CacheResult:
-        """Return stale data as a fallback."""
-        stale_data = (cached or {}).get(_K_DATA)
-        return CacheResult(stale_data, is_stale=stale_data is not None)
 
     # Fast path: no lock needed if cache is fresh or backed off
     if result := _cache_to_result(_read_json(cache_file)):
@@ -323,42 +261,32 @@ def _cached_fetch(cache_name: str, fetch_fn, key: str = "") -> CacheResult:
                     data = fetch_fn()
                 except Exception as e:
                     # Every failure backs off, not just 429: otherwise a dead
-                    # token or endpoint is re-polled by every session each cycle.
-                    prev = _effective_backoff_duration(cached or {})
-                    base = min(max(prev * 2, BACKOFF_BASE), BACKOFF_MAX)
+                    # key or endpoint is re-polled by every session each cycle.
+                    prev = cached or {}
+                    prev_dur = prev.get(_K_BACKOFF_DURATION, 0) if _is_backed_off(prev) else 0
+                    base = min(max(prev_dur * 2, BACKOFF_BASE), BACKOFF_MAX)
                     retry_after = getattr(e, "retry_after", None)
                     if retry_after and retry_after > 0:
                         base = max(base, retry_after)
                     jitter = random.uniform(0, base * 0.5)  # noqa: S311
-                    now = time.time()
-                    obj = dict(cached or {})
-                    obj[_K_BACKOFF_UNTIL] = now + base + jitter
+                    obj = dict(prev)
+                    obj[_K_BACKOFF_UNTIL] = time.time() + base + jitter
                     obj[_K_BACKOFF_DURATION] = base  # store base, not jittered
-                    obj.setdefault(_K_FIRST_FAILURE, now)
                     obj[_K_RATE_LIMITED] = isinstance(e, RateLimitedError)
-                    # A later transient error must not mask a still-bad token.
-                    if isinstance(e, AuthError):
-                        obj[_K_AUTH_ERROR] = True
-                        obj[_K_AUTH_KEY] = key
-                    _write_cache(obj)
+                    _atomic_write_json(cache_file, obj)
                     return CacheResult(
                         obj.get(_K_DATA),
                         is_stale=obj.get(_K_DATA) is not None,
                         is_rate_limited=bool(obj[_K_RATE_LIMITED]),
-                        is_auth_error=bool(obj.get(_K_AUTH_ERROR)),
                     )
 
-                obj = {_K_FETCHED_AT: time.time(), _K_DATA: data}
-                prev = cached or {}
-                for k in (_K_HEADERS_AT, _K_HEADERS):
-                    if prev.get(k) is not None:
-                        obj[k] = prev[k]
-                _write_cache(obj)
+                _atomic_write_json(cache_file, {_K_FETCHED_AT: time.time(), _K_DATA: data})
                 return CacheResult(data)
             finally:
                 fcntl.flock(lf, fcntl.LOCK_UN)
     except Exception:
-        return _stale_result(_read_json(cache_file))
+        stale = (_read_json(cache_file) or {}).get(_K_DATA)
+        return CacheResult(stale, is_stale=stale is not None)
 
 
 # ---------------------------------------------------------------------------
@@ -385,7 +313,8 @@ def _cache_name(slot: str = DEFAULT_SLOT) -> str:
 
 
 def _find_anthropic_token(slot: str = DEFAULT_SLOT) -> str | None:
-    """Find the OAuth bearer token of one account slot for the usage API."""
+    """Find the OAuth access token of one account slot. Only its presence is
+    used (to tell a subscription account from an API-key one); never sent."""
     if tok := _search_configs("auth.json", slot, "access"):
         return tok
     if slot != DEFAULT_SLOT:
@@ -442,51 +371,46 @@ def _parse_iso(value: object) -> datetime | None:
 # ---------------------------------------------------------------------------
 
 
-def _fetch_anthropic_usage(token: str) -> str | None:
-    """Fetch Anthropic usage (cached) and return a short status string."""
-    return _format_anthropic_status(_fetch_anthropic_result(token))
+def _anthropic_cached(slot: str = DEFAULT_SLOT) -> tuple[dict | None, float]:
+    """Last header reading of one account from the shared cache: (windows,
+    headers_at). A local file read — the usage endpoint is never called."""
+    cached = _read_json(_cache_dir() / f"{_cache_name(slot)}-cache.json") or {}
+    data = cached.get(_K_DATA)
+    at = cached.get(_K_HEADERS_AT)
+    if not isinstance(data, dict) or not isinstance(at, (int, float)) or at <= 0:
+        return None, 0.0
+    return data, float(at)
 
 
-def _fetch_anthropic_result(token: str, slot: str = DEFAULT_SLOT) -> CacheResult:
-    key = hashlib.sha256(token.encode()).hexdigest()[:16]
-    return _cached_fetch(
-        _cache_name(slot),
-        lambda: _http_get_json(
-            "https://api.anthropic.com/api/oauth/usage",
-            {
-                "Authorization": f"Bearer {token}",
-                "anthropic-beta": "oauth-2025-04-20",
-                "Accept": "application/json",
-            },
-        ),
-        key,
-    )
+def _fmt_age(seconds: float) -> str:
+    """Compact age of a reading: 'just now', '12m ago', '3h05m ago'."""
+    minutes = max(0, int(seconds // 60))
+    return "just now" if minutes < 1 else f"{_fmt_countdown(minutes)} ago"
 
 
-def _format_anthropic_status(result: CacheResult) -> str | None:
-    if not result.data:
-        if result.is_auth_error:
-            return "☁ (auth error)"
-        return "☁ (rate-limited)" if result.is_rate_limited else None
+def _format_anthropic_status(data: dict | None, age: float) -> str | None:
+    if not data:
+        return None
 
     local_tz = datetime.now().astimezone().tzinfo
     now = datetime.now(timezone.utc).astimezone(local_tz)
 
     parts: list[tuple[float, str]] = []
-    for key, val in result.data.items():
+    for key, val in data.items():
         if key == "extra_usage" or not isinstance(val, dict):
             continue
         util = val.get("utilization")
-        if util is None:
+        if not isinstance(util, (int, float)):
             continue
 
         label = key.replace("_", " ").title().replace("Five Hour", "5h").replace("Seven Day", "7d")
 
         reset_str = ""
         if (dt := _parse_iso(val.get("resets_at"))) is not None:
-            reset_str = _fmt_countdown(
-                max(0, int((dt.astimezone(local_tz) - now).total_seconds()) // 60)
-            )
+            left = int((dt.astimezone(local_tz) - now).total_seconds())
+            if left <= 0:
+                continue  # window reset since this reading: its number is void
+            reset_str = _fmt_countdown(left // 60)
 
         parts.append(
             (util, f"{label} {util:.0f}% ({reset_str})" if reset_str else f"{label} {util:.0f}%")
@@ -496,7 +420,7 @@ def _format_anthropic_status(result: CacheResult) -> str | None:
         return None
 
     parts.sort(key=lambda x: -x[0])
-    return f"☁ {', '.join(p[1] for p in parts[:3])}{result.status_suffix()}"
+    return f"☁ {', '.join(p[1] for p in parts[:3])} · {_fmt_age(age)}"
 
 
 def _fetch_poe_usage(api_key: str) -> str | None:
@@ -529,14 +453,13 @@ def _fetch_poe_usage(api_key: str) -> str | None:
 # ---------------------------------------------------------------------------
 #
 # Each parser takes a response-header map (lowercase names) and returns
-# ``(cache_name, windows, extra)`` or None. ``windows`` uses the usage
-# endpoint's shape — ``{window_key: {"utilization": percent, "resets_at":
-# iso}}`` — so every consumer of the shared cache reads header and endpoint
-# readings alike. ``extra`` is the raw provider-specific detail kept beside
+# ``(cache_name, windows, extra)`` or None. ``windows`` has the shape
+# ``{window_key: {"utilization": percent, "resets_at": iso}}`` that every
+# consumer of the shared cache reads. ``extra`` is the raw provider-specific detail kept beside
 # them. Add a provider by appending to HEADER_PARSERS.
 
 _ANTHROPIC_UNIFIED = "anthropic-ratelimit-unified-"
-# header window prefix -> usage-endpoint window key
+# header window prefix -> cache window key
 _ANTHROPIC_WINDOWS = {"5h": "five_hour", "7d": "seven_day"}
 
 
@@ -613,8 +536,7 @@ def _atomic_write_json(path: Path, obj: object) -> None:
 def _ingest_reading(cache_name: str, windows: dict, extra: dict, now: float) -> None:
     """Merge a header reading into the shared cache and its time-series.
 
-    Shares the cache's flock with :func:`_cached_fetch`. Windows the headers
-    do not carry (e.g. per-model weekly windows) keep their endpoint values.
+    Windows a reading does not carry keep their previous values.
     """
     cd = _cache_dir()
     cd.mkdir(parents=True, exist_ok=True)
@@ -730,20 +652,15 @@ def on_message_end(params: fir_ext.MessageEndParams, ctx: fir_ext.Context) -> No
 #
 # When a Claude subscription account hits its 5-hour or 7-day usage limit, the
 # error says only that a limit was hit. Everything needed to say *when it
-# resets* is already here: the oauth/usage cache this extension maintains, and
+# resets* is already here: the header cache this extension maintains, and
 # the reset instant Anthropic often puts in the error body itself. Sources are
 # consulted cheapest-and-most-authoritative first, and nothing is said at all
 # unless one of them yields a plausible instant.
 
 
 def _cached_usage_windows(slot: str = DEFAULT_SLOT) -> dict[str, dict]:
-    """Read the cached oauth/usage windows — a local file read, never a fetch.
-
-    Deliberately bypasses :func:`_cached_fetch`: that refreshes on expiry,
-    which would put a blocking HTTP call on the error path. The background
-    refresh loop keeps this file within its TTL anyway, and a window's
-    ``resets_at`` does not move while the window is open.
-    """
+    """Read the cached usage windows — a local file read, never a fetch.
+    A window's ``resets_at`` does not move while the window is open."""
     cached = _read_json(_cache_dir() / f"{_cache_name(slot)}-cache.json") or {}
     data = cached.get(_K_DATA)
     if not isinstance(data, dict):
@@ -838,7 +755,7 @@ def on_provider_error(params: fir_ext.ProviderErrorParams, ctx: fir_ext.Context)
     slot = params.get("provider") or ""
     if not _is_anthropic_slot(slot):
         return
-    # OAuth/subscription path only: an API-key account has no oauth/usage
+    # OAuth/subscription path only: an API-key account has no unified
     # windows and no token here. Only the presence of a token is consulted —
     # its value is never read into a message or a log.
     if not _find_anthropic_token(slot):
@@ -975,7 +892,14 @@ def _publish_warnings(
     fresh_w = [w for w in fresh if len(w) == 4]
     if fresh_w:
         texts.append(_warning_text(fresh_w, now))
-    texts += [a[2] for a in fresh if len(a) == 3]
+    fresh_a = [a for a in fresh if len(a) == 3]
+    if mode == "acp":
+        # Alerts (credential health, bursts) never trigger a turn: in ACP that
+        # turn lands in whatever session runs next. The section carries them.
+        fresh_a = []
+    texts += [a[2] for a in fresh_a]
+    if not texts:
+        return
     text = " ".join(texts)
     with contextlib.suppress(Exception):
         if mode == "acp":
@@ -991,41 +915,8 @@ def _publish_warnings(
 
 
 # ---------------------------------------------------------------------------
-# Health alerts: stale data, rejected / unrefreshable credential, login age
+# Credential health: unrefreshable token, login age
 # ---------------------------------------------------------------------------
-
-
-def _usage_health(cached: dict | None, now: float) -> list:
-    """Alerts for usage data that is stale or whose token was rejected."""
-    cached = cached or {}
-    fetched = float(cached.get(_K_FETCHED_AT) or 0)
-    first_fail = float(cached.get(_K_FIRST_FAILURE) or 0)
-    if not first_fail:
-        return []  # last attempt succeeded (or never attempted)
-    episode = int(fetched or first_fail)
-    expiry = now + ALERT_MEMORY
-    if cached.get(_K_AUTH_ERROR):
-        return [
-            (
-                f"auth:{episode}",
-                expiry,
-                "Anthropic usage endpoint rejected the OAuth token (401/403) — "
-                "usage numbers are not live; log in again (/login anthropic).",
-            )
-        ]
-    good = max(fetched, float(cached.get(_K_HEADERS_AT) or 0))
-    since = good or first_fail
-    if now - since <= STALE_AFTER_SECONDS:
-        return []
-    stamp = _fmt_clock(since)
-    what = f"last good data from {stamp}" if good else f"no data since {stamp}"
-    return [
-        (
-            f"stale:{episode}",
-            expiry,
-            f"Anthropic usage data is stale ({what}) — usage warnings may be wrong.",
-        )
-    ]
 
 
 def _fmt_clock(epoch: float) -> str:
@@ -1104,8 +995,8 @@ def _anthropic_credential(slot: str = DEFAULT_SLOT) -> dict | None:
 
 def _apply_config(cfg: dict | None) -> bool:
     """Apply ``provider-usage.json`` overrides; return False when disabled."""
-    global WARN_LEVELS, STALE_AFTER_SECONDS, REFRESH_GRACE_MINUTES, LOGIN_MAX_AGE_DAYS
-    global BURST_POINTS, BURST_WINDOW_SECONDS, HEADER_POLL_SECONDS
+    global WARN_LEVELS, REFRESH_GRACE_MINUTES, LOGIN_MAX_AGE_DAYS
+    global BURST_POINTS, BURST_WINDOW_SECONDS
     if not isinstance(cfg, dict):
         return True
     levels = cfg.get("warn_levels")
@@ -1114,12 +1005,10 @@ def _apply_config(cfg: dict | None) -> bool:
         if vals:
             WARN_LEVELS = tuple(vals)
     for key, name in (
-        ("stale_after_seconds", "STALE_AFTER_SECONDS"),
         ("refresh_grace_minutes", "REFRESH_GRACE_MINUTES"),
         ("login_max_age_days", "LOGIN_MAX_AGE_DAYS"),
         ("burst_points", "BURST_POINTS"),
         ("burst_window_seconds", "BURST_WINDOW_SECONDS"),
-        ("endpoint_poll_seconds", "HEADER_POLL_SECONDS"),
     ):
         v = cfg.get(key)
         if isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0:
@@ -1153,15 +1042,13 @@ def _refresh_once(ctx: fir_ext.Context, poe_key, mode: str) -> None:
     parts = []
     token = _find_anthropic_token(slot) if _is_anthropic_slot(slot) else None
     if token:
-        result = _fetch_anthropic_result(token, slot)
-        if s := _format_anthropic_status(result):
-            parts.append(s)
+        # Header readings only; the token gates the account, it is never sent.
         now = time.time()
-        name = _cache_name(slot)
-        alerts = _usage_health(
-            _read_json(_cache_dir() / f"{name}-cache.json"), now
-        ) + _credential_health(_anthropic_credential(slot), now)
-        _publish_warnings(ctx, result.data, mode, alerts, slot)
+        data, at = _anthropic_cached(slot)
+        if s := _format_anthropic_status(data, now - at):
+            parts.append(s)
+        alerts = _credential_health(_anthropic_credential(slot), now)
+        _publish_warnings(ctx, data, mode, alerts, slot)
     else:
         with contextlib.suppress(Exception):
             ctx.clear_section()

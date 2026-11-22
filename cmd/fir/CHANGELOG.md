@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Changed
+- provider-usage never calls Anthropic's `/api/oauth/usage` endpoint; usage comes only from inference response headers, and a new session shows the last cached reading with its age (`☁ 5h 4% · 12m ago`). The `stale_after_seconds` and `endpoint_poll_seconds` settings are gone (ignored if present).
+
+### Fixed
+- provider-usage no longer raises false "usage endpoint rejected the OAuth token" / stale-data alerts, and its credential-health alerts never trigger a turn in ACP (they spammed unrelated relay chats).
+- provider-usage status drops a cached window whose reset has passed instead of showing its void number.
+
 ## [1.63.3] - 2026-11-21
 
 ### Fixed

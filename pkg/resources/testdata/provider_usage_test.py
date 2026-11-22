@@ -416,47 +416,45 @@ class HealthTest(unittest.TestCase):
         self.assertEqual(len(calls), 1)
         self.assertGreater(self._cache()["backoff_until"], NOW)
 
-    def test_fresh_failure_is_not_stale_yet(self):
-        self._fail(OSError("down"))
-        self.assertEqual(self.mod._usage_health(self._cache(), NOW + 60), [])
+    def test_credential_alert_never_triggers_acp_turn(self):
+        cred = {"access": "x", "refresh": "y", "expires": (NOW - 3600) * 1000}
+        alerts = self.mod._credential_health(cred, NOW)
+        acp, tui = mock.Mock(), mock.Mock()
+        self.mod._publish_warnings(acp, None, "acp", alerts)
+        acp.send_message.assert_not_called()
+        self.assertIn("refresh token", acp.set_section.call_args[0][0])
+        # Claimed once: a later TUI session does not re-announce either.
+        self.mod._publish_warnings(tui, None, "interactive", alerts)
+        tui.notify.assert_not_called()
 
-    def test_long_failure_is_stale_and_announced_once(self):
-        self._fail(OSError("down"))
-        alerts = self.mod._usage_health(self._cache(), NOW + 3600)
-        self.assertEqual(len(alerts), 1)
-        self.assertIn("stale", alerts[0][2])
-        a, b = mock.Mock(), mock.Mock()
-        self.mod._publish_warnings(a, None, "acp", alerts)
-        self.mod._publish_warnings(b, None, "acp", alerts)
-        a.send_message.assert_called_once()
-        b.send_message.assert_not_called()
-        self.assertIn("stale", b.set_section.call_args[0][0])
+    def test_burst_alert_never_triggers_acp_turn(self):
+        alerts = [("burst:R:0", NOW + 3600, "Anthropic usage burst")]
+        ctx = mock.Mock()
+        self.mod._publish_warnings(ctx, None, "acp", alerts)
+        ctx.send_message.assert_not_called()
+        self.assertIn("burst", ctx.set_section.call_args[0][0])
+
+    def test_credential_alert_notifies_in_tui(self):
+        cred = {"access": "x", "refresh": "y", "expires": (NOW - 3600) * 1000}
+        tui = mock.Mock()
+        self.mod._publish_warnings(tui, None, "interactive", self.mod._credential_health(cred, NOW))
+        tui.notify.assert_called_once()
+
+    def test_acp_warning_with_credential_alert_triggers_only_warning(self):
+        cred = {"access": "x", "refresh": "y", "expires": (NOW - 3600) * 1000}
+        data = {"five_hour": {"utilization": 85.0, "resets_at": _iso(3600)}}
+        ctx = mock.Mock()
+        self.mod._publish_warnings(ctx, data, "acp", self.mod._credential_health(cred, NOW))
+        ctx.send_message.assert_called_once()
+        self.assertNotIn("refresh token", ctx.send_message.call_args[0][1])
 
     def test_alert_text_stable_over_time(self):
-        self._fail(OSError("down"))
-        c = self._cache()
-
         def strip(alerts):
             return [(a[0], a[2]) for a in alerts]
 
-        h = self.mod._usage_health
-        self.assertEqual(strip(h(c, NOW + 3600)), strip(h(c, NOW + 7200)))
         cred = {"access": "x", "refresh": "y", "expires": (NOW - 3600) * 1000}
         ch = self.mod._credential_health
         self.assertEqual(strip(ch(cred, NOW)), strip(ch(cred, NOW + 600)))
-
-    def test_new_token_bypasses_auth_backoff(self):
-        calls = []
-
-        def boom():
-            calls.append(1)
-            raise self.mod.AuthError("401")
-
-        self.mod._cached_fetch("anthropic-usage", boom, key="old")
-        self.mod._cached_fetch("anthropic-usage", boom, key="old")
-        self.assertEqual(len(calls), 1)
-        r = self.mod._cached_fetch("anthropic-usage", lambda: {"ok": 1}, key="new")
-        self.assertEqual(r.data, {"ok": 1})
 
     def test_generic_failure_status_is_not_rate_limited(self):
         self.mod._cached_fetch("anthropic-usage", lambda: {"five_hour": {"utilization": 1}})
@@ -465,36 +463,14 @@ class HealthTest(unittest.TestCase):
             self.assertNotIn("rate-limited", r.status_suffix())
             r = self.mod._cached_fetch("anthropic-usage", dict)
             self.assertNotIn("rate-limited", r.status_suffix())
-        with mock.patch.object(self.mod.time, "time", return_value=NOW + 10000):
-            r = self._fail(self.mod.AuthError("401"))
-        self.assertIn("auth", r.status_suffix())
 
-    def test_transient_error_does_not_mask_auth_error(self):
-        self._fail(self.mod.AuthError("401"))
-        with mock.patch.object(self.mod.time, "time", return_value=NOW + 10000):
-            self._fail(OSError("down"))
-        alerts = self.mod._usage_health(self._cache(), NOW + 10001)
-        self.assertIn("401", alerts[0][2])
-
-    def test_auth_error_alerts_immediately(self):
-        self._fail(self.mod.AuthError("401"))
-        alerts = self.mod._usage_health(self._cache(), NOW + 1)
-        self.assertEqual(len(alerts), 1)
-        self.assertIn("401", alerts[0][2])
-
-    def test_success_clears_episode(self):
-        self._fail(OSError("down"))
-        with mock.patch.object(self.mod.time, "time", return_value=NOW + 4000):
-            self.mod._cached_fetch("anthropic-usage", lambda: {"five_hour": {}})
-        self.assertEqual(self.mod._usage_health(self._cache(), NOW + 4001), [])
-
-    def test_http_401_raises_auth_error(self):
+    def test_http_401_is_a_plain_failure(self):
         import email.message
         import urllib.error
 
         err = urllib.error.HTTPError("u", 401, "no", email.message.Message(), None)
         with mock.patch.object(self.mod.urllib.request, "urlopen", side_effect=err):
-            with self.assertRaises(self.mod.AuthError):
+            with self.assertRaises(urllib.error.HTTPError):
                 self.mod._http_get_json("https://example.com", {})
 
     def test_unrefreshed_token_warns(self):
@@ -531,12 +507,15 @@ class HealthTest(unittest.TestCase):
         self.assertFalse(self.mod._apply_config({"enabled": False}))
         self.assertTrue(self.mod._apply_config(None))
 
-    def test_endpoint_poll_seconds_config(self):
-        self.assertEqual(self.mod.HEADER_POLL_SECONDS, 21600)
-        self.assertTrue(self.mod._apply_config({"endpoint_poll_seconds": 3600}))
-        self.assertEqual(self.mod.HEADER_POLL_SECONDS, 3600.0)
-        self.mod._apply_config({"endpoint_poll_seconds": -1})
-        self.assertEqual(self.mod.HEADER_POLL_SECONDS, 3600.0)
+    def test_retired_config_keys_are_ignored(self):
+        cfg = {"endpoint_poll_seconds": 3600, "stale_after_seconds": 60}
+        self.assertTrue(self.mod._apply_config(cfg))
+        self.assertFalse(hasattr(self.mod, "HEADER_POLL_SECONDS"))
+        self.assertFalse(hasattr(self.mod, "STALE_AFTER_SECONDS"))
+
+    def test_never_calls_the_usage_endpoint(self):
+        src = pathlib.Path(self.mod.__file__).read_text()
+        self.assertNotIn("api.anthropic.com", src)
 
     def test_frontmatter_is_builtin(self):
         src = pathlib.Path(self.mod.__file__).read_text()
@@ -652,66 +631,38 @@ class HeaderFeedTest(unittest.TestCase):
         self.mod._ingest_reading("anthropic-usage", {"five_hour": {"utilization": 2.0}}, {}, NOW)
         self.assertEqual(len(self.mod._read_series()), 1)
 
-    def test_fresh_headers_override_endpoint_backoff_and_staleness(self):
-        now = time.time()
-        cached = {
-            "fetched_at": now - 3 * self.mod.STALE_AFTER_SECONDS,
-            "first_failure_at": now - 3 * self.mod.STALE_AFTER_SECONDS,
-            "backoff_until": now + 600,
-            "rate_limited": True,
-            "headers_at": now - 5,
-            "data": {"five_hour": {"utilization": 42.0}},
+    def test_cached_reading_shown_with_age(self):
+        self.mod._ingest_reading(
+            "anthropic-usage",
+            {"five_hour": {"utilization": 4.0}},
+            {},
+            time.time() - 12 * 60 - 5,
+        )
+        data, at = self.mod._anthropic_cached()
+        status = self.mod._format_anthropic_status(data, time.time() - at)
+        self.assertTrue(status.startswith("☁ 5h 4%"), status)
+        self.assertTrue(status.endswith("· 12m ago"), status)
+        self.assertTrue(self.mod._format_anthropic_status(data, 5).endswith("· just now"))
+
+    def test_window_reset_since_reading_is_not_shown(self):
+        data = {
+            "five_hour": {"utilization": 90.0, "resets_at": _iso(time.time() - NOW - 60)},
+            "seven_day": {"utilization": 20.0, "resets_at": _iso(time.time() - NOW + 86400)},
         }
-        (self.dir / "anthropic-usage-cache.json").write_text(json.dumps(cached))
-        res = self.mod._cached_fetch("anthropic-usage", dict)
-        self.assertFalse(res.is_stale or res.is_rate_limited)
-        self.assertEqual(self.mod._usage_health(cached, now), [])
-        # Headers old too: stale again, dated by the newest good reading.
-        cached["headers_at"] = now - 2 * self.mod.STALE_AFTER_SECONDS
-        alerts = self.mod._usage_health(cached, now)
-        self.assertEqual(len(alerts), 1)
-        self.assertIn("last good data from", alerts[0][2])
-        # An auth error still wins over fresh headers.
-        cached.update(headers_at=now - 5, auth_error=True)
-        (self.dir / "anthropic-usage-cache.json").write_text(json.dumps(cached))
-        self.assertTrue(self.mod._cached_fetch("anthropic-usage", dict).is_auth_error)
+        status = self.mod._format_anthropic_status(data, 3600)
+        self.assertNotIn("5h", status)
+        self.assertIn("7d 20%", status)
+        del data["seven_day"]
+        self.assertIsNone(self.mod._format_anthropic_status(data, 3600))
 
-    def test_fresh_headers_defer_endpoint_poll(self):
-        calls = []
-
-        def fetch():
-            calls.append(1)
-            return {"five_hour": {"utilization": 1.0}}
-
-        now = time.time()
+    def test_no_reading_shows_nothing(self):
+        self.assertEqual(self.mod._anthropic_cached(), (None, 0.0))
+        # Old endpoint-only caches (no headers_at) are not shown either.
         (self.dir / "anthropic-usage-cache.json").write_text(
-            json.dumps(
-                {
-                    "fetched_at": now - self.mod.CACHE_SECONDS_TTL - 10,
-                    "headers_at": now - 5,
-                    "data": {"five_hour": {"utilization": 42.0}},
-                }
-            )
+            json.dumps({"fetched_at": 5, "data": {"five_hour": {"utilization": 1.0}}})
         )
-        res = self.mod._cached_fetch("anthropic-usage", fetch)
-        self.assertEqual(calls, [])
-        self.assertEqual(res.data["five_hour"]["utilization"], 42.0)
-
-        # Past HEADER_POLL_SECONDS the endpoint is polled again, and the
-        # header bookkeeping survives the rewrite.
-        (self.dir / "anthropic-usage-cache.json").write_text(
-            json.dumps(
-                {
-                    "fetched_at": now - self.mod.HEADER_POLL_SECONDS - 10,
-                    "headers_at": now - 5,
-                    "headers": {"status": "allowed"},
-                    "data": {},
-                }
-            )
-        )
-        self.mod._cached_fetch("anthropic-usage", fetch)
-        self.assertEqual(calls, [1])
-        self.assertEqual(self._cache()["headers"], {"status": "allowed"})
+        self.assertEqual(self.mod._anthropic_cached(), (None, 0.0))
+        self.assertIsNone(self.mod._format_anthropic_status(None, 0))
 
 
 class BurstTest(unittest.TestCase):
@@ -783,11 +734,12 @@ class ProviderGateTest(unittest.TestCase):
             self.mod, "_find_anthropic_token", side_effect=lambda slot="anthropic": tokens.get(slot)
         ).start()
         mock.patch.object(self.mod, "_find_poe_key", return_value="poe-key").start()
-        self.fetch = mock.patch.object(self.mod, "_fetch_anthropic_result").start()
-        self.fetch.return_value = self.mod.CacheResult({"five_hour": {"utilization": 90}})
+        self.fetch = mock.patch.object(self.mod, "_anthropic_cached").start()
+        self.fetch.return_value = ({"five_hour": {"utilization": 90}}, time.time() - 60)
+        self.http = mock.patch.object(self.mod, "_http_get_json").start()
         self.poe = mock.patch.object(self.mod, "_fetch_poe_usage", return_value="🅿 1k").start()
         self.pub = mock.patch.object(self.mod, "_publish_warnings").start()
-        for name in ("_usage_health", "_credential_health", "_burst_alerts"):
+        for name in ("_credential_health", "_burst_alerts"):
             mock.patch.object(self.mod, name, return_value=[]).start()
         self.series = mock.patch.object(self.mod, "_read_series", return_value=[]).start()
 
@@ -799,14 +751,16 @@ class ProviderGateTest(unittest.TestCase):
 
     def test_default_account_reports_its_own_quota(self):
         ctx = self._run("anthropic")
-        self.fetch.assert_called_once_with("tok-default", "anthropic")
+        self.fetch.assert_called_once_with("anthropic")
         self.assertEqual(self.pub.call_args[0][4], "anthropic")
         self.poe.assert_not_called()
-        self.assertIn("5h", ctx.set_status.call_args[0][0])
+        self.http.assert_not_called()
+        self.assertIn("5h 90%", ctx.set_status.call_args[0][0])
+        self.assertIn("1m ago", ctx.set_status.call_args[0][0])
 
     def test_extra_account_reports_its_own_quota(self):
         self._run("anthropic#acct2")
-        self.fetch.assert_called_once_with("tok-2", "anthropic#acct2")
+        self.fetch.assert_called_once_with("anthropic#acct2")
 
     def test_account_without_token_reports_nothing(self):
         ctx = self._run("anthropic#nologin")
