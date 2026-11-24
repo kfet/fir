@@ -475,6 +475,7 @@ func (m *InteractiveMode) getFooterData() components.FooterData {
 		Pwd:             pwd,
 		AutoCompactMode: m.autoCompactMode,
 		UpdateVersion:   m.UpdateVersion(),
+		UpdateInstalled: m.UpdateInstalled(),
 		Version:         binaryVersion(),
 	}
 

@@ -95,21 +95,24 @@ type DebugLogSettings struct {
 
 // Settings is the full settings schema.
 type Settings struct {
-	DefaultProvider           string                   `json:"defaultProvider,omitempty"`
-	DefaultModel              string                   `json:"defaultModel,omitempty"`
-	DefaultThinkingLevel      string                   `json:"defaultThinkingLevel,omitempty"`
-	Transport                 string                   `json:"transport,omitempty"`
-	SteeringMode              string                   `json:"steeringMode,omitempty"`
-	FollowUpMode              string                   `json:"followUpMode,omitempty"`
-	Theme                     string                   `json:"theme,omitempty"`
-	Compaction                *CompactionSettings      `json:"compaction,omitempty"`
-	BranchSummary             *BranchSummarySettings   `json:"branchSummary,omitempty"`
-	Retry                     *RetrySettings           `json:"retry,omitempty"`
-	HideThinkingBlock         *bool                    `json:"hideThinkingBlock,omitempty"`
-	ShellPath                 string                   `json:"shellPath,omitempty"`
-	ShellCommandPrefix        string                   `json:"shellCommandPrefix,omitempty"`
-	CollapseChangelog         *bool                    `json:"collapseChangelog,omitempty"`
-	TurnCache1h               *bool                    `json:"turnCache1h,omitempty"`
+	DefaultProvider      string                 `json:"defaultProvider,omitempty"`
+	DefaultModel         string                 `json:"defaultModel,omitempty"`
+	DefaultThinkingLevel string                 `json:"defaultThinkingLevel,omitempty"`
+	Transport            string                 `json:"transport,omitempty"`
+	SteeringMode         string                 `json:"steeringMode,omitempty"`
+	FollowUpMode         string                 `json:"followUpMode,omitempty"`
+	Theme                string                 `json:"theme,omitempty"`
+	Compaction           *CompactionSettings    `json:"compaction,omitempty"`
+	BranchSummary        *BranchSummarySettings `json:"branchSummary,omitempty"`
+	Retry                *RetrySettings         `json:"retry,omitempty"`
+	HideThinkingBlock    *bool                  `json:"hideThinkingBlock,omitempty"`
+	ShellPath            string                 `json:"shellPath,omitempty"`
+	ShellCommandPrefix   string                 `json:"shellCommandPrefix,omitempty"`
+	CollapseChangelog    *bool                  `json:"collapseChangelog,omitempty"`
+	TurnCache1h          *bool                  `json:"turnCache1h,omitempty"`
+	// AutoUpdate installs a new fir release in the background once it is a
+	// day old; fir never restarts itself. Default: true.
+	AutoUpdate                *bool                    `json:"autoUpdate,omitempty"`
 	Packages                  []any                    `json:"packages,omitempty"`
 	Extensions                []string                 `json:"extensions,omitempty"`
 	DisabledExtensions        []string                 `json:"disabledExtensions,omitempty"`
@@ -163,6 +166,7 @@ func deepMergeSettings(base, overrides Settings) Settings {
 	mergeBool(&r.HideThinkingBlock, overrides.HideThinkingBlock)
 	mergeBool(&r.CollapseChangelog, overrides.CollapseChangelog)
 	mergeBool(&r.TurnCache1h, overrides.TurnCache1h)
+	mergeBool(&r.AutoUpdate, overrides.AutoUpdate)
 	mergeBool(&r.EnableSkillCommands, overrides.EnableSkillCommands)
 	mergeBool(&r.EnableSysExtensions, overrides.EnableSysExtensions)
 	mergeBool(&r.ShowHardwareCursor, overrides.ShowHardwareCursor)
@@ -984,6 +988,14 @@ func (sm *SettingsManager) GetShellCommandPrefix() string {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 	return sm.settings.ShellCommandPrefix
+}
+
+// GetAutoUpdate reports whether fir installs new releases in the background.
+// Default: true.
+func (sm *SettingsManager) GetAutoUpdate() bool {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	return boolDefault(sm.settings.AutoUpdate, true)
 }
 
 // GetTurnCache1h reports whether interactive sessions write each turn's user

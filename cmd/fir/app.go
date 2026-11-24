@@ -583,25 +583,46 @@ func run() error {
 	// Resolve agentDir early so the version check can use the cache.
 	agentDir := resolveAgentDir()
 
-	// Start async version check for interactive and print modes.
-	// Skipped for machine-to-machine modes (ACP).
-	// The channel always receives exactly one value (the newer version
-	// available, or "" when up to date / the check was skipped or failed).
-	noticeCh := make(chan string, 1)
+	// Start async version check for interactive and print modes, and
+	// auto-update for the long-lived modes (interactive and ACP).
+	// The channel always receives exactly one value: an empty Notice when up
+	// to date or when the check was skipped or failed.
+	noticeCh := make(chan update.Notice, 1)
+	isPrint := args.Print || args.OutputMode == ModeJSON
 	wantUpdateCheck := args.OutputMode != ModeACP
-	if wantUpdateCheck {
+	wantAutoUpdate := !isPrint && os.Getenv(update.EnvNoAutoUpdate) == "" &&
+		config.NewSettingsManager("", agentDir).GetAutoUpdate()
+	if wantUpdateCheck || wantAutoUpdate {
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
 			rel, _ := update.CheckLatest(ctx, version, agentDir)
+			cancel()
+			var n update.Notice
 			if rel != nil {
-				noticeCh <- rel.Version
-			} else {
-				noticeCh <- ""
+				n.Version = rel.Version
 			}
+			if wantAutoUpdate {
+				// The notice waits for the install: it runs once per
+				// release and the TUI shows the notice asynchronously.
+				ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+				installed, err := update.AutoUpdate(ctx, version, agentDir, rel, update.DefaultAutoCooldown)
+				cancel()
+				if err != nil {
+					firlog.Debug("auto-update failed", "err", err)
+				}
+				if installed != "" {
+					n = update.Notice{Version: installed, Installed: true}
+				}
+			}
+			// ACP has no TUI to show the notice: stderr reaches the
+			// relay's log. stdout is the JSON-RPC stream, never use it.
+			if args.OutputMode == ModeACP && n.Installed {
+				fmt.Fprintln(os.Stderr, n.Text())
+			}
+			noticeCh <- n
 		}()
 	} else {
-		noticeCh <- ""
+		noticeCh <- update.Notice{}
 	}
 
 	// printUpdateNotice prints the update notice to stderr (non-blocking).
@@ -1068,11 +1089,11 @@ func extensionConfigDirs(projectDir string) []string {
 // drainUpdateNotice non-blockingly reads the available-update version from
 // noticeCh and prints the notice to stderr if one is available. Used by print
 // mode after the run completes.
-func drainUpdateNotice(noticeCh <-chan string) {
+func drainUpdateNotice(noticeCh <-chan update.Notice) {
 	select {
-	case version := <-noticeCh:
-		if version != "" {
-			fmt.Fprintln(os.Stderr, update.UpdateNotice(version))
+	case n := <-noticeCh:
+		if t := n.Text(); t != "" {
+			fmt.Fprintln(os.Stderr, t)
 		}
 	default:
 		// Check still in flight — skip rather than block.
@@ -1203,7 +1224,7 @@ func runAcpMode(args *Args) error {
 }
 
 // runInteractiveMode runs the full interactive TUI mode.
-func runInteractiveMode(args *Args, noticeCh <-chan string) error {
+func runInteractiveMode(args *Args, noticeCh <-chan update.Notice) error {
 	setup, err := setupSession(args, true)
 	if err != nil {
 		return err
@@ -1297,7 +1318,7 @@ func runInteractiveMode(args *Args, noticeCh <-chan string) error {
 	var ui tui.UI = mode
 
 	// Wire the update notice channel so the TUI shows it at startup.
-	ui.SetUpdateChannel(noticeCh)
+	mode.SetUpdateNotices(noticeCh)
 
 	// --wait-mcp: block until all MCP servers have finished their initial
 	// connect handshake before the TUI starts, so an initial prompt sees

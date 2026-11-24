@@ -52,6 +52,9 @@ type FooterData struct {
 	// UpdateVersion is the newer release available for download (empty when
 	// the running binary is current or the check has not completed).
 	UpdateVersion string
+	// UpdateInstalled is true when UpdateVersion is already installed and
+	// only a restart is needed.
+	UpdateInstalled bool
 	// Version is the version of the running binary (empty renders nothing).
 	Version string
 }
@@ -194,7 +197,7 @@ func (f *FooterComponent) Render(width int) []string {
 	}
 
 	// Update available — persistent, actionable indicator.
-	if badge := updateBadge(data.UpdateVersion); badge != "" {
+	if badge := updateBadge(data.UpdateVersion, data.UpdateInstalled); badge != "" {
 		statsParts = append(statsParts, t.Fg("warning", badge))
 	}
 
@@ -304,10 +307,13 @@ func (f *FooterComponent) Render(width int) []string {
 // version, e.g. "⬆ 0.99.1 · fir update". It returns "" when version is empty
 // (up to date, check disabled, or check not finished yet), which is what
 // makes the indicator disappear once the running binary is current.
-func updateBadge(version string) string {
+func updateBadge(version string, installed bool) string {
 	version = strings.TrimSpace(version)
 	if version == "" {
 		return ""
+	}
+	if installed {
+		return "⬆ " + strings.TrimPrefix(version, "v") + " · restart"
 	}
 	return "⬆ " + strings.TrimPrefix(version, "v") + " · fir update"
 }

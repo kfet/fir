@@ -281,7 +281,7 @@ func TestRecordAsyncRewritesTheCacheEntry(t *testing.T) {
 
 	ch := make(chan shadowOutcome, 1)
 	ch <- shadowOutcome{version: "v1.7.0"} // disagreement
-	<-shadowResolve{ch: ch}.recordAsync(path, "1.7.1", checkedAt)
+	<-shadowResolve{ch: ch}.recordAsync(path, "1.7.1", checkedAt, time.Time{})
 
 	got, ok := readCache(path)
 	if !ok {

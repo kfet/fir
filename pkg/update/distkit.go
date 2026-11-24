@@ -142,7 +142,7 @@ func (s shadowResolve) result(authoritative string) (version string, errText str
 // The returned channel is closed once the record is written. Production
 // ignores it — if the process exits first the next check simply asks again —
 // and tests join on it instead of sleeping.
-func (s shadowResolve) recordAsync(cachePath, authoritative string, checkedAt time.Time) <-chan struct{} {
+func (s shadowResolve) recordAsync(cachePath, authoritative string, checkedAt, published time.Time) <-chan struct{} {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -150,6 +150,7 @@ func (s shadowResolve) recordAsync(cachePath, authoritative string, checkedAt ti
 		writeCache(cachePath, &cacheEntry{
 			CheckedAt:      checkedAt,
 			LatestVersion:  authoritative,
+			PublishedAt:    published,
 			DistkitVersion: version,
 			DistkitError:   errText,
 		})

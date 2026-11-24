@@ -31,16 +31,20 @@ type asset struct {
 	// sums is the URL of the release's checksums.txt, filled in by
 	// pickRelease from the sibling assets.
 	sums string
+	// published is when the release holding this asset was published.
+	published time.Time
 }
 
 // checksumsName is the goreleaser checksum file fir-dist publishes.
 const checksumsName = "checksums.txt"
 
 type ghRelease struct {
-	Tag        string  `json:"tag_name"`
-	Draft      bool    `json:"draft"`
-	Prerelease bool    `json:"prerelease"`
-	Assets     []asset `json:"assets"`
+	Tag        string `json:"tag_name"`
+	Draft      bool   `json:"draft"`
+	Prerelease bool   `json:"prerelease"`
+	// PublishedAt drives the auto-update cool-down.
+	PublishedAt time.Time `json:"published_at"`
+	Assets      []asset   `json:"assets"`
 }
 
 var reVersion = regexp.MustCompile(`\d+\.\d+\.\d+`)
@@ -145,6 +149,7 @@ func pickRelease(rels []ghRelease, goos, goarch string, goarm int) (*asset, stri
 			}
 			if best == nil || v.GreaterThan(bestV) {
 				c := *a
+				c.published = r.PublishedAt
 				for _, o := range r.Assets {
 					if o.Name == checksumsName {
 						c.sums = o.URL

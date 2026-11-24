@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Added
+- **Auto-update**: interactive and ACP sessions install a new release in the background once it is 24h old, then say `fir X installed — restart fir to use it` (TUI notice and footer badge; stderr in ACP). fir never restarts itself. Skips dev builds, Homebrew installs and read-only install dirs; backs off 6h after a failure. Turn off with `"autoUpdate": false` or `FIR_NO_AUTO_UPDATE=1`.
+
 ## [1.64.0] - 2026-11-23
 
 ### Added

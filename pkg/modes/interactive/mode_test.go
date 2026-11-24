@@ -2384,7 +2384,7 @@ func TestStartUpdateNoticeWatcher_ShowsNotice(t *testing.T) {
 	tm := newTestMode(t)
 	ch := make(chan string, 1)
 	ch <- "1.0.0"
-	tm.mode.updateCh = ch
+	tm.mode.SetUpdateChannel(ch)
 
 	before := tm.messageCount()
 	tm.mode.startUpdateNoticeWatcher()
@@ -2410,7 +2410,7 @@ func TestStartUpdateNoticeWatcher_EmptyNotice(t *testing.T) {
 	tm := newTestMode(t)
 	ch := make(chan string, 1)
 	ch <- "" // empty — up to date
-	tm.mode.updateCh = ch
+	tm.mode.SetUpdateChannel(ch)
 
 	before := tm.messageCount()
 	tm.mode.startUpdateNoticeWatcher()
@@ -2424,7 +2424,7 @@ func TestStartUpdateNoticeWatcher_EmptyNotice(t *testing.T) {
 func TestStartUpdateNoticeWatcher_ContextCancel(t *testing.T) {
 	tm := newTestMode(t)
 	ch := make(chan string) // unbuffered — will not send until cancelled
-	tm.mode.updateCh = ch
+	tm.mode.SetUpdateChannel(ch)
 
 	// Cancel the mode context immediately; goroutine should exit cleanly.
 	tm.mode.cancel()
@@ -2459,7 +2459,7 @@ func TestStartUpdateNoticeWatcher_SetsFooterVersion(t *testing.T) {
 	tm := newTestMode(t)
 	ch := make(chan string, 1)
 	ch <- "1.0.0"
-	tm.mode.updateCh = ch
+	tm.mode.SetUpdateChannel(ch)
 
 	tm.mode.startUpdateNoticeWatcher()
 
@@ -2481,7 +2481,7 @@ func TestStartUpdateNoticeWatcher_EmptyLeavesFooterClean(t *testing.T) {
 	tm := newTestMode(t)
 	ch := make(chan string, 1)
 	ch <- ""
-	tm.mode.updateCh = ch
+	tm.mode.SetUpdateChannel(ch)
 
 	tm.mode.startUpdateNoticeWatcher()
 

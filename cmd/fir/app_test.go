@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"github.com/kfet/fir/pkg/update"
 	"io"
 	"net/http"
 	"os"
@@ -505,8 +506,8 @@ func TestResolveAgentDir_EnvOverride(t *testing.T) {
 // ============================================================================
 
 func TestDrainUpdateNotice_WithNotice(t *testing.T) {
-	ch := make(chan string, 1)
-	ch <- "1.0.0"
+	ch := make(chan update.Notice, 1)
+	ch <- update.Notice{Version: "1.0.0"}
 	// drainUpdateNotice should not block and should consume the message
 	drainUpdateNotice(ch)
 	if len(ch) != 0 {
@@ -515,8 +516,8 @@ func TestDrainUpdateNotice_WithNotice(t *testing.T) {
 }
 
 func TestDrainUpdateNotice_EmptyNotice(t *testing.T) {
-	ch := make(chan string, 1)
-	ch <- "" // empty — up to date, nothing to print
+	ch := make(chan update.Notice, 1)
+	ch <- update.Notice{} // empty — up to date, nothing to print
 	drainUpdateNotice(ch)
 	if len(ch) != 0 {
 		t.Error("expected channel to be drained even for empty notice")
@@ -524,7 +525,7 @@ func TestDrainUpdateNotice_EmptyNotice(t *testing.T) {
 }
 
 func TestDrainUpdateNotice_NoValue_NonBlocking(t *testing.T) {
-	ch := make(chan string, 1)
+	ch := make(chan update.Notice, 1)
 	// Channel is empty — drainUpdateNotice must not block.
 	done := make(chan struct{})
 	go func() {

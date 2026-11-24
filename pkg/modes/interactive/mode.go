@@ -156,12 +156,15 @@ type InteractiveMode struct {
 	// updateCh receives a single available-release version string (or "")
 	// when the background version check completes. Shown in the TUI at
 	// startup and, persistently, in the footer.
-	updateCh <-chan string
+	updateCh <-chan update.Notice
 
 	// updateVersion holds the newer release version once the background check
 	// reports one. Read by getFooterData on every render, written by the
 	// update-notice watcher goroutine — hence atomic.
 	updateVersion atomic.Pointer[string]
+	// updateInstalled is true when updateVersion is already on disk and only
+	// a restart is needed.
+	updateInstalled atomic.Bool
 
 	// clipboardReader reads an image from the system clipboard.
 	// Defaults to clipboard.ReadClipboardImage; can be replaced in tests.
@@ -468,6 +471,14 @@ func mcpStateWord(k mcp.ServerEventKind) string {
 // completes.  When it is non-empty the TUI shows a one-shot notice in the
 // message area and a persistent indicator in the footer.
 func (m *InteractiveMode) SetUpdateChannel(ch <-chan string) {
+	nc := make(chan update.Notice, 1)
+	m.updateCh = nc
+	go func() { nc <- update.Notice{Version: <-ch} }()
+}
+
+// SetUpdateNotices is SetUpdateChannel for a check that can also report an
+// installed update (see update.Notice).
+func (m *InteractiveMode) SetUpdateNotices(ch <-chan update.Notice) {
 	m.updateCh = ch
 }
 
@@ -481,6 +492,10 @@ func (m *InteractiveMode) UpdateVersion() string {
 	return ""
 }
 
+// UpdateInstalled reports whether UpdateVersion is already installed and
+// only a restart is needed.
+func (m *InteractiveMode) UpdateInstalled() bool { return m.updateInstalled.Load() }
+
 // startUpdateNoticeWatcher spawns a goroutine that waits for the version
 // check result on m.updateCh and shows a notice if available. The goroutine
 // exits silently when the mode context is cancelled.
@@ -489,13 +504,16 @@ func (m *InteractiveMode) startUpdateNoticeWatcher() {
 		select {
 		case <-m.ctx.Done():
 			return
-		case version := <-m.updateCh:
-			if version != "" {
+		case n := <-m.updateCh:
+			if version := n.Version; version != "" {
 				// Store before showing: showMessage triggers the render that
 				// reads updateVersion for the footer, so the badge and the
 				// one-shot notice land in the same frame.
 				m.updateVersion.Store(&version)
-				m.showMessage(update.UpdateNotice(version))
+				if n.Installed {
+					m.updateInstalled.Store(true)
+				}
+				m.showMessage(n.Text())
 			}
 		}
 	}()

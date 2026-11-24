@@ -42,6 +42,8 @@ type Release struct {
 	Version string
 	// inner is the matched platform asset (nil for cache-only results).
 	inner *asset
+	// PublishedAt is when the release was published (zero when unknown).
+	PublishedAt time.Time
 }
 
 // cacheEntry is persisted to agentDir/update-check.json to limit API calls.
@@ -51,6 +53,8 @@ type Release struct {
 type cacheEntry struct {
 	CheckedAt     time.Time `json:"checked_at"`
 	LatestVersion string    `json:"latest_version"`
+	// PublishedAt lets the auto-update cool-down run from the cache alone.
+	PublishedAt time.Time `json:"published_at,omitempty"`
 	// DistkitVersion is what the dormant distkit resolver returned for the
 	// same check, and DistkitError what it failed with. They are recorded
 	// so a fleet sweep can grep update-check.json for disagreement without
@@ -91,7 +95,7 @@ func checkLatest(ctx context.Context, currentVersion, cacheDir string, forceRefr
 			if !IsNewer(entry.LatestVersion, currentVersion) {
 				return nil, nil
 			}
-			return &Release{Version: entry.LatestVersion}, nil
+			return &Release{Version: entry.LatestVersion, PublishedAt: entry.PublishedAt}, nil
 		}
 	}
 
@@ -117,13 +121,13 @@ func checkLatest(ctx context.Context, currentVersion, cacheDir string, forceRefr
 	// The shadow rewrites this entry when it lands, and if the process exits
 	// first the next check simply asks again.
 	checkedAt := time.Now()
-	writeCache(cachePath, &cacheEntry{CheckedAt: checkedAt, LatestVersion: version})
-	shadowCh.recordAsync(cachePath, version, checkedAt)
+	writeCache(cachePath, &cacheEntry{CheckedAt: checkedAt, LatestVersion: version, PublishedAt: latest.published})
+	shadowCh.recordAsync(cachePath, version, checkedAt, latest.published)
 
 	if !IsNewer(version, currentVersion) {
 		return nil, nil
 	}
-	return &Release{Version: version, inner: latest}, nil
+	return &Release{Version: version, inner: latest, PublishedAt: latest.published}, nil
 }
 
 // FetchLatest fetches the latest release from the public distribution repo
@@ -140,7 +144,7 @@ func fetchLatestFrom(ctx context.Context, base string) (*Release, error) {
 	if !found {
 		return nil, fmt.Errorf("no release found for %s/%s", repoOwner, repoName)
 	}
-	return &Release{Version: version, inner: latest}, nil
+	return &Release{Version: version, inner: latest, PublishedAt: latest.published}, nil
 }
 
 // SelfUpdate downloads the release binary for the current platform and
