@@ -38,6 +38,12 @@ type BridgeAPI interface {
 	// configured default has gone unavailable. Returns nil when no registry
 	// is reachable (e.g. the auth helper's nop bridge).
 	GetAvailableModels() []*ai.Model
+	// GetProviderModelIDs returns the IDs of every model the session's
+	// registry defines for provider — built-in, extension-registered and
+	// catalog-overlay alike — regardless of live availability. Handed to
+	// auth/list_models so a probing extension checks overlay-added IDs too.
+	// Returns nil when no registry is reachable.
+	GetProviderModelIDs(provider string) []string
 	// GetClientVersion returns the effective third-party client version pin
 	// for key (a catalog-overlay clientVersions JSON name, e.g.
 	// "claudeCode"): the newer of the published overlay's value and the

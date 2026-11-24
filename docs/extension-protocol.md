@@ -1391,6 +1391,11 @@ A hook that makes its **own** HTTP request cannot be post-processed by fir, so
 }
 ```
 
+It also receives `model_ids`: every model ID fir's registry defines for the
+provider (built-in, extension-declared and catalog-overlay alike), so a hook
+that probes IDs one by one checks overlay-added models too instead of hiding
+them. Absent when no registry is reachable; treat it as optional.
+
 In the Python SDK, read it with `ctx.client_version("claudeCode")` (a plain
 dict lookup, no RPC) and apply it with `str.replace`. It is the same validated
 scalar from the same source — a convenience on top of the one mechanism, not a

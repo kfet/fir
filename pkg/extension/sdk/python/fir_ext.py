@@ -359,7 +359,10 @@ left literal and warned about once.
 A hook that makes its OWN HTTP request cannot be post-processed, so
 ``auth/list_models`` receives ``{"client_versions": {"claudeCode": "2.1.280"}}``
 in its params; read it with :meth:`AuthContext.client_version` (a plain dict
-lookup, no RPC) and apply it with ``str.replace``.
+lookup, no RPC) and apply it with ``str.replace``. It also receives
+``model_ids`` (optional): every model ID fir's registry defines for the
+provider, catalog-overlay additions included, so a probing hook checks those
+too.
 
 
 EXTENSION → FIR CALLS  (extension → fir, Request)

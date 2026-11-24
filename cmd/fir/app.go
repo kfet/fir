@@ -843,13 +843,14 @@ func runUpdateCheck() error {
 
 // runListModels lists available models and exits.
 func runListModels(args *Args) error {
-	agentDir := resolveAgentDir()
-
-	authStorage := auth.NewAuthStorage(filepath.Join(agentDir, "auth.json"))
-	modelRegistry := models.NewModelRegistry(authStorage, filepath.Join(agentDir, "models.json"))
+	modelRegistry, cleanup, err := listModelsRegistry(args)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
 
 	if args.ApiKey != "" && args.Provider != "" {
-		authStorage.SetRuntimeApiKey(args.Provider, args.ApiKey)
+		modelRegistry.AuthStorage().SetRuntimeApiKey(args.Provider, args.ApiKey)
 	}
 
 	models := modelRegistry.GetAll()
@@ -878,6 +879,19 @@ func runListModels(args *Args) error {
 	return nil
 }
 
+// listModelsRegistry returns a model registry for the --list-models paths.
+// Extension-declared providers (google-antigravity and friends) register
+// their models only when extensions run, so a bare registry would silently
+// omit them; extensions are loaded unless --no-extensions is set.
+func listModelsRegistry(args *Args) (*models.ModelRegistry, func(), error) {
+	if args.NoExtensions {
+		agentDir := resolveAgentDir()
+		authStorage := auth.NewAuthStorage(filepath.Join(agentDir, "auth.json"))
+		return models.NewModelRegistry(authStorage, filepath.Join(agentDir, "models.json")), func() {}, nil
+	}
+	return startExtensionHost(args, "list-models")
+}
+
 // runListAvailableModels lists models that are authenticated and confirmed
 // available by the provider's live model list, then exits.
 func runListAvailableModels(args *Args) error {
@@ -892,14 +906,16 @@ func runListAvailableModels(args *Args) error {
 		}
 	}
 
-	agentDir := resolveAgentDir()
-	cacheDir := filepath.Join(agentDir, "cache")
+	cacheDir := filepath.Join(resolveAgentDir(), "cache")
 
-	authStorage := auth.NewAuthStorage(filepath.Join(agentDir, "auth.json"))
-	modelRegistry := models.NewModelRegistry(authStorage, filepath.Join(agentDir, "models.json"))
+	modelRegistry, cleanup, err := listModelsRegistry(args)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
 
 	if args.ApiKey != "" && args.Provider != "" {
-		authStorage.SetRuntimeApiKey(args.Provider, args.ApiKey)
+		modelRegistry.AuthStorage().SetRuntimeApiKey(args.Provider, args.ApiKey)
 	}
 
 	// Kick off live model fetches and wait up to 10s for them to finish.

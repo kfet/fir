@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Antigravity models stay current with no account.** The nightly model-watch reads Antigravity model IDs from router-for-me/models and their numbers from models.dev (limits: the smaller of both; cost: zero), and proposes them in a new `extensionProviders` section of the catalog overlay. It only adds, at most 8 per run, with its own anomaly guard; when aggregator churn trips the global cap, the run still opens an overlay-only PR for them.
+
+### Fixed
+
+- `fir --list-models` and `--list-available-models` showed no models for extension-registered providers such as `google-antigravity`: they now load extensions (unless `--no-extensions`).
+- The Antigravity live probe now checks every model ID fir knows for the provider (`auth/list_models` gets `model_ids`), so catalog-overlay models are no longer hidden.
+- `TestFiles_ApprovalRequired` no longer fails on macOS, where the temp dir is reported through its resolved `/private/var` path.
+
+### Changed
+
+- Antigravity models report zero cost: the service is subscription-billed, so per-token API prices overstated session cost.
+
 ## [1.63.4] - 2026-11-22
 
 ### Changed

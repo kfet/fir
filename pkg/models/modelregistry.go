@@ -956,8 +956,9 @@ func (r *ModelRegistry) loadCustomModels(modelsJsonPath string, overlay *Catalog
 	origins := make(map[string]string)
 
 	if overlay != nil {
-		mergeModelsConfig(config, overlay.modelsConfig())
-		recordOrigins(origins, overlay.modelsConfig(), OriginOverlay)
+		oc := overlay.runtimeModelsConfig()
+		mergeModelsConfig(config, oc)
+		recordOrigins(origins, oc, OriginOverlay)
 	}
 
 	if modelsJsonPath != "" {
@@ -1145,15 +1146,26 @@ func mergeModelDefs(base, overlay []ModelDefinition) []ModelDefinition {
 }
 
 func validateModelsConfig(config *ModelsConfig) error {
+	return validateModelsConfigWith(config, registeredProviders())
+}
+
+// registeredProviders is the set of providers that currently have models in
+// the ai registry: compiled-in ones plus any an extension has registered.
+func registeredProviders() func(string) bool {
+	set := make(map[string]bool, len(ai.GetProviders()))
+	for _, p := range ai.GetProviders() {
+		set[string(p)] = true
+	}
+	return func(name string) bool { return set[name] }
+}
+
+// validateModelsConfigWith validates config, treating providers for which
+// isBuiltIn reports true as built-in (baseUrl / apiKey / api inherited).
+func validateModelsConfigWith(config *ModelsConfig, isBuiltIn func(string) bool) error {
 	// Built-in providers can define custom models without specifying baseUrl / apiKey / api;
 	// those fields are inherited from the first built-in model for the provider.
-	builtInProviders := make(map[string]bool, len(ai.GetProviders()))
-	for _, p := range ai.GetProviders() {
-		builtInProviders[string(p)] = true
-	}
-
 	for providerName, providerConfig := range config.Providers {
-		isBuiltIn := builtInProviders[providerName]
+		isBuiltIn := isBuiltIn(providerName)
 		hasModels := len(providerConfig.Models) > 0
 		hasModelOverrides := len(providerConfig.ModelOverrides) > 0
 

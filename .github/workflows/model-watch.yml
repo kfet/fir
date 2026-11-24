@@ -3,7 +3,9 @@ name: model-watch
 # Notice new models automatically.
 #
 # Nightly: regenerate the model catalog from upstream (models.dev, OpenRouter,
-# Vercel AI Gateway, Poe, SWE-bench) and, when upstream has models fir does not
+# Vercel AI Gateway, Poe, SWE-bench; Google Antigravity model IDs from
+# router-for-me/models, with numbers from models.dev — no account needed) and,
+# when upstream has models fir does not
 # know about, open a PR with the regenerated catalog plus a report of what is
 # new and which curated fields still need a human.
 #
@@ -110,6 +112,7 @@ jobs:
             # the vendor sometimes raises the gate on models fir already
             # ships, so a night with no new model but a moved pin matters.
             echo "pin=$(jq -r '.client_version_bump // ""' "$SUMMARY")"
+            echo "overlay_only=$(jq -r '.overlay_only // false' "$SUMMARY")"
           } >> "$GITHUB_OUTPUT"
 
       - name: Open or update the PR
@@ -120,6 +123,7 @@ jobs:
           SHORT: ${{ steps.decide.outputs.short }}
           COUNT: ${{ steps.decide.outputs.count }}
           PIN: ${{ steps.decide.outputs.pin }}
+          OVERLAY_ONLY: ${{ steps.decide.outputs.overlay_only }}
         run: |
           set -euo pipefail
 
@@ -128,7 +132,13 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -B "$BRANCH"
-          git add pkg/ai/models_catalog.bin pkg/models/catalog-v1.json
+          # overlay_only: the compiled catalog tripped the anomaly cap, so
+          # only the overlay (Antigravity models, client pin) is proposed.
+          if [ "$OVERLAY_ONLY" = "true" ]; then
+            git add pkg/models/catalog-v1.json
+          else
+            git add pkg/ai/models_catalog.bin pkg/models/catalog-v1.json
+          fi
           if git diff --cached --quiet; then
             echo "::notice::nothing to commit"
             exit 0

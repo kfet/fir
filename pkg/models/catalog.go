@@ -132,6 +132,16 @@ type CatalogOverlay struct {
 	ClientVersions *CatalogClientVersions `json:"clientVersions,omitempty"`
 	// Providers is a models.d-shaped fragment.
 	Providers map[string]ProviderConfig `json:"providers"`
+	// ExtensionProviders has the Providers shape but targets providers that
+	// an EXTENSION registers at runtime (google-antigravity), not the
+	// compiled-in catalog. It is a separate field, not part of Providers,
+	// because binaries that predate it validate Providers against the
+	// compiled-in providers and would reject the whole document — clientVersions
+	// pin included — for naming one they do not know yet. Old binaries
+	// ignore this field. New binaries merge each entry only once its provider
+	// is registered; until then it is deferred, never an error. Same
+	// endpoint/credential ban as Providers.
+	ExtensionProviders map[string]ProviderConfig `json:"extensionProviders,omitempty"`
 }
 
 // CatalogClientVersions is a CLOSED set. A struct, deliberately not a
@@ -252,6 +262,52 @@ func (o *CatalogOverlay) modelsConfig() *ModelsConfig {
 	return &ModelsConfig{Providers: o.Providers}
 }
 
+// runtimeModelsConfig is what the registry merges: Providers plus every
+// ExtensionProviders entry whose provider is currently registered. Entries
+// for providers not (yet) registered are skipped; the Refresh that follows
+// extension startup picks them up.
+func (o *CatalogOverlay) runtimeModelsConfig() *ModelsConfig {
+	if len(o.ExtensionProviders) == 0 {
+		return o.modelsConfig()
+	}
+	registered := registeredProviders()
+	out := &ModelsConfig{}
+	add := func(name string, pc ProviderConfig) {
+		// Clone the maps mergeModelsConfig writes into, so merging never
+		// mutates the parsed document.
+		mergeModelsConfig(out, &ModelsConfig{Providers: map[string]ProviderConfig{name: cloneProviderConfig(pc)}})
+	}
+	for name, pc := range o.Providers {
+		add(name, pc)
+	}
+	for name, pc := range o.ExtensionProviders {
+		if registered(name) {
+			add(name, pc)
+		}
+	}
+	return out
+}
+
+// cloneProviderConfig copies the slices and maps of pc that a merge mutates.
+func cloneProviderConfig(pc ProviderConfig) ProviderConfig {
+	pc.Models = append([]ModelDefinition(nil), pc.Models...)
+	if pc.ModelOverrides != nil {
+		m := make(map[string]ModelOverride, len(pc.ModelOverrides))
+		for k, v := range pc.ModelOverrides {
+			m[k] = v
+		}
+		pc.ModelOverrides = m
+	}
+	if pc.Headers != nil {
+		h := make(map[string]string, len(pc.Headers))
+		for k, v := range pc.Headers {
+			h[k] = v
+		}
+		pc.Headers = h
+	}
+	return pc
+}
+
 // ParseCatalogOverlay decodes and validates a catalog document. Every rejection
 // is an error the caller turns into "ignore this document" — never a
 // user-visible failure. Exported so cmd/generate-models can validate an
@@ -273,11 +329,22 @@ func ParseCatalogOverlay(data []byte) (*CatalogOverlay, error) {
 	if err := validateCatalogProviders(o.Providers); err != nil {
 		return nil, err
 	}
+	if err := validateCatalogProviders(o.ExtensionProviders); err != nil {
+		return nil, fmt.Errorf("extensionProviders: %w", err)
+	}
 	if err := validateCatalogClientVersions(o.ClientVersions); err != nil {
 		return nil, err
 	}
 	if err := validateModelsConfig(o.modelsConfig()); err != nil {
 		return nil, err
+	}
+	// Extension providers are not registered when a document is parsed (the
+	// generator, startup before extensions), so check structure only: every
+	// one counts as built-in, since the overlay cannot carry an endpoint
+	// anyway and so can only target a provider some code registers.
+	allBuiltIn := func(string) bool { return true }
+	if err := validateModelsConfigWith(&ModelsConfig{Providers: o.ExtensionProviders}, allBuiltIn); err != nil {
+		return nil, fmt.Errorf("extensionProviders: %w", err)
 	}
 	return &o, nil
 }

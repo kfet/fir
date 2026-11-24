@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -307,6 +308,44 @@ func TestRunListModels_WithPattern(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runListModels returned error: %v", err)
 	}
+}
+
+// TestRunListModels_IncludesExtensionProviders is the regression test for
+// --list-models printing zero google-antigravity models: the provider and its
+// models are registered by an extension, which the listing never loaded.
+func TestRunListModels_IncludesExtensionProviders(t *testing.T) {
+	agentDir := t.TempDir()
+	t.Setenv("FIR_AGENT_DIR", agentDir)
+	providers.RegisterDefaultProviders()
+
+	out := captureListModels(t, &Args{ListModels: "google-antigravity", Extensions: []string{"antigravity-auth"}})
+	if !strings.Contains(out, "google-antigravity/gemini-3-flash") {
+		t.Fatalf("extension-registered models missing from --list-models:\n%s", out)
+	}
+}
+
+// captureListModels runs runListModels and returns what it printed.
+func captureListModels(t *testing.T, args *Args) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	orig := os.Stdout
+	os.Stdout = w
+	done := make(chan string)
+	go func() {
+		b, _ := io.ReadAll(r)
+		done <- string(b)
+	}()
+	runErr := runListModels(args)
+	os.Stdout = orig
+	w.Close()
+	out := <-done
+	if runErr != nil {
+		t.Fatalf("runListModels: %v", runErr)
+	}
+	return out
 }
 
 // ============================================================================

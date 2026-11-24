@@ -448,6 +448,22 @@ endpoint and auth stay under operator control, so a typo in a published catalog
 can never redirect the fleet's credentials. It follows that the overlay can only
 add models to providers fir already knows about.
 
+**Extension providers (`extensionProviders`).** Providers that an extension
+registers at runtime (e.g. `google-antigravity` from `antigravity_auth.py`)
+take their overlay models from a separate top-level `extensionProviders`
+section of the same shape. Each entry applies once its provider is registered
+(the registry refreshes after extensions start); before that, or under
+`--no-extensions`, it is skipped, never an error. Binaries that predate the
+field ignore it. The nightly `model-watch` job keeps Antigravity current with
+no account: IDs come from
+`https://raw.githubusercontent.com/router-for-me/models/main/models.json`
+(key `antigravity`), numbers and capabilities from models.dev (the tier
+suffix `-low/-high/-xhigh/-thinking/-tiered` stripped to find the base
+model), context/max tokens the smaller of the two, cost always zero
+(subscription-billed). It only ever adds (at most 8 per run), never removes.
+The extension's live probe (`auth/list_models`) checks every ID the registry
+holds for the provider — overlay additions included, passed as `model_ids`.
+
 - Fetched at startup and then every hour for the life of the session, cached
   at `<agent-dir>/cache/catalog-v1.json`; a changed catalog is hot-applied, so
   even a bot process that has been up for weeks follows within the TTL.
@@ -456,6 +472,8 @@ add models to providers fir already knows about.
   at debug, never a degradation.
 - Force a refresh with `/reload`, which refetches ignoring the TTL and
   hot-applies a changed catalog to the running session.
+- `fir --list-models` loads extensions (unless `--no-extensions`), so
+  extension-registered providers such as `google-antigravity` are listed.
 - `fir --list-models --verbose` prints each model's origin
   (`builtin` / `overlay` / `user:models.json` / `user:models.d/<file>`) so you
   can see which layer won.

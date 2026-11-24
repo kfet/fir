@@ -75,9 +75,19 @@ type watchResult struct {
 	// 2.1.291"), which is a qualifying event in its own right: a vendor
 	// sometimes raises the gate on models fir already ships, and a night with
 	// no new model but a moved pin still matters.
-	ClientVersionBump string      `json:"client_version_bump,omitempty"`
-	Failed            []string    `json:"sources_failed,omitempty"`
-	specs             []modelSpec // qualifying specs, in report order
+	ClientVersionBump string   `json:"client_version_bump,omitempty"`
+	Failed            []string `json:"sources_failed,omitempty"`
+	// OverlayOnly means the compiled catalog is anomalous and must not be
+	// committed: the PR carries only the overlay (extension-provider models,
+	// client version pin).
+	OverlayOnly bool `json:"overlay_only,omitempty"`
+	// Deferred are new extension-provider models past the per-run cap;
+	// a later run adds them.
+	Deferred []string `json:"deferred,omitempty"`
+	// Notes are per-model caveats for the report (e.g. an Antigravity id
+	// with no models.dev match).
+	Notes []string    `json:"-"`
+	specs []modelSpec // qualifying specs, in report order
 	// known and defaults are the runtime baseline (compiled + overlay) the
 	// default-successor check resolves against; nil means compiled-only.
 	known    map[modelKey]bool
@@ -120,9 +130,11 @@ func knownModels(compiled map[modelKey]*ai.Model, overlayPath string) (map[model
 		log.Printf("Warning: catalog overlay invalid (%v); treating overlay models as unknown", err)
 		return known, nil
 	}
-	for provider, pc := range overlay.Providers {
-		for _, m := range pc.Models {
-			known[modelKey{provider, m.ID}] = true
+	for _, section := range []map[string]models.ProviderConfig{overlay.Providers, overlay.ExtensionProviders} {
+		for provider, pc := range section {
+			for _, m := range pc.Models {
+				known[modelKey{provider, m.ID}] = true
+			}
 		}
 	}
 	return known, overlay.ProviderDefaults
@@ -196,15 +208,39 @@ func compareCatalogs(fresh []modelSpec, overlayPath, trigger string) *watchResul
 		return modelKey{res.specs[i].Provider, res.specs[i].ID}.String() <
 			modelKey{res.specs[j].Provider, res.specs[j].ID}.String()
 	})
+	res.specs, res.Deferred = capExtensionAdditions(res.specs)
+
+	// Extension-provider models (Antigravity) have their own source, their
+	// own per-run cap and their own anomaly guard, and only ever touch the
+	// overlay. They neither count toward qualifyingCap nor get starved by it:
+	// a flood of aggregator churn still yields an overlay-only PR for them.
+	var ext, other []modelSpec
+	for _, m := range res.specs {
+		if extensionProviders[m.Provider] {
+			ext = append(ext, m)
+		} else {
+			other = append(other, m)
+		}
+	}
+	if a := extensionAnomaly(ext, res.Deferred, known); a != "" {
+		res.Anomaly = a
+		ext, res.Deferred = nil, nil
+		res.specs = other
+	}
+	if len(other) > qualifyingCap {
+		res.Anomaly = joinAnomaly(res.Anomaly, fmt.Sprintf(
+			"%d qualifying new models (cap %d) — upstream anomaly, not proposing them", len(other), qualifyingCap))
+		res.specs = ext
+		res.OverlayOnly = true
+	}
 	// Qualifying is the reported view of specs — one list, one order.
 	for _, m := range res.specs {
 		res.Qualifying = append(res.Qualifying, modelKey{m.Provider, m.ID}.String())
 	}
 
 	switch {
-	case len(res.Qualifying) > qualifyingCap:
-		res.Anomaly = fmt.Sprintf("%d qualifying new models (cap %d) — upstream anomaly, not opening a PR",
-			len(res.Qualifying), qualifyingCap)
+	case res.OverlayOnly:
+		res.OpenPR = len(res.Qualifying) > 0
 	case trigger == triggerAnyDiff:
 		res.OpenPR = len(res.Qualifying) > 0 || res.Changed > 0 || len(res.Removed) > 0
 	default:
@@ -548,7 +584,10 @@ func writeReport(path string, res *watchResult, overlayAdded []string) error {
 			m.Name, m.ContextWindow, m.MaxTokens, m.CostInput, m.CostOutput, m.Reasoning)
 
 		fKey, f := flagship(m, compiled)
-		if f == nil {
+		if extensionProviders[m.Provider] {
+			fmt.Fprintf(&b, "- served by an extension provider: id from %s, limits the smaller of "+
+				"models.dev and %s, cost zero (subscription-billed)\n", antigravitySource, antigravitySource)
+		} else if f == nil {
 			fmt.Fprintf(&b, "- no compiled-in relative of lineage `%s` to compare against — "+
 				"curated fields must be decided from scratch\n", ai.ExtractLineage(m.ID))
 		} else {
@@ -640,6 +679,18 @@ func writeReport(path string, res *watchResult, overlayAdded []string) error {
 			"Note: an overlay entry redefines a model wholesale, so once curated fields are added " +
 			"for these ids in `applyOverridesAndAdditions()`, update or drop the overlay entry too — " +
 			"otherwise it keeps shadowing the richer built-in definition.\n\n")
+	}
+
+	if len(res.Notes) > 0 || len(res.Deferred) > 0 {
+		b.WriteString("## Needs a human\n\n")
+		for _, n := range res.Notes {
+			fmt.Fprintf(&b, "- %s\n", n)
+		}
+		if len(res.Deferred) > 0 {
+			fmt.Fprintf(&b, "- deferred past the per-run cap of %d (a later run adds them): `%s`\n",
+				antigravityAddCap, strings.Join(res.Deferred, "`, `"))
+		}
+		b.WriteString("\n")
 	}
 
 	if res.Changed > 0 || len(res.Removed) > 0 {
@@ -745,12 +796,19 @@ func updateOverlay(path string, specs []modelSpec, claudeCodePin string) (added,
 				m.Provider, m.ID, strings.Join(bad, ", ")))
 			continue
 		}
-		pc := overlay.Providers[m.Provider]
+		section := overlay.Providers
+		if extensionProviders[m.Provider] {
+			if overlay.ExtensionProviders == nil {
+				overlay.ExtensionProviders = map[string]models.ProviderConfig{}
+			}
+			section = overlay.ExtensionProviders
+		}
+		pc := section[m.Provider]
 		if slices.ContainsFunc(pc.Models, func(d models.ModelDefinition) bool { return d.ID == m.ID }) {
 			continue
 		}
 		pc.Models = append(pc.Models, overlayDefinition(m))
-		overlay.Providers[m.Provider] = pc
+		section[m.Provider] = pc
 		added = append(added, m.Provider+"/"+m.ID)
 	}
 	if claudeCodePin != "" {
@@ -793,6 +851,8 @@ type watchOptions struct {
 	// failed or was not fetched). Compared forward-only against the pin
 	// committed in the overlay.
 	claudeCodeVersion string
+	// notes are per-model source caveats for the report.
+	notes map[modelKey]string
 }
 
 // runWatch compares the fresh fetch with the compiled-in catalog and writes
@@ -810,6 +870,13 @@ func runWatch(opts watchOptions) {
 	}
 
 	res := compareCatalogs(opts.fresh, opts.overlayPath, opts.trigger)
+	// Caveats only for models this run would add; known ones were vetted.
+	for k, n := range opts.notes {
+		if !res.known[k] {
+			res.Notes = append(res.Notes, fmt.Sprintf("`%s`: %s", k, n))
+		}
+	}
+	sort.Strings(res.Notes)
 
 	// The client version pin is part of a new model's requirements, so it
 	// rides the same PR — and moves on its own when nothing else changed.
@@ -818,11 +885,16 @@ func runWatch(opts watchOptions) {
 	if bump != "" {
 		res.ClientVersionBump = bump
 		newPin = opts.claudeCodeVersion
-		if res.Anomaly == "" {
-			// A cap anomaly means "open nothing"; never override it.
+		switch {
+		case res.Anomaly == "":
 			res.OpenPR = true
 			res.Anomaly = cvAnomaly
+		case res.OverlayOnly:
+			// The pin lives in the overlay, so an overlay-only PR can carry
+			// it; the compiled catalog stays out either way.
+			res.OpenPR = true
 		}
+		// Otherwise a cap anomaly means "open nothing"; never override it.
 	}
 
 	log.Printf("Model watch: %d new (%d qualifying), %d changed, %d removed, pin %q; open_pr=%v %s",

@@ -182,6 +182,7 @@ func (n *nopBridgeAPI) SetLabel(_, _ string)                                   {
 func (n *nopBridgeAPI) ClearLabel(_ string)                                    {}
 func (n *nopBridgeAPI) SetModel(_ *ai.Model) bool                              { return false }
 func (n *nopBridgeAPI) GetAvailableModels() []*ai.Model                        { return nil }
+func (n *nopBridgeAPI) GetProviderModelIDs(string) []string                    { return nil }
 
 // GetClientVersion: no registry here (`fir login` runs before any session),
 // so the compiled-in floor is the answer — the same value the registry would

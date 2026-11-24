@@ -90,10 +90,17 @@ func TestParseCatalogOverlayRejects(t *testing.T) {
 		"provider authHeader":   catalogDoc(t, "2026-01-01T00:00:00Z", `{"anthropic":{"authHeader":true,"modelOverrides":{"a":{"name":"b"}}}}`),
 		// Endpoint/credential fields are rejected at EVERY level the schema
 		// allows them, not just the provider level.
-		"model baseUrl":    catalogDoc(t, "2026-01-01T00:00:00Z", `{"anthropic":{"models":[{"id":"x","baseUrl":"https://evil.example"}]}}`),
-		"model headers":    catalogDoc(t, "2026-01-01T00:00:00Z", `{"anthropic":{"models":[{"id":"x","headers":{"Authorization":"Bearer y"}}]}}`),
-		"override headers": catalogDoc(t, "2026-01-01T00:00:00Z", `{"anthropic":{"modelOverrides":{"claude-opus-5":{"headers":{"Authorization":"Bearer y"}}}}}`),
-		"invalid model":    catalogDoc(t, "2026-01-01T00:00:00Z", `{"anthropic":{"models":[{"id":"x","contextWindow":0}]}}`),
+		"model baseUrl":           catalogDoc(t, "2026-01-01T00:00:00Z", `{"anthropic":{"models":[{"id":"x","baseUrl":"https://evil.example"}]}}`),
+		"model headers":           catalogDoc(t, "2026-01-01T00:00:00Z", `{"anthropic":{"models":[{"id":"x","headers":{"Authorization":"Bearer y"}}]}}`),
+		"override headers":        catalogDoc(t, "2026-01-01T00:00:00Z", `{"anthropic":{"modelOverrides":{"claude-opus-5":{"headers":{"Authorization":"Bearer y"}}}}}`),
+		"ext baseUrl":             `{"schemaVersion":1,"generatedAt":"2026-01-01T00:00:00Z","providers":{},"extensionProviders":{"x":{"models":[{"id":"m","baseUrl":"https://evil.example"}]}}}`,
+		"ext provider apiKey":     `{"schemaVersion":1,"generatedAt":"2026-01-01T00:00:00Z","providers":{},"extensionProviders":{"x":{"apiKey":"k","models":[{"id":"m"}]}}}`,
+		"ext provider headers":    `{"schemaVersion":1,"generatedAt":"2026-01-01T00:00:00Z","providers":{},"extensionProviders":{"x":{"headers":{"A":"b"},"models":[{"id":"m"}]}}}`,
+		"ext provider authHeader": `{"schemaVersion":1,"generatedAt":"2026-01-01T00:00:00Z","providers":{},"extensionProviders":{"x":{"authHeader":true,"models":[{"id":"m"}]}}}`,
+		"ext model headers":       `{"schemaVersion":1,"generatedAt":"2026-01-01T00:00:00Z","providers":{},"extensionProviders":{"x":{"models":[{"id":"m","headers":{"A":"b"}}]}}}`,
+		"ext override headers":    `{"schemaVersion":1,"generatedAt":"2026-01-01T00:00:00Z","providers":{},"extensionProviders":{"x":{"modelOverrides":{"m":{"headers":{"A":"b"}}}}}}`,
+		"ext invalid model":       `{"schemaVersion":1,"generatedAt":"2026-01-01T00:00:00Z","providers":{},"extensionProviders":{"x":{"models":[{"id":"m","contextWindow":0}]}}}`,
+		"invalid model":           catalogDoc(t, "2026-01-01T00:00:00Z", `{"anthropic":{"models":[{"id":"x","contextWindow":0}]}}`),
 	}
 	for name, body := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -705,5 +712,50 @@ func TestDefaultModelForProviderRespectsLiveList(t *testing.T) {
 	r.liveModelsMu.Unlock()
 	if got := r.DefaultModelForProvider(ai.ProviderAnthropic); got != "claude-opus-5" {
 		t.Fatalf("default = %q, want anchor claude-opus-5", got)
+	}
+}
+
+// TestOverlayModelsForLateRegisteredProvider covers providers that only exist
+// once an extension registers them (google-antigravity). Before registration
+// the overlay's models for that provider cannot resolve an api/baseUrl; they
+// must be deferred rather than failing validation and taking the user's
+// models.json down with them. After registration a Refresh picks them up.
+func TestOverlayModelsForLateRegisteredProvider(t *testing.T) {
+	const prov = "late-ext-prov"
+	dir := t.TempDir()
+	embedded, err := ParseCatalogOverlay(embeddedCatalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	newer := embedded.GeneratedAt.Add(time.Hour).UTC().Format(time.RFC3339)
+	writeCatalogCache(t, dir, `{"schemaVersion":1,"generatedAt":"`+newer+`","providers":{},`+
+		`"extensionProviders":{"`+prov+`":{"models":[{"id":"overlay-model","contextWindow":1000,"maxTokens":100}]}}}`)
+	if err := os.WriteFile(filepath.Join(dir, "models.json"),
+		[]byte(`{"providers":{"anthropic":{"modelOverrides":{"claude-opus-5":{"contextWindow":777}}}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := newCatalogTestRegistry(t, dir, "")
+	if e := r.GetError(); e != "" {
+		t.Fatalf("unregistered overlay provider surfaced an error: %s", e)
+	}
+	if got := r.ModelOrigin("anthropic", "claude-opus-5"); got != OriginUserModelsJSON {
+		t.Fatalf("origin = %q", got)
+	}
+	if m := r.Find("anthropic", "claude-opus-5"); m == nil || m.ContextWindow != 777 {
+		t.Fatalf("user models.json lost while overlay provider unregistered: %+v", m)
+	}
+	if registryHasModel(r, prov, "overlay-model") {
+		t.Fatal("overlay model present before its provider registered")
+	}
+
+	ai.RegisterModel(&ai.Model{ID: "ext-model", Provider: prov, API: "openai-completions", BaseURL: "https://example.invalid"})
+	t.Cleanup(func() { ai.UnregisterProviderModels(prov) })
+	r.Refresh()
+	if !registryHasModel(r, prov, "overlay-model") {
+		t.Fatal("overlay model missing after provider registered")
+	}
+	if got := r.ModelOrigin(prov, "overlay-model"); got != OriginOverlay {
+		t.Fatalf("origin = %q, want overlay", got)
 	}
 }

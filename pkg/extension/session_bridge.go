@@ -238,6 +238,25 @@ func (b *SessionBridge) GetAvailableModels() []*ai.Model {
 	return mr.GetAvailable()
 }
 
+// GetProviderModelIDs returns every model ID the session registry defines
+// for provider, live or not. Nil when the session has no model registry.
+func (b *SessionBridge) GetProviderModelIDs(provider string) []string {
+	if b.session == nil {
+		return nil
+	}
+	mr := b.session.ModelRegistryRef()
+	if mr == nil {
+		return nil
+	}
+	var ids []string
+	for _, m := range mr.GetAll() {
+		if string(m.Provider) == provider {
+			ids = append(ids, m.ID)
+		}
+	}
+	return ids
+}
+
 // GetClientVersion resolves the pin through the session's model registry so
 // a hot-applied catalog overlay takes effect without a restart. Falls back to
 // the compiled-in floor when there is no registry.

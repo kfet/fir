@@ -228,17 +228,19 @@ def list_models(params: dict, ctx: fir_ext.AuthContext) -> list[str] | None:
     that the wire actually accepts — so it can't be used for filtering.
 
     Strategy: opportunistically probe ``/v1internal:streamGenerateContent``
-    with a 1-token request against each ID in the **static catalogue**
-    (the list registered just below this function). Bucket each ID as live
+    with a 1-token request against each ID fir knows for the provider: the
+    static catalogue registered below plus ``params["model_ids"]`` (the
+    registry's IDs, including ones the catalog overlay adds). Bucket each ID as live
     (200 / 400 / 429 / 500) or missing (404). Return only the live IDs so
     fir's model picker hides stale catalogue entries automatically.
 
     fir already caches this result for 1 hour per provider (see
     ``pkg/models/live_models.go`` ``liveCacheTTL``) and runs it in a
     background goroutine, so the cost is amortised across many invocations.
-    Discovery of *new* IDs (ones not in the catalogue at all) is out of
-    scope here — that's what the ``antigravity-models`` skill does, with
-    a hand-curated candidate sweep.
+    Discovery of *new* IDs is out of scope here: the nightly model-watch
+    (cmd/generate-models) adds them to the catalog overlay from the
+    router-for-me Antigravity list, and the ``antigravity-models`` skill
+    does a hand-curated candidate sweep.
 
     Returns ``None`` on any unexpected failure so fir falls back to the
     permissive built-in catalogue rather than masking everything.
@@ -253,13 +255,16 @@ def list_models(params: dict, ctx: fir_ext.AuthContext) -> list[str] | None:
     if os.environ.get("FIR_ANTIGRAVITY_DISABLE_PROBE"):
         return None
 
-    # Pull the canonical ID list straight from the provider we registered.
-    catalogue_ids = _antigravity_catalogue_ids()
+    # Probe every ID fir's registry defines for this provider (``model_ids``,
+    # which includes catalog-overlay additions), falling back to the IDs
+    # registered below when the host is too old to send it. Probing only our
+    # own list would hide every overlay-added model.
+    catalogue_ids = _probe_ids(params)
     if not catalogue_ids:
         return None
 
     # Pre-flight against a known-good ID. If auth/endpoint is broken, every
-    # probe will return 401/403/0 — we'd waste 12 more requests just to
+    # probe will return 401/403/0 — we'd waste a request per model just to
     # discover the same thing. Bail early.
     if not _preflight_ok(access, project, catalogue_ids):
         return None
@@ -295,6 +300,15 @@ def _preflight_ok(access: str, project: str, catalogue_ids: list[str]) -> bool:
         if code in _PROBE_EXISTS_STATUSES or code in _PROBE_MISSING_STATUSES:
             return True
     return False
+
+
+def _probe_ids(params: dict) -> list[str]:
+    """Return the IDs to probe: the host's ``model_ids`` merged with ours."""
+    ids = list(_antigravity_catalogue_ids())
+    for mid in params.get("model_ids") or []:
+        if isinstance(mid, str) and mid and mid not in ids:
+            ids.append(mid)
+    return ids
 
 
 def _antigravity_catalogue_ids() -> list[str]:
@@ -389,7 +403,8 @@ def _probe_models(access: str, project: str, ids: list[str]) -> tuple[list[str],
 # Ships the "google-antigravity" wire-protocol Api (Cloud Code Assist's
 # sandbox endpoints with antigravity-specific User-Agent, system
 # instructions, and Claude+thinking interleaved-thinking-2025-05-14
-# header), the matching hosted-provider record, and the 12-model catalogue.
+# header), the matching hosted-provider record, and the hand-written model
+# catalogue (the catalog overlay adds newer ones).
 # Replaces what used to live in:
 #
 #   - pkg/ai/providers/register_antigravity.go (DeclGoogleConfig)
@@ -454,6 +469,8 @@ fir_ext.register_api(
 _ANTIGRAVITY_BASE_URL = "https://daily-cloudcode-pa.sandbox.googleapis.com"
 
 
+# Costs are deliberately zero: Antigravity is subscription-billed, so
+# per-token API prices would overstate what a session costs.
 def _antigravity_model(
     model_id: str,
     name: str,
@@ -500,10 +517,6 @@ fir_ext.register_provider(
                 reasoning=True,
                 context_window=200_000,
                 max_tokens=64_000,
-                cost_input=5,
-                cost_output=25,
-                cost_cache_read=0.5,
-                cost_cache_write=6.25,
                 swe_score=80.9,
             ),
             _antigravity_model(
@@ -512,10 +525,6 @@ fir_ext.register_provider(
                 reasoning=True,
                 context_window=200_000,
                 max_tokens=128_000,
-                cost_input=5,
-                cost_output=25,
-                cost_cache_read=0.5,
-                cost_cache_write=6.25,
                 swe_score=80.8,
             ),
             _antigravity_model(
@@ -524,10 +533,6 @@ fir_ext.register_provider(
                 reasoning=False,
                 context_window=200_000,
                 max_tokens=64_000,
-                cost_input=3,
-                cost_output=15,
-                cost_cache_read=0.3,
-                cost_cache_write=3.75,
                 swe_score=77.2,
             ),
             _antigravity_model(
@@ -536,10 +541,6 @@ fir_ext.register_provider(
                 reasoning=True,
                 context_window=200_000,
                 max_tokens=64_000,
-                cost_input=3,
-                cost_output=15,
-                cost_cache_read=0.3,
-                cost_cache_write=3.75,
                 swe_score=77.2,
             ),
             _antigravity_model(
@@ -548,10 +549,6 @@ fir_ext.register_provider(
                 reasoning=True,
                 context_window=200_000,
                 max_tokens=64_000,
-                cost_input=3,
-                cost_output=15,
-                cost_cache_read=0.3,
-                cost_cache_write=3.75,
                 swe_score=79.6,
             ),
             _antigravity_model(
@@ -560,9 +557,6 @@ fir_ext.register_provider(
                 reasoning=True,
                 context_window=1_048_576,
                 max_tokens=65535,
-                cost_input=0.5,
-                cost_output=3,
-                cost_cache_read=0.5,
                 swe_score=76.2,
             ),
             _antigravity_model(
@@ -571,10 +565,6 @@ fir_ext.register_provider(
                 reasoning=True,
                 context_window=1_048_576,
                 max_tokens=65535,
-                cost_input=2,
-                cost_output=12,
-                cost_cache_read=0.2,
-                cost_cache_write=2.375,
                 swe_score=76.2,
             ),
             _antigravity_model(
@@ -583,10 +573,6 @@ fir_ext.register_provider(
                 reasoning=True,
                 context_window=1_048_576,
                 max_tokens=65535,
-                cost_input=2,
-                cost_output=12,
-                cost_cache_read=0.2,
-                cost_cache_write=2.375,
                 swe_score=76.2,
             ),
             _antigravity_model(
@@ -595,9 +581,6 @@ fir_ext.register_provider(
                 reasoning=True,
                 context_window=1_048_576,
                 max_tokens=65535,
-                cost_input=0.1,
-                cost_output=0.4,
-                cost_cache_read=0.01,
             ),
             _antigravity_model(
                 "gemini-3.1-pro-high",
@@ -605,10 +588,6 @@ fir_ext.register_provider(
                 reasoning=True,
                 context_window=1_048_576,
                 max_tokens=65535,
-                cost_input=2,
-                cost_output=12,
-                cost_cache_read=0.2,
-                cost_cache_write=2.375,
                 swe_score=80.6,
             ),
             _antigravity_model(
@@ -617,10 +596,6 @@ fir_ext.register_provider(
                 reasoning=True,
                 context_window=1_048_576,
                 max_tokens=65535,
-                cost_input=2,
-                cost_output=12,
-                cost_cache_read=0.2,
-                cost_cache_write=2.375,
                 swe_score=80.6,
             ),
             _antigravity_model(
@@ -629,10 +604,6 @@ fir_ext.register_provider(
                 reasoning=True,
                 context_window=1_048_576,
                 max_tokens=65535,
-                cost_input=1.5,
-                cost_output=9,
-                cost_cache_read=0.15,
-                cost_cache_write=0.083,
             ),
             _antigravity_model(
                 "gpt-oss-120b-medium",
@@ -640,8 +611,6 @@ fir_ext.register_provider(
                 reasoning=False,
                 context_window=131072,
                 max_tokens=32768,
-                cost_input=0.09,
-                cost_output=0.36,
                 inputs=("text",),
             ),
         ],

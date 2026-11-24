@@ -175,7 +175,10 @@ func TestFiles_ApprovalRequired(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "declined")
 	require.Len(t, got.Files, 1)
-	assert.Equal(t, p, got.Files[0].Path)
+	// The manager reports the resolved path (macOS: /var -> /private/var).
+	want, err := filepath.EvalSymlinks(p)
+	require.NoError(t, err)
+	assert.Equal(t, want, got.Files[0].Path)
 	assert.Equal(t, mcptest.SaveToolName, got.Tool)
 	assert.Empty(t, f.fs.Saved())
 	assert.Empty(t, f.fs.Declared(), "nothing reaches the server before approval")

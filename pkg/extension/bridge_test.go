@@ -17,38 +17,39 @@ import (
 
 // mockBridgeAPI implements BridgeAPI for testing.
 type mockBridgeAPI struct {
-	mu              sync.Mutex
-	execCalled      bool
-	execCmd         string
-	sessionName     string
-	pendingSteers   int
-	sessionFile     string
-	sentMessages    []CustomMessageSpec
-	sentMsgOpts     []*SendMessageOptions
-	userMessages    []string
-	userMsgOpts     []*SendUserMessageOptions
-	labels          map[string]string
-	modelSet        *ai.Model
-	availableModels []*ai.Model
-	toolsRegistered []ToolDefinition
-	sessionData     map[string]string
-	restartPrompts  []string
-	restartPrepends []string
-	restartErr      error
-	reloadNames     []string
-	reloadErr       error
-	extensions      []ExtensionInfo
-	reloadFn        func(name string) error
-	loadSessionFn   func(name, path string) error
-	loadSessionArgs [][2]string
-	reloadMCPFn     func() (ReloadMCPResult, error)
-	reloadMCPCalls  int
-	reloadResCalls  int
-	reloadResErr    error
-	reloadMCPResult ReloadMCPResult
-	reloadMCPErr    error
-	observableStore *store.ObservableStore
-	clientVersions  map[string]string
+	mu               sync.Mutex
+	execCalled       bool
+	execCmd          string
+	sessionName      string
+	pendingSteers    int
+	sessionFile      string
+	sentMessages     []CustomMessageSpec
+	sentMsgOpts      []*SendMessageOptions
+	userMessages     []string
+	userMsgOpts      []*SendUserMessageOptions
+	labels           map[string]string
+	modelSet         *ai.Model
+	providerModelIDs map[string][]string
+	availableModels  []*ai.Model
+	toolsRegistered  []ToolDefinition
+	sessionData      map[string]string
+	restartPrompts   []string
+	restartPrepends  []string
+	restartErr       error
+	reloadNames      []string
+	reloadErr        error
+	extensions       []ExtensionInfo
+	reloadFn         func(name string) error
+	loadSessionFn    func(name, path string) error
+	loadSessionArgs  [][2]string
+	reloadMCPFn      func() (ReloadMCPResult, error)
+	reloadMCPCalls   int
+	reloadResCalls   int
+	reloadResErr     error
+	reloadMCPResult  ReloadMCPResult
+	reloadMCPErr     error
+	observableStore  *store.ObservableStore
+	clientVersions   map[string]string
 	// captures of the most recent SideQuery call
 	sideQueryQuestion string
 	sideQueryOpts     *session.SideQueryOptions
@@ -164,6 +165,11 @@ func (m *mockBridgeAPI) GetAvailableModels() []*ai.Model {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.availableModels
+}
+func (m *mockBridgeAPI) GetProviderModelIDs(provider string) []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.providerModelIDs[provider]
 }
 func (m *mockBridgeAPI) ContinueSession() error { return nil }
 func (m *mockBridgeAPI) SideQuery(question string, opts *session.SideQueryOptions) (string, error) {

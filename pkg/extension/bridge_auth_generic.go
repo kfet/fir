@@ -495,6 +495,14 @@ func (b *Bridge) callExtListModels(ctx context.Context, providerID string, creds
 		"credentials":     creds,
 		"client_versions": b.clientVersionsParam(),
 	}
+	// Every ID the registry defines for this provider (incl. catalog-overlay
+	// additions) so an extension that probes IDs one by one does not hide
+	// models it never declared itself.
+	if api := b.api.Load(); api != nil {
+		if ids := (*api).GetProviderModelIDs(providerID); len(ids) > 0 {
+			params["model_ids"] = ids
+		}
+	}
 	raw, err := b.CallHook(ctx, "auth/list_models", params, 30*time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("auth/list_models: %w", err)

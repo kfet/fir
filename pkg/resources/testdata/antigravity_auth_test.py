@@ -147,6 +147,25 @@ class TestListModelsProbe(unittest.TestCase):
             out = self.ag.list_models(self.params, _FakeCtx())
         self.assertEqual(sorted(self.ag._antigravity_catalogue_ids()), out)
 
+    def test_host_model_ids_are_probed(self):
+        # Overlay-added IDs arrive via params["model_ids"]; they must be
+        # probed and returned, or the live filter hides them.
+        params = dict(self.params, model_ids=["gemini-3-flash", "gemini-4-neon-xhigh"])
+        with self._patch_probe({"*": 200}):
+            out = self.ag.list_models(params, _FakeCtx())
+        assert out is not None
+        self.assertIn("gemini-4-neon-xhigh", out)
+        self.assertEqual(len(out), len(set(out)), "no duplicate IDs")
+
+    def test_registered_costs_are_zero(self):
+        # Subscription-billed: per-token prices would overstate session cost.
+        for prov in self.ag.fir_ext._providers:
+            if prov.get("id") != _PROVIDER_ID:
+                continue
+            for m in prov.get("models", []):
+                cost = {k: v for k, v in m.items() if k.startswith("cost")}
+                self.assertFalse(any(cost.values()), f"{m['id']} has cost {cost}")
+
     def test_404_ids_are_filtered_out(self):
         stale = "claude-sonnet-4-5"  # in catalogue, observed 404 in prod
         with self._patch_probe({stale: 404}):

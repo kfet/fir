@@ -2453,6 +2453,19 @@ func main() {
 		failed = append(failed, claudeCodeSource+": "+err.Error())
 	}
 
+	// Antigravity IDs (membership only; numbers come from models.dev). Same
+	// soft-fail contract as every other source.
+	agyRouter, err := fetchAntigravityModels()
+	if err != nil {
+		log.Printf("Warning: Antigravity id fetch failed: %v", err)
+		failed = append(failed, antigravitySource+": "+err.Error())
+	}
+	agyDeclared, err := extensionDeclaredIDs(filepath.Join(root, "pkg", "resources", "builtin_extensions", "antigravity_auth.py"))
+	if err != nil {
+		log.Printf("Warning: %v", err)
+		failed = append(failed, antigravitySource+": "+err.Error())
+	}
+
 	if *strict && len(failed) > 0 {
 		// A flaky upstream must not produce a red badge every morning.
 		log.Printf("Upstream unavailable (%s); not generating", strings.Join(failed, "; "))
@@ -2498,8 +2511,19 @@ func main() {
 	// on disk.
 	reportCatalogDiff(all, failed, *changelog)
 
+	// Antigravity models ride the watch only: the provider is registered by
+	// an extension, so they belong in the overlay, never the compiled catalog.
+	var agyNotes map[modelKey]string
+	fresh := all
+	if agyRouter != nil && agyDeclared != nil {
+		var agy []modelSpec
+		agy, agyNotes = antigravitySpecs(agyRouter, all)
+		fresh = append(append([]modelSpec(nil), all...), dropDeclared(agy, agyNotes, agyDeclared)...)
+	}
+
 	runWatch(watchOptions{
-		fresh:             all,
+		fresh:             fresh,
+		notes:             agyNotes,
 		trigger:           *trigger,
 		reportPath:        *report,
 		summaryPath:       *summary,

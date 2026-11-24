@@ -175,6 +175,7 @@ func TestCallExtListModelsPassesClientVersions(t *testing.T) {
 	b, extCodec := pipePair(&InitResult{Name: "test-ext"})
 	api := newMockAPI()
 	api.clientVersions = map[string]string{models.ClientVersionKeyClaudeCode: "7.8.9"}
+	api.providerModelIDs = map[string][]string{"anthropic": {"a1", "overlay-a2"}}
 	b.SetAPI(api)
 	runCtx, runCancel := context.WithCancel(context.Background())
 	defer runCancel()
@@ -212,6 +213,10 @@ func TestCallExtListModelsPassesClientVersions(t *testing.T) {
 		}
 		if cv[models.ClientVersionKeyClaudeCode] != "7.8.9" {
 			t.Fatalf("client_versions = %v", cv)
+		}
+		ids, _ := params["model_ids"].([]any)
+		if len(ids) != 2 || ids[1] != "overlay-a2" {
+			t.Fatalf("model_ids = %v", params["model_ids"])
 		}
 	case <-ctx.Done():
 		t.Fatal("hook never arrived")

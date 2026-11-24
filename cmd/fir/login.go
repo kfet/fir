@@ -396,9 +396,18 @@ func runLoginWithExtensions(args *Args, providerID string, opts auth.LoginOption
 // built-in API providers before calling. The returned cleanup function shuts
 // extensions and the session down in reverse order.
 func startLoginSession(args *Args) (func(), error) {
+	_, cleanup, err := startExtensionHost(args, "login")
+	return cleanup, err
+}
+
+// startExtensionHost boots a lightweight session with extensions loaded and
+// returns its model registry, so callers that only need the registry (login,
+// --list-models) see extension-declared providers and models such as
+// google-antigravity. mode is the extension mode string passed to extensions.
+func startExtensionHost(args *Args, mode string) (*models.ModelRegistry, func(), error) {
 	cwd, err := os.Getwd()
 	if err != nil {
-		return nil, fmt.Errorf("get working directory: %w", err)
+		return nil, nil, fmt.Errorf("get working directory: %w", err)
 	}
 	agentDir := resolveAgentDir()
 
@@ -418,7 +427,7 @@ func startLoginSession(args *Args) (func(), error) {
 		NoSkills:        true, // skills aren't needed for login
 	})
 	if err := rl.Reload(); err != nil {
-		return nil, fmt.Errorf("reload resources: %w", err)
+		return nil, nil, fmt.Errorf("reload resources: %w", err)
 	}
 
 	// Build a lightweight session — no MCP, ephemeral session store, no tools.
@@ -441,7 +450,7 @@ func startLoginSession(args *Args) (func(), error) {
 
 	result, err := session.Setup(context.Background(), opts)
 	if err != nil {
-		return nil, fmt.Errorf("session setup: %w", err)
+		return nil, nil, fmt.Errorf("session setup: %w", err)
 	}
 
 	var extSetup *extension.SetupResult
@@ -449,7 +458,7 @@ func startLoginSession(args *Args) (func(), error) {
 		extOpts := extension.SetupOptions{
 			ProjectDir:    cwd,
 			Cwd:           cwd,
-			Mode:          "login",
+			Mode:          mode,
 			Version:       version,
 			EnabledNames:  resolveEnabledExtensions(args, settingsManager),
 			DisabledNames: resolveDisabledExtensions(args, settingsManager),
@@ -487,5 +496,5 @@ func startLoginSession(args *Args) (func(), error) {
 			_ = result.MCPManager.Close()
 		}
 	}
-	return cleanup, nil
+	return modelRegistry, cleanup, nil
 }
