@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.64.0] - 2026-11-23
+
 ### Added
 
 - **Antigravity models stay current with no account.** The nightly model-watch reads Antigravity model IDs from router-for-me/models and their numbers from models.dev (limits: the smaller of both; cost: zero), and proposes them in a new `extensionProviders` section of the catalog overlay. It only adds, at most 8 per run, with its own anomaly guard; when aggregator churn trips the global cap, the run still opens an overlay-only PR for them.
@@ -14,6 +16,7 @@
 
 ### Changed
 
+- **Model catalog regenerated**: added `huggingface/thinkingmachines/Inkling-2-Mini`, `mistral/ministral-14b-latest`, `opencode-go/hungerg-free`, `zai/glm-5.4` (+1 on aggregators); removed 30 retired first-party models (azure-openai-responses/openai `gpt-4`, `o1`, `o3-mini`, … +3 on aggregators); 28 model(s) with changed pricing/limits.
 - Antigravity models report zero cost: the service is subscription-billed, so per-token API prices overstated session cost.
 
 ## [1.63.4] - 2026-11-22
