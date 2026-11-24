@@ -2,8 +2,13 @@
 
 ## [Unreleased]
 
+## [1.65.0] - 2026-11-24
+
 ### Added
 - **Auto-update**: interactive and ACP sessions install a new release in the background once it is 24h old, then say `fir X installed — restart fir to use it` (TUI notice and footer badge; stderr in ACP). fir never restarts itself. Skips dev builds, Homebrew installs and read-only install dirs; backs off 6h after a failure. Turn off with `"autoUpdate": false` or `FIR_NO_AUTO_UPDATE=1`.
+
+### Changed
+- **Model catalog regenerated**: added 22 HuggingFace models (e.g. `huggingface/Qwen/Qwen3.8-Flash-Next-FP8`, `huggingface/ibm-granite/granite-4.2-8b`); removed 9 (e.g. `github-copilot/claude-opus-5`, `opencode/kimi-k2.5`); 31 models with changed pricing/limits.
 
 ## [1.64.0] - 2026-11-23
 
