@@ -85,6 +85,20 @@ class TestStaticURLDrift(unittest.TestCase):
         self.assertEqual(self.flow.get("callback_addr"), "127.0.0.1:1455")
         self.assertEqual(self.flow.get("callback_path"), "/auth/callback")
 
+    def test_device_code_frozen(self):
+        dc = self.flow.get("device_code") or {}
+        self.assertEqual(
+            dc.get("usercode_url"), "https://auth.openai.com/api/accounts/deviceauth/usercode"
+        )
+        self.assertEqual(
+            dc.get("poll_url"), "https://auth.openai.com/api/accounts/deviceauth/token"
+        )
+        self.assertEqual(dc.get("verification_url"), "https://auth.openai.com/codex/device")
+        self.assertEqual(dc.get("redirect_uri"), "https://auth.openai.com/deviceauth/callback")
+        self.assertIn("ChatGPT → Settings → Security", dc.get("hint", ""))
+        # Cloudflare returns 530 for Python's default User-Agent.
+        self.assertTrue(dc.get("headers", {}).get("User-Agent"))
+
 
 if __name__ == "__main__":
     unittest.main()

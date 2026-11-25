@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Codex login also offers a device code.** The one OpenAI Codex login now races three sources, first wins: the local browser (loopback port 1455), a pasted failed-localhost URL, and a device code shown after the browser link (https://auth.openai.com/codex/device). Device login is off by default in ChatGPT (enable it in Settings → Security); if no code can be issued the section is silently omitted. A taken port 1455 no longer aborts the login. Generic: declarative OAuth providers opt in with `device_code`.
+
 ## [1.67.0] - 2026-11-25
 
 ### Added

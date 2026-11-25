@@ -59,7 +59,20 @@ func (p *genericAuthProvider) Login(ctx context.Context, callbacks pinoauth.Logi
 
 	pkce := pinoauth.GeneratePKCE()
 
-	callbackCh, localRedirectURI, err := p.openCallbackChannel(loginCtx, fl, pkce.Verifier)
+	// raceCtx scopes every code source (listener, paste, device poll);
+	// cancelling it once one source wins tears down the others while the
+	// exchange continues on loginCtx.
+	raceCtx, cancelRace := context.WithCancel(loginCtx)
+	defer cancelRace()
+
+	// Request the device code (once, no retries) in parallel with the bind.
+	var devReady chan *deviceSession
+	if fl.DeviceCode != nil {
+		devReady = make(chan *deviceSession, 1)
+		go func() { devReady <- requestDeviceCode(raceCtx, fl.DeviceCode, fl.ClientID) }()
+	}
+
+	callbackCh, localRedirectURI, err := p.openCallbackChannel(raceCtx, fl, pkce.Verifier)
 	if err != nil {
 		return nil, err
 	}
@@ -76,30 +89,36 @@ func (p *genericAuthProvider) Login(ctx context.Context, callbacks pinoauth.Logi
 	authURL := buildAuthorizeURL(fl, pkce, shown)
 	shortURL := buildShortURL(fl, pkce, shown)
 
+	var dev *deviceSession
+	if devReady != nil {
+		dev = <-devReady
+	}
+	instructions := fl.OpenURLInstructions
+	if dev != nil {
+		instructions = deviceInstructions(instructions, fl.DeviceCode, dev)
+	}
+
 	if callbacks.OnAuth != nil {
-		callbacks.OnAuth(pinoauth.AuthInfo{URL: authURL, ShortURL: shortURL, Instructions: fl.OpenURLInstructions})
+		callbacks.OnAuth(pinoauth.AuthInfo{URL: authURL, ShortURL: shortURL, Instructions: instructions})
 	}
 	if callbacks.OnProgress != nil {
 		callbacks.OnProgress("Waiting for OAuth callback...")
 	}
 
-	code, state, pasted, err := awaitCode(loginCtx, callbackCh, localRedirectURI, callbacks, pkce.Verifier)
+	win, err := p.raceCode(raceCtx, fl, dev, callbackCh, localRedirectURI, callbacks, pkce.Verifier)
+	cancelRace()
 	if err != nil {
 		return nil, err
 	}
-	if state != pkce.Verifier {
-		return nil, fmt.Errorf("OAuth state mismatch")
-	}
-	redirectURI := exchangeRedirectURI(fl, localRedirectURI, pasted)
 
 	if callbacks.OnProgress != nil {
 		callbacks.OnProgress("Exchanging authorization code for tokens...")
 	}
 
 	tok, err := p.tokenClient(fl).Exchange(loginCtx, pinoauth.ExchangeRequest{
-		Code:         code,
-		CodeVerifier: pkce.Verifier,
-		RedirectURI:  redirectURI,
+		Code:         win.code,
+		CodeVerifier: win.verifier,
+		RedirectURI:  win.redirectURI,
 		Extra:        expandTokenBodyExtra(fl, pkce.Verifier),
 	})
 	if err != nil {
@@ -107,6 +126,90 @@ func (p *genericAuthProvider) Login(ctx context.Context, callbacks pinoauth.Logi
 	}
 
 	return p.tokenToCredentials(loginCtx, tok, nil)
+}
+
+// codeWin is the authorization code that won the race plus the PKCE
+// verifier and redirect_uri its exchange must use.
+type codeWin struct {
+	code, verifier, redirectURI string
+}
+
+// raceCode waits for the first authorization code from the loopback
+// callback / manual paste (awaitCode) and, when dev is non-nil, the
+// device-code poll. A device failure only drops that source; a
+// callback/paste error (e.g. the user cancelled the prompt) ends the login.
+func (p *genericAuthProvider) raceCode(
+	ctx context.Context,
+	fl *OAuthFlowSpec,
+	dev *deviceSession,
+	callbackCh <-chan *pinoauth.CallbackResult,
+	localRedirectURI string,
+	callbacks pinoauth.LoginCallbacks,
+	verifier string,
+) (codeWin, error) {
+	browserOK := callbackCh != nil || callbacks.OnManualCodeInput != nil
+	if dev == nil || !browserOK {
+		if dev != nil {
+			g, err := pollDevice(ctx, fl.DeviceCode, dev)
+			if err != nil {
+				return codeWin{}, err
+			}
+			return codeWin{code: g.code, verifier: g.verifier, redirectURI: fl.DeviceCode.RedirectURI}, nil
+		}
+		return browserCode(ctx, fl, callbackCh, localRedirectURI, callbacks, verifier)
+	}
+
+	type result struct {
+		win    codeWin
+		err    error
+		device bool
+	}
+	out := make(chan result, 2)
+	go func() {
+		w, err := browserCode(ctx, fl, callbackCh, localRedirectURI, callbacks, verifier)
+		out <- result{win: w, err: err}
+	}()
+	go func() {
+		g, err := pollDevice(ctx, fl.DeviceCode, dev)
+		if err != nil {
+			out <- result{err: err, device: true}
+			return
+		}
+		out <- result{win: codeWin{code: g.code, verifier: g.verifier, redirectURI: fl.DeviceCode.RedirectURI}, device: true}
+	}()
+	for {
+		r := <-out
+		if r.device && r.err != nil {
+			// Device source failed (expired, disabled, …): keep waiting
+			// on the browser source.
+			continue
+		}
+		if r.device && callbacks.OnDismissManualInput != nil {
+			// Device won: release the paste prompt awaitCode left open.
+			callbacks.OnDismissManualInput()
+		}
+		return r.win, r.err
+	}
+}
+
+// browserCode waits for the loopback callback or the manual paste and
+// verifies state.
+func browserCode(
+	ctx context.Context,
+	fl *OAuthFlowSpec,
+	callbackCh <-chan *pinoauth.CallbackResult,
+	localRedirectURI string,
+	callbacks pinoauth.LoginCallbacks,
+	verifier string,
+) (codeWin, error) {
+	code, state, pasted, err := awaitCode(ctx, callbackCh, localRedirectURI, callbacks, verifier)
+	if err != nil {
+		return codeWin{}, err
+	}
+	if state != verifier {
+		return codeWin{}, fmt.Errorf("OAuth state mismatch")
+	}
+	return codeWin{code: code, verifier: verifier, redirectURI: exchangeRedirectURI(fl, localRedirectURI, pasted)}, nil
 }
 
 // expandTokenBodyExtra materialises the spec's TokenBodyExtra into a
@@ -186,6 +289,15 @@ func (p *genericAuthProvider) openCallbackChannel(
 
 	srv, ch, resolvedAddr, bindErr := pinoauth.StartCallbackServer(ctx, path, addr, state)
 	if bindErr != nil {
+		// With a device-code source and a fixed loopback port the login
+		// still works: keep the loopback redirect in the authorize URL so
+		// a failed-localhost redirect URL can be pasted, and let the
+		// device code race it.
+		if fl.DeviceCode != nil && fl.ManualRedirectURI == "" {
+			if _, port, err := net.SplitHostPort(addr); err == nil && port != "" && port != "0" {
+				return nil, fmt.Sprintf("http://localhost:%s%s", port, path), nil
+			}
+		}
 		if fl.ManualRedirectURI == "" {
 			return nil, "", fmt.Errorf("starting callback server: %w", bindErr)
 		}

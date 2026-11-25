@@ -167,6 +167,11 @@ type OAuthFlowSpec struct {
 	// stored target. Cuts worst-case auth URLs from ~600+ chars to
 	// ~200 — handy in terminals/QR codes.
 	ShortURLBase string `json:"short_url_base,omitempty"`
+	// DeviceCode, when set, races an optional device-code grant against
+	// the loopback callback and the manual paste in the same login: the
+	// code and link are shown alongside the browser link, and whichever
+	// source completes first wins. See [DeviceCodeSpec].
+	DeviceCode *DeviceCodeSpec `json:"device_code,omitempty"`
 	// HasPostExchange opts the extension into the auth/post_exchange
 	// JSON-RPC hook (called after both initial code-exchange and
 	// each refresh) for credential-shape customisation.
@@ -174,6 +179,31 @@ type OAuthFlowSpec struct {
 	// HasCustomRefresh opts the extension into the auth/refresh
 	// JSON-RPC hook, replacing the default pinoauth.Refresh call.
 	HasCustomRefresh bool `json:"has_custom_refresh,omitempty"`
+}
+
+// DeviceCodeSpec configures an OpenAI-style device-code grant that yields
+// an authorization code (not tokens): POST UserCodeURL {client_id} →
+// {device_auth_id, user_code, interval}; the user enters user_code at
+// VerificationURL; poll POST PollURL {device_auth_id, user_code} (403/404
+// = pending) → {authorization_code, code_verifier}; exchange that at the
+// flow's TokenURL with RedirectURI. Any failure only drops this source;
+// the browser login still works.
+type DeviceCodeSpec struct {
+	// UserCodeURL issues the user code. Requested once per login.
+	UserCodeURL string `json:"usercode_url"`
+	// PollURL is polled until the user approves.
+	PollURL string `json:"poll_url"`
+	// VerificationURL is where the user enters the code.
+	VerificationURL string `json:"verification_url"`
+	// RedirectURI is sent with the code exchange for device-won logins.
+	RedirectURI string `json:"redirect_uri"`
+	// Hint is shown after the code (e.g. how to enable device login).
+	Hint string `json:"hint,omitempty"`
+	// Headers are added to the usercode and poll requests (e.g. a
+	// User-Agent the provider's CDN accepts).
+	Headers map[string]string `json:"headers,omitempty"`
+	// MaxWaitSeconds caps polling. Defaults to 900 (15 minutes).
+	MaxWaitSeconds int `json:"max_wait_seconds,omitempty"`
 }
 
 // ApiSpec describes a wire-protocol adapter registered by an extension.

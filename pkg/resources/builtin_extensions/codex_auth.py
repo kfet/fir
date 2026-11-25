@@ -10,7 +10,9 @@
 Declarative provider: fir drives the standard authorization-code+PKCE flow.
 Codex-specific bits: extracting ``chatgpt_account_id`` from the access-token
 JWT (post-exchange enrichment) and the live model list via the ChatGPT
-backend API.
+backend API. The same login also offers a device code (off by default in
+ChatGPT accounts; enabled in ChatGPT → Settings → Security) that races the
+browser callback and the paste — first to complete wins.
 """
 
 from __future__ import annotations
@@ -50,6 +52,19 @@ fir_ext.declare_oauth_provider(
     },
     open_url_instructions="Complete the sign-in in your browser.",
     short_url_base="https://tinyurl.com/fir-cdx",
+    device_code={
+        "usercode_url": "https://auth.openai.com/api/accounts/deviceauth/usercode",
+        "poll_url": "https://auth.openai.com/api/accounts/deviceauth/token",
+        "verification_url": "https://auth.openai.com/codex/device",
+        "redirect_uri": "https://auth.openai.com/deviceauth/callback",
+        "hint": (
+            "If the page says device code login is disabled, enable it in "
+            "ChatGPT → Settings → Security, or use the link above."
+        ),
+        # Cloudflare in front of auth.openai.com rejects some default
+        # User-Agents (HTTP 530); send a Codex-CLI-like one.
+        "headers": {"User-Agent": "codex_cli_rs/0.1.0 (fir)", "originator": "fir"},
+    },
 )
 
 

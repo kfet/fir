@@ -51,8 +51,9 @@ const (
 
 // pendingAuthTimeout bounds how long a parked Login goroutine waits for
 // the user to paste the redirect URL. Belt-and-braces — relays should
-// cancel explicitly when the user gives up.
-const pendingAuthTimeout = 10 * time.Minute
+// cancel explicitly when the user gives up. Longer than the 15-minute
+// device-code window so a device login is not cut short.
+const pendingAuthTimeout = 16 * time.Minute
 
 // pendingAuth holds the state of an in-flight interactive OAuth login.
 type pendingAuth struct {

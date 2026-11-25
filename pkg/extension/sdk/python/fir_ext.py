@@ -2006,6 +2006,7 @@ def declare_oauth_provider(
     token_headers: dict[str, str] | None = None,
     open_url_instructions: str = "",
     short_url_base: str = "",
+    device_code: dict[str, Any] | None = None,
     has_post_exchange: bool | None = None,
     has_custom_refresh: bool | None = None,
     uses_callback_server: bool = True,
@@ -2098,6 +2099,13 @@ def declare_oauth_provider(
         shortener merges them with the stored target. Cuts worst-case
         auth URLs from ~600+ chars to ~200 — friendlier in terminals/QR
         codes. Empty to disable.
+    device_code : dict, optional
+        Race an OpenAI-style device-code grant against the browser login
+        in the same flow. Keys: ``usercode_url``, ``poll_url``,
+        ``verification_url``, ``redirect_uri`` (sent with a device-won
+        exchange), optional ``hint`` (shown after the code), ``headers``
+        and ``max_wait_seconds`` (default 900). fir requests one user code
+        per login; on failure the device section is silently omitted.
     has_post_exchange, has_custom_refresh : bool, optional
         Override the auto-detection of which hooks the extension
         provides. Normally left as ``None`` — the SDK populates these
@@ -2129,6 +2137,7 @@ def declare_oauth_provider(
                 "token_headers": dict(token_headers) if token_headers else {},
                 "open_url_instructions": open_url_instructions,
                 "short_url_base": short_url_base,
+                **({"device_code": dict(device_code)} if device_code else {}),
                 # has_post_exchange / has_custom_refresh are filled in at
                 # init time from the decorator registries — see
                 # _finalise_auth_specs.
