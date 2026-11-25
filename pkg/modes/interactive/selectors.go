@@ -416,6 +416,9 @@ func (m *InteractiveMode) loadAllSessionsForSelector() ([]store.SessionListInfo,
 func (m *InteractiveMode) oauthLoginCallbacks() pinoauth.LoginCallbacks {
 	// manualInputCancel, when non-nil, dismisses the active manual-input
 	// prompt by simulating Escape. Protected by manualInputMu.
+	// A loopback URL is reported only by the login these callbacks drive;
+	// drop any left by an earlier login that ended before OnAuth.
+	m.localAuthURL.Store(nil)
 	var manualInputMu sync.Mutex
 	var manualInputCancel func()
 
@@ -489,6 +492,12 @@ func (m *InteractiveMode) oauthLoginCallbacks() pinoauth.LoginCallbacks {
 	callbacks := pinoauth.LoginCallbacks{
 		OnAuth: func(info pinoauth.AuthInfo) {
 			openURL := session.PreferredAuthURL(info.URL, info.ShortURL)
+			if local := m.localAuthURL.Swap(nil); local != nil {
+				// The shown URL is the manual copy-the-code one, for a
+				// browser on another device; the local browser takes the
+				// loopback URL so its redirect completes the login.
+				openURL = *local
+			}
 			// Try to auto-open the browser.
 			browserOpened := session.OpenBrowser(openURL) == nil
 

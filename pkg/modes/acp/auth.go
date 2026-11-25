@@ -262,9 +262,10 @@ func (pa *firAgent) authenticateOAuth(ctx context.Context, method *ExtendedAuthM
 			formatProviderName(providerID), envkeys.ProviderEnvVar(providerID))
 	}
 
+	ctx, browserURL := session.WithLocalAuthURL(ctx)
 	err := authStorage.Login(ctx, providerID, pinoauth.LoginCallbacks{
 		OnAuth: func(info pinoauth.AuthInfo) {
-			openURL := session.PreferredAuthURL(info.URL, info.ShortURL)
+			openURL := browserURL(info)
 			firlog.Info("acp oauth: opening browser", "url", openURL, "short_url", info.ShortURL)
 			if err := session.OpenBrowser(openURL); err != nil {
 				firlog.Info("acp oauth: failed to open browser", "error", err)

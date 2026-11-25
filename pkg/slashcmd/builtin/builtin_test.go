@@ -106,7 +106,8 @@ func (a *fakeAuth) List() []string {
 	}
 	return ids
 }
-func (a *fakeAuth) Login(_ context.Context, id string, _ pinoauth.LoginCallbacks) error {
+func (a *fakeAuth) Login(ctx context.Context, id string, _ pinoauth.LoginCallbacks) error {
+	ai.ReportLocalAuthURL(ctx, "http://localhost:1/callback")
 	if a.loginErr != nil {
 		return a.loginErr
 	}
@@ -345,6 +346,22 @@ func TestLogin(t *testing.T) {
 		t.Fatalf("picker choices %+v", ro.picked)
 	}
 	expect(t, &ro.out, "status:Logged in to OPENAI")
+}
+
+// sinkOut is an Output that implements slashcmd.LocalAuthURLSink.
+type sinkOut struct {
+	out
+	local string
+}
+
+func (o *sinkOut) LocalAuthURL(u string) { o.local = u }
+
+func TestLoginLocalAuthURLSink(t *testing.T) {
+	o := &sinkOut{}
+	run(t, &fakeHost{auth: newAuth()}, o, "login", "anthropic")
+	if o.local != "http://localhost:1/callback" {
+		t.Fatalf("local auth URL = %q", o.local)
+	}
 }
 
 func TestLoginTimeout(t *testing.T) {

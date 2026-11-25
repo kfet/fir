@@ -779,3 +779,145 @@ func TestGenericAuthProvider_CallbackServerClosedOnReturn(t *testing.T) {
 	}
 	t.Errorf("callback server still accepting connections at %s after Login returned", ru.Host)
 }
+
+func TestShownRedirectURI(t *testing.T) {
+	local := "http://localhost:1/callback"
+	withManual := &OAuthFlowSpec{ManualRedirectURI: "https://p/code"}
+	if got := shownRedirectURI(withManual, local); got != "https://p/code" {
+		t.Errorf("manual configured: got %q", got)
+	}
+	if got := shownRedirectURI(withManual, ""); got != "https://p/code" {
+		t.Errorf("no listener: got %q", got)
+	}
+	if got := shownRedirectURI(&OAuthFlowSpec{}, local); got != local {
+		t.Errorf("no manual: got %q", got)
+	}
+}
+
+func TestExchangeRedirectURI(t *testing.T) {
+	withManual := &OAuthFlowSpec{ManualRedirectURI: "https://p/code"}
+	none := &OAuthFlowSpec{}
+	local := "http://localhost:1/callback"
+	cases := []struct {
+		name   string
+		fl     *OAuthFlowSpec
+		local  string
+		pasted bool
+		want   string
+	}{
+		{"pasted with manual", withManual, local, true, "https://p/code"},
+		{"callback with manual", withManual, local, false, local},
+		{"pasted without manual", none, local, true, local},
+		{"no listener", withManual, "", true, "https://p/code"},
+	}
+	for _, c := range cases {
+		if got := exchangeRedirectURI(c.fl, c.local, c.pasted); got != c.want {
+			t.Errorf("%s: got %q want %q", c.name, got, c.want)
+		}
+	}
+}
+
+// dualURLLogin runs a login against a bound loopback listener plus a
+// manual_redirect_uri. complete receives the shown URL and the reported
+// local URL and must finish the flow: it returns the paste input, or ""
+// to leave the paste prompt blocked (code arrives via the callback).
+func dualURLLogin(t *testing.T, complete func(shown, local string) string) string {
+	t.Helper()
+	ai.ResetOAuthProviders()
+	t.Cleanup(ai.ResetOAuthProviders)
+	srv := newFakeOAuthServer(t)
+	caps := &InitResult{
+		Name: "test-ext",
+		AuthProviders: []AuthProviderSpec{{
+			ID: "test-dual", Name: "Dual", UsesCallbackServer: true,
+			Flow: &OAuthFlowSpec{
+				ClientID: "c", AuthorizeURL: srv.authorizeURL(), TokenURL: srv.tokenURL(),
+				CallbackAddr: "127.0.0.1:0", ManualRedirectURI: "https://manual.example/code",
+				AuthParamsExtra: map[string]string{"code": "true"},
+			},
+		}},
+	}
+	bridge := NewBridge(nil, caps)
+	bridge.RegisterAuthProviders()
+	t.Cleanup(bridge.UnregisterAuthProviders)
+
+	var local string
+	ctx := ai.WithLocalAuthURLSink(context.Background(), func(u string) { local = u })
+	var shown string
+	release := make(chan struct{})
+	defer close(release)
+	_, err := ai.GetOAuthProvider("test-dual").Login(ctx, pinoauth.LoginCallbacks{
+		OnAuth: func(info pinoauth.AuthInfo) { shown = info.URL },
+		OnManualCodeInput: func() (string, error) {
+			if in := complete(shown, local); in != "" {
+				return in, nil
+			}
+			<-release
+			return "", fmt.Errorf("dismissed")
+		},
+	})
+	if err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+	_, body := srv.snapshot()
+	return string(body)
+}
+
+func redirectOf(t *testing.T, raw string) (redirect, state string) {
+	t.Helper()
+	u, err := url.Parse(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return u.Query().Get("redirect_uri"), u.Query().Get("state")
+}
+
+func TestGenericAuthProvider_DualURL_Paste(t *testing.T) {
+	body := dualURLLogin(t, func(shown, local string) string {
+		r, state := redirectOf(t, shown)
+		if r != "https://manual.example/code" {
+			t.Errorf("shown redirect = %q, want manual", r)
+		}
+		if lr, _ := redirectOf(t, local); !strings.HasPrefix(lr, "http://localhost:") {
+			t.Errorf("local redirect = %q, want loopback", lr)
+		}
+		return "PASTED#" + state
+	})
+	for _, frag := range []string{"code=PASTED", "redirect_uri=https%3A%2F%2Fmanual.example%2Fcode"} {
+		if !strings.Contains(body, frag) {
+			t.Errorf("token body missing %q in %q", frag, body)
+		}
+	}
+}
+
+func TestGenericAuthProvider_DualURL_Callback(t *testing.T) {
+	var localRedirect string
+	body := dualURLLogin(t, func(_, local string) string {
+		var state string
+		localRedirect, state = redirectOf(t, local)
+		go func() {
+			resp, err := http.Get(localRedirect + "?code=CB&state=" + url.QueryEscape(state))
+			if err == nil {
+				resp.Body.Close()
+			}
+		}()
+		return ""
+	})
+	for _, frag := range []string{"code=CB", "redirect_uri=" + url.QueryEscape(localRedirect)} {
+		if !strings.Contains(body, frag) {
+			t.Errorf("token body missing %q in %q", frag, body)
+		}
+	}
+}
+
+func TestGenericAuthProvider_DualURL_PasteLoopbackURL(t *testing.T) {
+	var localRedirect string
+	body := dualURLLogin(t, func(_, local string) string {
+		var state string
+		localRedirect, state = redirectOf(t, local)
+		return localRedirect + "?code=LB&state=" + url.QueryEscape(state)
+	})
+	if !strings.Contains(body, "redirect_uri="+url.QueryEscape(localRedirect)) {
+		t.Errorf("pasted loopback URL must exchange with loopback redirect_uri: %q", body)
+	}
+}

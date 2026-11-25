@@ -43,9 +43,10 @@ func runLogin(providerID string, opts auth.LoginOptions) error {
 
 	fmt.Fprintf(os.Stderr, "Logging in to %s...\n", provider.Name())
 
+	ctx, browserURL := session.WithLocalAuthURL(context.Background())
 	callbacks := pinoauth.LoginCallbacks{
 		OnAuth: func(info pinoauth.AuthInfo) {
-			openURL := session.PreferredAuthURL(info.URL, info.ShortURL)
+			openURL := browserURL(info)
 			browserOpened := session.OpenBrowser(openURL) == nil
 			formatted := session.FormatAuthURLs(info.URL, info.ShortURL)
 			if browserOpened {
@@ -78,7 +79,7 @@ func runLogin(providerID string, opts auth.LoginOptions) error {
 		},
 	}
 
-	slot, label, err := authStorage.LoginAccountOpts(context.Background(), providerID, callbacks, opts)
+	slot, label, err := authStorage.LoginAccountOpts(ctx, providerID, callbacks, opts)
 	if err != nil {
 		return fmt.Errorf("login failed: %w", err)
 	}

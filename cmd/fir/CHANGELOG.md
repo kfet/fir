@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- **OAuth login works when the browser is on another device.** Providers with a `manual_redirect_uri` (Anthropic) now always show the manual copy-the-code URL, open the loopback URL in the local browser in every mode (CLI, TUI, ACP), race the callback against the paste, and exchange with the redirect_uri that produced the code — the Claude Code flow.
+
 ## [1.66.0] - 2026-11-24
 
 ### Added

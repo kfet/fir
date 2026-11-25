@@ -106,6 +106,11 @@ type InteractiveMode struct {
 	// Bash execution state
 	bashComponent atomic.Pointer[components.BashExecutionComponent]
 
+	// localAuthURL, when set, is the loopback authorize URL a provider
+	// reported for the login in flight; OnAuth opens it locally and shows
+	// the provider's manual URL. Consumed (cleared) by OnAuth.
+	localAuthURL atomic.Pointer[string]
+
 	// Flags
 	running         bool
 	shutdownRequest bool

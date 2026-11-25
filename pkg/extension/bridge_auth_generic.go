@@ -59,13 +59,22 @@ func (p *genericAuthProvider) Login(ctx context.Context, callbacks pinoauth.Logi
 
 	pkce := pinoauth.GeneratePKCE()
 
-	callbackCh, redirectURI, err := p.openCallbackChannel(loginCtx, fl, pkce.Verifier)
+	callbackCh, localRedirectURI, err := p.openCallbackChannel(loginCtx, fl, pkce.Verifier)
 	if err != nil {
 		return nil, err
 	}
+	shown := shownRedirectURI(fl, localRedirectURI)
 
-	authURL := buildAuthorizeURL(fl, pkce, redirectURI)
-	shortURL := buildShortURL(fl, pkce, redirectURI)
+	// When the user is shown the manual (copy-the-code) URL but a loopback
+	// listener is bound too, hand the loopback URL to a caller that opens
+	// a local browser: the same PKCE session then completes either way —
+	// redirect to localhost, or the code pasted from another device.
+	if localRedirectURI != "" && shown != localRedirectURI {
+		ai.ReportLocalAuthURL(loginCtx, buildAuthorizeURL(fl, pkce, localRedirectURI))
+	}
+
+	authURL := buildAuthorizeURL(fl, pkce, shown)
+	shortURL := buildShortURL(fl, pkce, shown)
 
 	if callbacks.OnAuth != nil {
 		callbacks.OnAuth(pinoauth.AuthInfo{URL: authURL, ShortURL: shortURL, Instructions: fl.OpenURLInstructions})
@@ -74,13 +83,14 @@ func (p *genericAuthProvider) Login(ctx context.Context, callbacks pinoauth.Logi
 		callbacks.OnProgress("Waiting for OAuth callback...")
 	}
 
-	code, state, err := awaitCode(loginCtx, callbackCh, callbacks, pkce.Verifier)
+	code, state, pasted, err := awaitCode(loginCtx, callbackCh, localRedirectURI, callbacks, pkce.Verifier)
 	if err != nil {
 		return nil, err
 	}
 	if state != pkce.Verifier {
 		return nil, fmt.Errorf("OAuth state mismatch")
 	}
+	redirectURI := exchangeRedirectURI(fl, localRedirectURI, pasted)
 
 	if callbacks.OnProgress != nil {
 		callbacks.OnProgress("Exchanging authorization code for tokens...")
@@ -145,9 +155,9 @@ func (p *genericAuthProvider) tokenClient(fl *OAuthFlowSpec) *pinoauth.Client {
 
 // openCallbackChannel binds the local OAuth callback server (or arranges
 // the manual-paste fallback when the spec disables/can't bind one). It
-// returns a channel for the redirect result (nil when binding was
-// skipped or failed but a manual fallback is configured), the redirect
-// URI to embed in the authorize URL, and any fatal error.
+// returns a channel for the redirect result and the loopback redirect URI
+// (both empty when binding was skipped or failed but a manual fallback is
+// configured), and any fatal error.
 //
 // On a successful bind, lifecycle (Close) is wired into ctx via a
 // goroutine; the caller does not need to track the *http.Server.
@@ -162,7 +172,7 @@ func (p *genericAuthProvider) openCallbackChannel(
 		if fl.ManualRedirectURI == "" {
 			return nil, "", fmt.Errorf("callback server disabled but no manual_redirect_uri configured")
 		}
-		return nil, fl.ManualRedirectURI, nil
+		return nil, "", nil
 	}
 
 	addr := fl.CallbackAddr
@@ -180,7 +190,7 @@ func (p *genericAuthProvider) openCallbackChannel(
 			return nil, "", fmt.Errorf("starting callback server: %w", bindErr)
 		}
 		// Bind failed but caller provided a manual fallback URI.
-		return nil, fl.ManualRedirectURI, nil
+		return nil, "", nil
 	}
 
 	// Close the server when ctx is done so a cancelled login doesn't
@@ -299,43 +309,103 @@ func defaultCredsFromToken(tok *pinoauth.Token) *ai.OAuthCredentials {
 	return c
 }
 
-// awaitCode waits for the authorization code: either through the
-// callback server (when bound) or from a manual paste prompt as a
-// pure fallback when the callback server failed to start.
+// shownRedirectURI picks the redirect URI of the authorize URL shown to
+// the user. A provider with a manual_redirect_uri always shows its manual
+// (copy-the-code) URL, so the login works with the browser on any device;
+// callers open the loopback URL in this host's browser, and the callback
+// races the paste.
+func shownRedirectURI(fl *OAuthFlowSpec, localRedirectURI string) string {
+	if fl.ManualRedirectURI != "" {
+		return fl.ManualRedirectURI
+	}
+	return localRedirectURI
+}
+
+// exchangeRedirectURI returns the redirect_uri for the token exchange: it
+// must match the authorize URL that produced the code. A code from the
+// loopback callback came via localRedirectURI; a pasted code came from the
+// manual URI when the provider has one (else the user pasted the loopback
+// redirect URL from a browser on another device).
+func exchangeRedirectURI(fl *OAuthFlowSpec, localRedirectURI string, pasted bool) string {
+	if pasted && fl.ManualRedirectURI != "" || localRedirectURI == "" {
+		return fl.ManualRedirectURI
+	}
+	return localRedirectURI
+}
+
+// awaitCode waits for the authorization code: it races the callback
+// server (when bound) against the manual paste prompt (when the caller
+// has one). pasted reports whether the code came from the paste; a pasted
+// loopback redirect URL counts as the callback, since localRedirectURI
+// produced that code.
 func awaitCode(
 	ctx context.Context,
 	callbackCh <-chan *pinoauth.CallbackResult,
+	localRedirectURI string,
 	callbacks pinoauth.LoginCallbacks,
 	verifier string,
-) (string, string, error) {
-	if callbackCh != nil {
-		// Callback server bound — race it against optional manual paste.
-		return pinoauth.AwaitAuthCode(ctx, callbackCh, callbacks.OnManualCodeInput, callbacks.OnDismissManualInput)
+) (code, state string, pasted bool, err error) {
+	if callbackCh == nil {
+		// Pure manual fallback (callback server failed to bind, or the
+		// spec disabled it entirely).
+		if callbacks.OnManualCodeInput == nil {
+			return "", "", false, fmt.Errorf("callback server unavailable and no manual input handler")
+		}
+		input, err := callbacks.OnManualCodeInput()
+		if err != nil {
+			return "", "", false, err
+		}
+		code, state := pinoauth.ParseAuthorizationInput(input)
+		if state == "" {
+			// SECURITY: when the user pastes a bare authorization code
+			// (not a full redirect URL with `&state=...`), there is no
+			// state value to verify against the CSRF token (verifier).
+			// We accept this with the verifier substituted in so the
+			// downstream `state == verifier` check passes — effectively
+			// bypassing CSRF protection on the manual-paste-bare-code
+			// path. A hand-pasted code can't be verified, but refusing
+			// it would block users on locked-down machines where the
+			// local callback server can't bind.
+			state = verifier
+		}
+		return code, state, true, nil
 	}
-	// Pure manual fallback (callback server failed to bind, or the
-	// spec disabled it entirely).
-	if callbacks.OnManualCodeInput == nil {
-		return "", "", fmt.Errorf("callback server unavailable and no manual input handler")
+
+	type winner struct {
+		code, state string
+		pasted      bool
+		err         error
 	}
-	input, err := callbacks.OnManualCodeInput()
-	if err != nil {
-		return "", "", err
+	out := make(chan winner, 2)
+	go func() {
+		select {
+		case res, ok := <-callbackCh:
+			if !ok || res == nil {
+				out <- winner{err: pinoauth.ErrCallbackClosed}
+				return
+			}
+			out <- winner{code: res.Code, state: res.State}
+		case <-ctx.Done():
+			out <- winner{err: ctx.Err()}
+		}
+	}()
+	if callbacks.OnManualCodeInput != nil {
+		go func() {
+			input, err := callbacks.OnManualCodeInput()
+			if err != nil {
+				out <- winner{err: err}
+				return
+			}
+			c, s := pinoauth.ParseAuthorizationInput(input)
+			loopback := strings.HasPrefix(strings.TrimSpace(input), localRedirectURI+"?")
+			out <- winner{code: c, state: s, pasted: !loopback}
+		}()
 	}
-	code, state := pinoauth.ParseAuthorizationInput(input)
-	if state == "" {
-		// SECURITY: when the user pastes a bare authorization code
-		// (not a full redirect URL with `&state=...`), there is no
-		// state value to verify against the CSRF token (verifier).
-		// We accept this with the verifier substituted in so the
-		// downstream `state == verifier` check passes — effectively
-		// bypassing CSRF protection on the manual-paste-bare-code
-		// path. This is the same trade-off the imperative extensions
-		// made before this refactor: a hand-pasted code can't be
-		// verified, but refusing it would block users on locked-down
-		// machines where the local callback server can't bind.
-		state = verifier
+	w := <-out
+	if callbacks.OnDismissManualInput != nil {
+		callbacks.OnDismissManualInput()
 	}
-	return code, state, nil
+	return w.code, w.state, w.pasted, w.err
 }
 
 // buildAuthorizeURL composes the authorization endpoint URL with the

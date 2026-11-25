@@ -76,6 +76,10 @@ func (h *tuiCmdHost) Code(text string)    { h.m.showStatus(text) }
 
 func (h *tuiCmdHost) LoginCallbacks() pinoauth.LoginCallbacks { return h.m.oauthLoginCallbacks() }
 
+// LocalAuthURL implements slashcmd.LocalAuthURLSink: the next OnAuth opens
+// url in the local browser instead of the URL it shows.
+func (h *tuiCmdHost) LocalAuthURL(url string) { h.m.localAuthURL.Store(&url) }
+
 // builtin.Host.
 func (h *tuiCmdHost) Cwd() string {
 	cwd, _ := os.Getwd()

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/auth"
 	"github.com/kfet/fir/pkg/mcp"
 	"github.com/kfet/fir/pkg/slashcmd"
@@ -333,6 +334,9 @@ func LoginProvider(c *slashcmd.Ctx, id string) {
 	c.Async(func() {
 		ctx, cancel := context.WithTimeout(c.Context, loginTimeout)
 		defer cancel()
+		if sink, ok := c.Out.(slashcmd.LocalAuthURLSink); ok {
+			ctx = ai.WithLocalAuthURLSink(ctx, sink.LocalAuthURL)
+		}
 		if err := a.Login(ctx, id, c.Out.LoginCallbacks()); err != nil {
 			switch {
 			case ctx.Err() == context.DeadlineExceeded:

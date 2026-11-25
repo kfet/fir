@@ -30,6 +30,14 @@ type Output interface {
 	LoginCallbacks() pinoauth.LoginCallbacks
 }
 
+// LocalAuthURLSink is an optional [Output] extension for modes that open
+// the authorization URL in a browser on this host. When a provider shows
+// the user a manual (copy-the-code) URL, it reports the loopback authorize
+// URL here first so the mode opens that one locally instead.
+type LocalAuthURLSink interface {
+	LocalAuthURL(url string)
+}
+
 // Ctx is passed to every handler.
 type Ctx struct {
 	Context context.Context

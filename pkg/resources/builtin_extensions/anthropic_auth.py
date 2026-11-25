@@ -71,10 +71,7 @@ fir_ext.declare_oauth_provider(
     token_body_extra={"state": "{state}"},
     # Expanded by fir at every token exchange and refresh.
     token_headers={"User-Agent": _USER_AGENT},
-    open_url_instructions=(
-        "Complete login in your browser. If the browser is on another machine, "
-        "paste the final redirect URL here."
-    ),
+    open_url_instructions=("Sign in, then copy the code shown on the page and paste it here."),
     short_url_base="https://tinyurl.com/fir-ant",
 )
 
