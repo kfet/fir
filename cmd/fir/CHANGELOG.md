@@ -2,8 +2,13 @@
 
 ## [Unreleased]
 
+## [1.66.0] - 2026-11-24
+
 ### Added
 - MCP server `instructions` (from `initialize`) now reach the model: one `# MCP server instructions` system-prompt section, a subsection per server in name order, each cut at 4,096 characters, identical texts merged, absent when no server sends any. It updates on connect, reconnect and reload, and is saved in session state so a resumed session keeps the same prompt before its servers reconnect.
+
+### Changed
+- **Model catalog regenerated**: added 3 aggregator models; 70 models with changed pricing/limits.
 
 ## [1.65.0] - 2026-11-24
 
