@@ -355,19 +355,7 @@ func awaitCode(
 		if err != nil {
 			return "", "", false, err
 		}
-		code, state := pinoauth.ParseAuthorizationInput(input)
-		if state == "" {
-			// SECURITY: when the user pastes a bare authorization code
-			// (not a full redirect URL with `&state=...`), there is no
-			// state value to verify against the CSRF token (verifier).
-			// We accept this with the verifier substituted in so the
-			// downstream `state == verifier` check passes — effectively
-			// bypassing CSRF protection on the manual-paste-bare-code
-			// path. A hand-pasted code can't be verified, but refusing
-			// it would block users on locked-down machines where the
-			// local callback server can't bind.
-			state = verifier
-		}
+		code, state := parsePasted(input, verifier)
 		return code, state, true, nil
 	}
 
@@ -396,7 +384,7 @@ func awaitCode(
 				out <- winner{err: err}
 				return
 			}
-			c, s := pinoauth.ParseAuthorizationInput(input)
+			c, s := parsePasted(input, verifier)
 			loopback := strings.HasPrefix(strings.TrimSpace(input), localRedirectURI+"?")
 			out <- winner{code: c, state: s, pasted: !loopback}
 		}()
@@ -406,6 +394,19 @@ func awaitCode(
 		callbacks.OnDismissManualInput()
 	}
 	return w.code, w.state, w.pasted, w.err
+}
+
+// parsePasted extracts code and state from manual input. SECURITY: a
+// bare code (as shown by a provider's copy-code page) carries no state
+// to verify against the CSRF token, so the verifier is substituted and
+// the caller's state check passes. Refusing it would block every
+// copy-code login and users whose callback server cannot bind.
+func parsePasted(input, verifier string) (code, state string) {
+	code, state = pinoauth.ParseAuthorizationInput(input)
+	if state == "" {
+		state = verifier
+	}
+	return code, state
 }
 
 // buildAuthorizeURL composes the authorization endpoint URL with the

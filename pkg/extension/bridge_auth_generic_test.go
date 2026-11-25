@@ -921,3 +921,14 @@ func TestGenericAuthProvider_DualURL_PasteLoopbackURL(t *testing.T) {
 		t.Errorf("pasted loopback URL must exchange with loopback redirect_uri: %q", body)
 	}
 }
+
+// A bare code (no #state, as Google's codeassist authcode page shows) must
+// exchange with the manual redirect_uri.
+func TestGenericAuthProvider_DualURL_PasteBareCode(t *testing.T) {
+	body := dualURLLogin(t, func(string, string) string { return "  BARE  " })
+	for _, frag := range []string{"code=BARE&", "redirect_uri=https%3A%2F%2Fmanual.example%2Fcode"} {
+		if !strings.Contains(body+"&", frag) {
+			t.Errorf("token body missing %q in %q", frag, body)
+		}
+	}
+}

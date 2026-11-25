@@ -74,8 +74,11 @@ fir_ext.declare_oauth_provider(
     ),
     callback_addr="127.0.0.1:0",
     callback_path="/cb",
+    # Gemini CLI's NO_BROWSER redirect: Google shows the code with a Copy
+    # button, so remote/headless logins can paste it back.
+    manual_redirect_uri="https://codeassist.google.com/authcode",
     auth_params_extra={"access_type": "offline", "prompt": "consent"},
-    open_url_instructions="Complete the sign-in in your browser.",
+    open_url_instructions="Sign in, then copy the code shown on the page and paste it here.",
     short_url_base="https://tinyurl.com/fir-gem",
 )
 
