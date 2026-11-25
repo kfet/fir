@@ -2,8 +2,13 @@
 
 ## [Unreleased]
 
+## [1.66.1] - 2026-11-24
+
 ### Fixed
 - **OAuth login works when the browser is on another device.** Providers with a `manual_redirect_uri` (Anthropic) now always show the manual copy-the-code URL, open the loopback URL in the local browser in every mode (CLI, TUI, ACP), race the callback against the paste, and exchange with the redirect_uri that produced the code — the Claude Code flow.
+
+### Changed
+- **Model catalog regenerated**: added `huggingface/Qwen/Qwen3.8-Flash-Next`; 6 model(s) with changed pricing/limits (huggingface: Qwen/Qwen3-235B-A22B-Instruct-2507, Qwen/Qwen3.6-35B-A3B, deepseek-ai/DeepSeek-V3-0324, deepseek-ai/DeepSeek-V4.1-Flash-1017, google/gemma-3-4b-it; openrouter: google/gemma-4-26b-a4b-it).
 
 ## [1.66.0] - 2026-11-24
 
