@@ -66,10 +66,11 @@ const (
 // nonConfigKeys are lower_snake_case identifiers that legitimately appear in
 // the MCP region without being fir config keys.
 var nonConfigKeys = map[string]bool{
-	"scopes_supported": true, // RFC 8414 authorization-server metadata field
-	"agent_introspect": true, // tool name (exposes mcp.servers health)
-	"mcp_state":        true, // extension event name (MCP health changes)
-	"upload_required":  true, // MCP files extension result type
+	"scopes_supported":             true, // RFC 8414 authorization-server metadata field
+	"agent_introspect":             true, // tool name (exposes mcp.servers health)
+	"mcp_state":                    true, // extension event name (MCP health changes)
+	"upload_required":              true, // MCP files extension result type
+	"agentbox_oauth_drop_endpoint": true, // OAuth metadata field (drop-box)
 }
 
 // jsonKeyLike matches backtick-quoted lower_snake_case identifiers. The

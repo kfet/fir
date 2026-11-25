@@ -174,6 +174,10 @@ type serverAuth struct {
 	// notify, when set, is called (in its own goroutine) whenever
 	// lastRequired changes. Set once by Manager.serverAuthFor before use.
 	notify func()
+	// dropEndpoint caches the drop-box endpoint advertised by dropIssuer,
+	// this server's credential issuer. Guarded by mu. See oauth_drop.go.
+	dropEndpoint string
+	dropIssuer   string
 }
 
 // reasonNoCredential is the AuthRequiredError reason for a server that has
@@ -813,7 +817,10 @@ func (sa *serverAuth) probeChallenge(ctx context.Context) {
 // windows. Requests arriving meanwhile do not queue behind it: acquire sees
 // loginInFlight and fails them fast with a "login in progress" error rather
 // than letting them sit on the lock until their deadlines expire.
-func (sa *serverAuth) Login(ctx context.Context, ui pinoauth.LoginCallbacks) error {
+//
+// drops, when non-nil, finds a drop-box on another server for Case A logins
+// (see oauth_drop.go).
+func (sa *serverAuth) Login(ctx context.Context, ui pinoauth.LoginCallbacks, drops dropAccessFunc) error {
 	if err := sa.mu.lockCtx(ctx); err != nil {
 		return fmt.Errorf("MCP server %q login: %w", sa.name, err)
 	}
@@ -821,7 +828,7 @@ func (sa *serverAuth) Login(ctx context.Context, ui pinoauth.LoginCallbacks) err
 	sa.loginInFlight.Store(true)
 	defer sa.loginInFlight.Store(false)
 	sa.pending = nil
-	err := sa.loginLocked(ctx, ui)
+	err := sa.loginLocked(ctx, ui, drops)
 	if err != nil {
 		return fmt.Errorf("MCP server %q login: %w", sa.name, err)
 	}
@@ -925,20 +932,22 @@ func (sa *serverAuth) startCallbackServer(ctx context.Context, state string) (*h
 	}
 }
 
-func (sa *serverAuth) loginLocked(ctx context.Context, ui pinoauth.LoginCallbacks) error {
-	// Bind the loopback listener FIRST: the redirect URI must be known before
-	// dynamic client registration, which registers it verbatim.
-	state := pinoauth.GenerateState()
-	cbCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	srv, resultCh, redirectURI, err := sa.startCallbackServer(cbCtx, state)
-	if err != nil {
-		return err
+func (sa *serverAuth) loginLocked(ctx context.Context, ui pinoauth.LoginCallbacks, drops dropAccessFunc) error {
+	// Refresh first: a stored refresh token that still works needs no browser.
+	sa.ensureLoadedLocked()
+	if sa.cred != nil && sa.cred.Token != nil && sa.cred.Token.RefreshToken != "" {
+		progress(ui, "Refreshing the stored credential…")
+		err := sa.refreshLocked(ctx, true)
+		if err == nil && sa.cred != nil && sa.cred.Token != nil {
+			progress(ui, "Stored credential refreshed; no browser login needed.")
+			firlog.Info("mcp oauth: login satisfied by refresh", "server", sa.name)
+			return nil
+		}
+		firlog.Debug("mcp oauth: refresh before login failed", "server", sa.name, "err", err)
 	}
-	defer srv.Close() //nolint:errcheck // best-effort; cbCtx cancel also closes it
 
 	progress(ui, fmt.Sprintf("Discovering OAuth configuration for %s…", sa.resource))
-	prm, err := discoverResourceMetadata(ctx, sa.hc, sa.resource, sa.challenge)
+	prm, prmURL, err := discoverResourceMetadataDoc(ctx, sa.hc, sa.resource, sa.challenge)
 	if err != nil {
 		if len(sa.cfg.AuthorizationServers) == 0 {
 			return err
@@ -950,16 +959,22 @@ func (sa *serverAuth) loginLocked(ctx context.Context, ui pinoauth.LoginCallback
 		// tolerates the nil.
 		firlog.Debug("mcp oauth: ignoring protected-resource metadata failure, issuers are forced",
 			"server", sa.name, "err", err)
-		prm = nil
+		prm, prmURL = nil, ""
 	}
-	asm, err := discoverAuthServer(ctx, sa.hc, sa.resolveIssuers(prm))
+	asm, asmURL, err := discoverAuthServerDoc(ctx, sa.hc, sa.resolveIssuers(prm))
 	if err != nil {
 		return err
 	}
 	scope := sa.resolveScope(prm)
+	state := pinoauth.GenerateState()
+	cbCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
 
 	clientID, clientSecret := sa.cfg.ClientID, expandEnvRef(sa.cfg.ClientSecret)
-	if clientID == "" {
+	register := func(redirectURI string) error {
+		if sa.cfg.ClientID != "" {
+			return nil
+		}
 		progress(ui, "Registering fir with the authorization server…")
 		reg, err := registerClient(ctx, sa.hc, asm, redirectURI, scope)
 		if err != nil {
@@ -969,6 +984,37 @@ func (sa *serverAuth) loginLocked(ctx context.Context, ui pinoauth.LoginCallback
 		if reg.Scope != "" {
 			scope = reg.Scope
 		}
+		return nil
+	}
+
+	var (
+		redirectURI string
+		resultCh    <-chan *pinoauth.CallbackResult
+		dropErr     error
+		dropped     bool
+	)
+	if slot := sa.openDropSlot(ctx, asm, asmURL, prmURL, state, drops); slot != nil {
+		if err := register(slot.redirectURI()); err != nil {
+			firlog.Debug("mcp oauth: registration rejected the drop-box redirect; using loopback",
+				"server", sa.name, "err", err)
+		} else {
+			ch := make(chan *pinoauth.CallbackResult, 1)
+			go slot.await(cbCtx, sa.hc, ch, &dropErr)
+			redirectURI, resultCh, dropped = slot.redirectURI(), ch, true
+		}
+	}
+	if resultCh == nil {
+		// Bind the loopback listener before registration, which registers
+		// its redirect URI verbatim.
+		srv, ch, uri, err := sa.startCallbackServer(cbCtx, state)
+		if err != nil {
+			return err
+		}
+		defer srv.Close() //nolint:errcheck // best-effort; cbCtx cancel also closes it
+		if err := register(uri); err != nil {
+			return err
+		}
+		redirectURI, resultCh = uri, ch
 	}
 
 	pkce := pinoauth.GeneratePKCE()
@@ -987,16 +1033,19 @@ func (sa *serverAuth) loginLocked(ctx context.Context, ui pinoauth.LoginCallback
 	if ui.OnAuth != nil {
 		ui.OnAuth(pinoauth.AuthInfo{
 			URL:          authURL,
-			Instructions: loginInstructions(sa.name, redirectURI),
+			Instructions: sa.instructions(redirectURI, dropped),
 		})
 	}
 	code, gotState, err := pinoauth.AwaitAuthCode(ctx, resultCh, ui.OnManualCodeInput, ui.OnDismissManualInput)
 	if err != nil {
+		if errors.Is(err, pinoauth.ErrCallbackClosed) && dropErr != nil {
+			err = dropErr
+		}
 		return fmt.Errorf("waiting for authorization code: %w", err)
 	}
-	// The loopback server validates state itself; a pasted code does not go
-	// through it, so validate here too. An empty state means the user pasted a
-	// bare code, which carries no state to check.
+	// The loopback server validates state itself; a pasted or dropped code
+	// does not go through it, so validate here too. An empty state means the
+	// user pasted a bare code, which carries no state to check.
 	if gotState != "" && gotState != state {
 		return errors.New("authorization state mismatch")
 	}
@@ -1042,6 +1091,54 @@ func (sa *serverAuth) loginLocked(ctx context.Context, ui pinoauth.LoginCallback
 	sa.synced = fingerprint(sa.cred)
 	firlog.Info("mcp oauth: login complete", "server", sa.name, "issuer", asm.Issuer)
 	return nil
+}
+
+// openDropSlot picks a drop-box for this login, or returns nil to use the
+// loopback listener. A pinned redirect URI or FIR_MCP_OAUTH_REDIRECT_BASE
+// wins. Case B: the server's own metadata advertises a drop endpoint on the
+// authorization server's host, which accepts redirects under it without a
+// token. Case A: another logged-in server's drop-box, opened with its token;
+// it needs dynamic client registration.
+func (sa *serverAuth) openDropSlot(ctx context.Context, asm *oauthex.AuthServerMeta, asmURL, prmURL, state string, drops dropAccessFunc) *dropSlot {
+	if sa.cfg.RedirectURI != "" || os.Getenv(envRedirectBase) != "" {
+		return nil
+	}
+	ep := fetchDropEndpoint(ctx, sa.hc, asmURL)
+	if ep == "" {
+		ep = fetchDropEndpoint(ctx, sa.hc, prmURL)
+	}
+	if ep != "" && sameHost(ep, asm.AuthorizationEndpoint) {
+		slot, err := newDropSlot(ep, "", state)
+		if err != nil {
+			return nil
+		}
+		firlog.Debug("mcp oauth: using own drop-box", "server", sa.name, "endpoint", ep)
+		return slot
+	}
+	if drops == nil || sa.cfg.ClientID != "" || asm.RegistrationEndpoint == "" {
+		return nil
+	}
+	da, ok := drops(ctx)
+	if !ok {
+		return nil
+	}
+	slot, err := newDropSlot(da.Endpoint, da.Token, state)
+	if err != nil {
+		return nil
+	}
+	if err := slot.open(ctx, sa.hc); err != nil {
+		firlog.Debug("mcp oauth: drop-box slot not opened; using loopback", "server", sa.name, "err", err)
+		return nil
+	}
+	firlog.Debug("mcp oauth: using drop-box", "server", sa.name, "endpoint", da.Endpoint)
+	return slot
+}
+
+// sameHost reports whether two URLs name the same host and port.
+func sameHost(a, b string) bool {
+	ua, err1 := url.Parse(a)
+	ub, err2 := url.Parse(b)
+	return err1 == nil && err2 == nil && ua.Host != "" && strings.EqualFold(ua.Host, ub.Host)
 }
 
 // resolveScope picks the scope to request. An explicitly configured scope wins
@@ -1217,6 +1314,16 @@ func authHTTPClient(sa *serverAuth) *http.Client {
 // embedded uses with no agent directory.
 func newCredentialStore(storage *auth.AuthStorage) credentialStore {
 	return credentialStore{storage: storage}
+}
+
+// instructions picks the login instructions: a drop-box login needs nothing
+// but the link.
+func (sa *serverAuth) instructions(redirectURI string, dropped bool) string {
+	if dropped {
+		return fmt.Sprintf("Authorize fir to access the MCP server %q. Open the link on any device and approve;"+
+			" fir picks up the result automatically.", sa.name)
+	}
+	return loginInstructions(sa.name, redirectURI)
 }
 
 // loginInstructions tells the user how to finish a login. With a loopback

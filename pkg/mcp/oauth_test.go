@@ -1549,7 +1549,7 @@ func TestMCPOAuth_RequestFailsFastWhileALoginIsInFlight(t *testing.T) {
 			_ = resp.Body.Close()
 		},
 	}
-	go func() { loginDone <- sa.Login(context.Background(), ui) }()
+	go func() { loginDone <- sa.Login(context.Background(), ui, nil) }()
 	<-loginEntered
 
 	// A tool call arriving now must NOT sit on the mutex until the human is

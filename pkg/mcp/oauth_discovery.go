@@ -122,13 +122,20 @@ var errNoMetadata = errors.New("no OAuth metadata found")
 // an error, it just means the caller must fall back to using the resource's own
 // origin as the authorization-server issuer.
 func discoverResourceMetadata(ctx context.Context, hc *http.Client, resource string, ci challengeInfo) (*oauthex.ProtectedResourceMetadata, error) {
+	prm, _, err := discoverResourceMetadataDoc(ctx, hc, resource, ci)
+	return prm, err
+}
+
+// discoverResourceMetadataDoc is discoverResourceMetadata that also returns
+// the URL the document was read from ("" when none was found).
+func discoverResourceMetadataDoc(ctx context.Context, hc *http.Client, resource string, ci challengeInfo) (*oauthex.ProtectedResourceMetadata, string, error) {
 	var candidates []string
 	if ci.ResourceMetadata != "" {
 		candidates = append(candidates, ci.ResourceMetadata)
 	}
 	derived, err := prmCandidates(resource)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	candidates = append(candidates, derived...)
 
@@ -137,12 +144,12 @@ func discoverResourceMetadata(ctx context.Context, hc *http.Client, resource str
 		if err == nil && prm != nil {
 			firlog.Debug("mcp oauth: protected-resource metadata", "url", mdURL,
 				"authorization_servers", prm.AuthorizationServers)
-			return prm, nil
+			return prm, mdURL, nil
 		}
 		firlog.Debug("mcp oauth: no protected-resource metadata", "url", mdURL, "err", err)
 	}
 	// RFC 9728 metadata is optional; the caller falls back to the origin.
-	return nil, nil
+	return nil, "", nil
 }
 
 // discoverAuthServer resolves authorization-server metadata for the first
@@ -153,8 +160,15 @@ func discoverResourceMetadata(ctx context.Context, hc *http.Client, resource str
 // does not host metadata — so a nil result means "try the next candidate", not
 // success.
 func discoverAuthServer(ctx context.Context, hc *http.Client, issuers []string) (*oauthex.AuthServerMeta, error) {
+	asm, _, err := discoverAuthServerDoc(ctx, hc, issuers)
+	return asm, err
+}
+
+// discoverAuthServerDoc is discoverAuthServer that also returns the URL the
+// metadata document was read from.
+func discoverAuthServerDoc(ctx context.Context, hc *http.Client, issuers []string) (*oauthex.AuthServerMeta, string, error) {
 	if len(issuers) == 0 {
-		return nil, errNoMetadata
+		return nil, "", errNoMetadata
 	}
 	var firstErr error
 	for _, issuer := range issuers {
@@ -181,13 +195,13 @@ func discoverAuthServer(ctx context.Context, hc *http.Client, issuers []string) 
 				"authorization_endpoint", asm.AuthorizationEndpoint,
 				"token_endpoint", asm.TokenEndpoint,
 				"registration_endpoint", asm.RegistrationEndpoint)
-			return asm, nil
+			return asm, mdURL, nil
 		}
 	}
 	if firstErr != nil {
-		return nil, fmt.Errorf("authorization server discovery: %w", firstErr)
+		return nil, "", fmt.Errorf("authorization server discovery: %w", firstErr)
 	}
-	return nil, errNoMetadata
+	return nil, "", errNoMetadata
 }
 
 // issuerCandidates returns the authorization-server issuers to try for a

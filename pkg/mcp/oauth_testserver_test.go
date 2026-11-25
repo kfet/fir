@@ -4,14 +4,17 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -41,6 +44,10 @@ type asOptions struct {
 	accessTokenTTL int
 	// rotateRefresh issues a new refresh token on every refresh.
 	rotateRefresh bool
+	// drop advertises and serves an agentbox OAuth code drop-box.
+	drop bool
+	// dropOpenStatus, when non-zero, is the status every slot-open POST gets.
+	dropOpenStatus int
 }
 
 // fakeAuthServer implements just enough of RFC 8414 / 7591 / 6749 / 7636 /
@@ -69,7 +76,22 @@ type fakeAuthServer struct {
 	lastResource string
 	// lastRedirect records the redirect_uri of the last successful code grant.
 	lastRedirect string
+
+	// drop-box state: slot id → slot.
+	slots     map[string]*fakeDropSlot
+	dropOpens int
+	dropPolls int
 }
+
+// fakeDropSlot is one drop-box slot. owner is the Bearer token that opened it
+// ("" for a Case B slot opened at approval).
+type fakeDropSlot struct {
+	owner string
+	query string
+	ready chan struct{}
+}
+
+const fakeDropPrefix = "/.agentbox/oauth-drop/"
 
 type pendingCode struct {
 	challenge   string
@@ -86,6 +108,7 @@ func newFakeAuthServer(t *testing.T, opts asOptions) *fakeAuthServer {
 		codes:   map[string]pendingCode{},
 		access:  map[string]string{},
 		refresh: map[string]bool{},
+		slots:   map[string]*fakeDropSlot{},
 	}
 	if opts.preRegistered != "" {
 		// A pre-registered client accepts any loopback redirect URI, as real
@@ -98,6 +121,7 @@ func newFakeAuthServer(t *testing.T, opts asOptions) *fakeAuthServer {
 	mux.HandleFunc("/register", as.handleRegister)
 	mux.HandleFunc("/authorize", as.handleAuthorize)
 	mux.HandleFunc("/token", as.handleToken)
+	mux.HandleFunc(fakeDropPrefix, as.handleDrop)
 	as.srv = httptest.NewServer(mux)
 	t.Cleanup(as.srv.Close)
 	return as
@@ -115,6 +139,9 @@ func (as *fakeAuthServer) handleMetadata(w http.ResponseWriter, _ *http.Request)
 		"grant_types_supported":                 []string{"authorization_code", "refresh_token"},
 		"code_challenge_methods_supported":      []string{"S256"},
 		"token_endpoint_auth_methods_supported": []string{"none"},
+	}
+	if as.opts.drop {
+		meta[dropMetadataKey] = as.srv.URL + fakeDropPrefix
 	}
 	if !as.opts.noDCR {
 		meta["registration_endpoint"] = as.srv.URL + "/register"
@@ -185,6 +212,13 @@ func (as *fakeAuthServer) handleAuthorize(w http.ResponseWriter, r *http.Request
 		as.mu.Unlock()
 		fail("unknown client_id " + clientID)
 		return
+	}
+	if as.opts.drop && strings.HasPrefix(redirectURI, as.srv.URL+fakeDropPrefix) {
+		// Case B: approval opens the slot named by the redirect URI.
+		id := strings.TrimPrefix(redirectURI, as.srv.URL+fakeDropPrefix)
+		if _, ok := as.slots[id]; !ok {
+			as.slots[id] = &fakeDropSlot{ready: make(chan struct{})}
+		}
 	}
 	code := fmt.Sprintf("code-%d", len(as.codes)+1)
 	as.codes[code] = pendingCode{challenge: q.Get("code_challenge"), redirectURI: redirectURI, clientID: clientID}
@@ -524,4 +558,76 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 func pkceChallengeOf(verifier string) string {
 	sum := sha256.Sum256([]byte(verifier))
 	return base64.RawURLEncoding.EncodeToString(sum[:])
+}
+
+// handleDrop serves the drop-box: POST <id> opens (Bearer required), GET <id>
+// stores the callback query, GET <id>/poll long-polls for it.
+func (as *fakeAuthServer) handleDrop(w http.ResponseWriter, r *http.Request) {
+	rest := strings.TrimPrefix(r.URL.Path, fakeDropPrefix)
+	id, poll := strings.CutSuffix(rest, "/poll")
+	bearer := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	switch {
+	case r.Method == http.MethodPost && !poll:
+		as.mu.Lock()
+		as.dropOpens++
+		as.mu.Unlock()
+		if as.opts.dropOpenStatus != 0 {
+			w.WriteHeader(as.opts.dropOpenStatus)
+			return
+		}
+		if !as.tokenValid(bearer) {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		as.mu.Lock()
+		as.slots[id] = &fakeDropSlot{owner: bearer, ready: make(chan struct{})}
+		as.mu.Unlock()
+		w.WriteHeader(http.StatusCreated)
+	case r.Method == http.MethodGet && !poll:
+		as.mu.Lock()
+		sl, ok := as.slots[id]
+		if !ok || sl.query != "" {
+			as.mu.Unlock()
+			http.NotFound(w, r)
+			return
+		}
+		sl.query = r.URL.RawQuery
+		close(sl.ready)
+		as.mu.Unlock()
+		_, _ = io.WriteString(w, "Done. You can close this page.")
+	case r.Method == http.MethodGet && poll:
+		sum := sha256.Sum256([]byte(r.Header.Get(dropSecretHeader)))
+		as.mu.Lock()
+		as.dropPolls++
+		sl, ok := as.slots[id]
+		as.mu.Unlock()
+		if !ok || hex.EncodeToString(sum[:]) != id {
+			http.NotFound(w, r)
+			return
+		}
+		if sl.owner != "" && sl.owner != bearer {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		select {
+		case <-sl.ready:
+		case <-r.Context().Done():
+			return
+		case <-time.After(5 * time.Second):
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		as.mu.Lock()
+		delete(as.slots, id)
+		as.mu.Unlock()
+		writeJSON(w, http.StatusOK, map[string]string{"query": sl.query})
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+func (as *fakeAuthServer) dropCounters() (opens, polls int) {
+	as.mu.Lock()
+	defer as.mu.Unlock()
+	return as.dropOpens, as.dropPolls
 }

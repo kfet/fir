@@ -311,7 +311,7 @@ func (m *Manager) LoginServer(ctx context.Context, name string, ui pinoauth.Logi
 	// in its own process with no prior traffic, so without this probe the CLI
 	// could never use the header path at all.
 	sa.probeChallenge(ctx)
-	if err := sa.Login(ctx, ui); err != nil {
+	if err := sa.Login(ctx, ui, m.dropAccessFor(name)); err != nil {
 		return err
 	}
 	// Get the fresh token into use — but only if this Manager is actually

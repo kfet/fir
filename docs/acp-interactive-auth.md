@@ -58,6 +58,13 @@ Cancel:          authenticate { methodId, _meta: { auth: { interactive: true, id
   pasted URL is validated; a bare code carries no state. A bare code (just the
   `code=` value, surrounding whitespace ignored) is accepted — relays may pass
   whatever the user pasted verbatim.
+- When a configured server advertises an agentbox OAuth code drop-box
+  (`agentbox_oauth_drop_endpoint`, see [mcp.md](mcp.md#oauth-code-drop-box)),
+  the redirect goes there instead of to loopback and fir polls for the code, so
+  the login completes as soon as the user approves on any device — call 2 never
+  arrives. The instructions on call 1 say so. Paste still works.
+- When the stored credential has a refresh token that still works, call 1
+  answers `ok` at once with no URL.
 - On success the server is reconnected and its tools are pushed into the
   session — no `/mcp reload` needed. A credential minted out-of-band
   (`fir mcp login <server>` on the agent host) is also picked up by running

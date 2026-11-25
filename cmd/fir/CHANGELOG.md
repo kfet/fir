@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- MCP OAuth login uses an agentbox code drop-box when one is advertised (`agentbox_oauth_drop_endpoint` in OAuth metadata): the printed link is all a phone user needs, no paste-back. Logging in to agentbox itself uses its own drop-box; other DCR servers open a slot with the agentbox token. Falls back to loopback + paste otherwise. `fir mcp login` / `/mcp login` now try a stored refresh token before opening a browser.
+
 ## [1.68.0] - 2026-11-25
 
 ### Added

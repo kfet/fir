@@ -148,6 +148,33 @@ MCP server "my-remote" requires OAuth authentication (no stored credential); run
 The login flow races the loopback callback against a manual paste prompt, so it also works
 over SSH where the browser cannot reach `127.0.0.1`.
 
+Login first tries the stored refresh token, if any, and only opens a browser
+when that fails. To force a fresh login, `fir mcp logout <server>` first.
+
+#### OAuth code drop-box
+
+An authorization server can advertise `"agentbox_oauth_drop_endpoint":
+"https://<host>/.agentbox/oauth-drop/"` in its RFC 8414 metadata (or the
+protected-resource metadata). agentbox does. fir then uses a redirect URI under
+that endpoint instead of loopback and polls for the code, so the printed link is
+all the user needs, from any device:
+
+- **Logging in to the advertising server itself** (Case B): redirect
+  `<endpoint><id>`, where `<id>` is the hex SHA-256 of a random poll secret fir
+  keeps. The server opens the slot when the owner approves; fir long-polls
+  `<endpoint><id>/poll` with header `Agentbox-Drop-Secret: <secret>`.
+- **Logging in to another server with dynamic client registration** (Case A):
+  fir first opens the slot with `POST <endpoint><id>` and the drop host's access
+  token (refreshed first if near expiry), then uses `<endpoint><id>` as the
+  redirect URI and polls with the secret and the token.
+
+The endpoint must be on the same host as the metadata that advertises it, and
+https (http only on loopback). PKCE and `state` work as before. fir falls back
+to loopback + paste when no drop-box is known, the slot cannot be opened,
+registration rejects the redirect URI, the server uses a pre-registered
+`client_id` (Case A only), or `redirect_uri` / `FIR_MCP_OAUTH_REDIRECT_BASE` is
+set.
+
 `fir mcp login` probes the server unauthenticated first, so it picks up the `resource_metadata`
 pointer from the 401 challenge (RFC 9728 §5.1) rather than having to guess the well-known path.
 
