@@ -2,9 +2,15 @@
 
 ## [Unreleased]
 
+## [1.69.0] - 2026-11-25
+
 ### Added
 
 - MCP OAuth login uses an agentbox code drop-box when one is advertised (`agentbox_oauth_drop_endpoint` in OAuth metadata): the printed link is all a phone user needs, no paste-back. Logging in to agentbox itself uses its own drop-box; other DCR servers open a slot with the agentbox token. Falls back to loopback + paste otherwise. `fir mcp login` / `/mcp login` now try a stored refresh token before opening a browser.
+
+### Changed
+
+- Model catalog: added Bedrock Claude Haiku/Sonnet 5.5 (ca), Kimi K3/K3.1 (in), Azure GPT-6.x healthcare variants +4 more; removed old Bedrock regional Claude Sonnet 4 / Fable 5 / Opus 5 / Nova Premier ids; 17 models with changed pricing/limits.
 
 ## [1.68.0] - 2026-11-25
 
