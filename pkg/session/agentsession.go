@@ -268,7 +268,10 @@ type AgentSession struct {
 
 	// System prompt
 	baseSystemPrompt string
-	sessionDate      string // frozen date for system prompt (YYYY-MM-DD), set once per session
+	// sysPromptMu serialises system prompt rebuilds (MCP servers trigger
+	// them from their own goroutines) and guards baseSystemPrompt.
+	sysPromptMu sync.Mutex
+	sessionDate string // frozen date for system prompt (YYYY-MM-DD), set once per session
 
 	// resourceReloadPending is set by RequestResourceReload and consumed
 	// (exactly once) when the current turn ends or immediately when idle.
@@ -932,9 +935,22 @@ func (s *AgentSession) RemoveFollowUp(oneBasedIndex int) (string, bool) {
 // callers from forgetting the SetSystemPrompt half (which historically caused
 // freshly-created sessions to send no system prompt to the LLM on turn one).
 func (s *AgentSession) buildSystemPrompt() {
+	s.rebuildSystemPrompt(true)
+}
+
+// rebuildSystemPrompt composes the system prompt and applies it. With force
+// false it keeps the old prompt when nothing changed, so the provider's
+// prompt cache stays valid. It reports whether it applied a prompt.
+func (s *AgentSession) rebuildSystemPrompt(force bool) bool {
+	s.sysPromptMu.Lock()
+	defer s.sysPromptMu.Unlock()
 	prompt := s.composeSystemPrompt()
+	if !force && prompt == s.baseSystemPrompt {
+		return false
+	}
 	s.baseSystemPrompt = prompt
 	s.Agent.SetSystemPrompt(prompt)
+	return true
 }
 
 // composeSystemPrompt renders the system prompt from the current resource
@@ -962,6 +978,9 @@ func (s *AgentSession) composeSystemPrompt() string {
 	// Append additional instructions
 	for _, append := range s.resourceLoader.GetAppendSystemPrompt() {
 		prompt += "\n\n" + append
+	}
+	if mi := s.mcpInstructionsSection(); mi != "" {
+		prompt += "\n\n" + mi
 	}
 	if cp := s.ClientSystemPrompt(); cp != "" {
 		prompt += "\n\n" + cp
@@ -1380,6 +1399,8 @@ func (s *AgentSession) Hooks() *AgentSessionHooks {
 
 // GetSystemPrompt returns the current base system prompt.
 func (s *AgentSession) GetSystemPrompt() string {
+	s.sysPromptMu.Lock()
+	defer s.sysPromptMu.Unlock()
 	return ai.FlattenSystemPrompt(s.baseSystemPrompt)
 }
 

@@ -78,7 +78,7 @@ All settings fields are optional. Project settings are merged on top of global s
 | `skills/` | Project-specific skills (auto-discovered) |
 | `extensions/` | Project-specific extensions (auto-discovered) |
 | `packages/` | Installed external packages (project scope, via `--local`) |
-| `mcp.json` | MCP server configuration (project-level) |
+| `mcp.json` | MCP server configuration (project-level). Each connected server's `initialize` `instructions` are added to the system prompt (max 4,096 chars per server). |
 
 ### Project Context Files
 

@@ -270,7 +270,8 @@ func TestReapRehydrate_AnyRuntimePropertySurvives(t *testing.T) {
 
 	var want session.RuntimeState
 	statetest.FillNonZero(t, &want, cwd, map[string]mcp.ServerConfig{"srv": echoServer()},
-		map[string][]ai.Tool{"srv": {{Name: "mcp__srv__stale", Parameters: map[string]any{"type": "object"}}}})
+		map[string][]ai.Tool{"srv": {{Name: "mcp__srv__stale", Parameters: map[string]any{"type": "object"}}}},
+		map[string]string{"srv": "stale instructions"})
 	want.Handle = sid
 	entry.session.UpdateSessionState(func(st *session.SessionState) { st.Runtime = want })
 
@@ -282,7 +283,11 @@ func TestReapRehydrate_AnyRuntimePropertySurvives(t *testing.T) {
 	if tools := got.McpTools["srv"]; len(tools) != 1 || tools[0].Name != "mcp__srv__echo" {
 		t.Fatalf("srv tools after connect = %+v, want the live echo tool", tools)
 	}
-	got.McpTools = want.McpTools
+	// The echo server sends no instructions, so the saved ones are dropped.
+	if got.McpInstructions != nil {
+		t.Fatalf("srv instructions after connect = %v, want none", got.McpInstructions)
+	}
+	got.McpTools, got.McpInstructions = want.McpTools, want.McpInstructions
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("runtime after rehydrate:\n got %#v\nwant %#v", got, want)
 	}

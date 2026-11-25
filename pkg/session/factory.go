@@ -296,7 +296,11 @@ func StartMCPManager(ctx context.Context, sess *AgentSession, configs map[string
 	advertise := func() {
 		toolsMu.Lock()
 		defer toolsMu.Unlock()
-		mcpTools := sess.mcpAdvertised(mgr.ToolsByServer())
+		byServer := mgr.ToolsByServer()
+		// Instructions first: a caller that waits for the new tools then
+		// also sees the new prompt.
+		sess.mcpSetInstructions(byServer, mgr.InstructionsByServer())
+		mcpTools := sess.mcpAdvertised(byServer)
 
 		// Bound each model-dispatched MCP tool call with the default timeout,
 		// innermost — on the RAW Execute, before hook wrapping — so N covers

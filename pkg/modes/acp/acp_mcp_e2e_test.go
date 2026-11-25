@@ -67,7 +67,8 @@ func runMCPEchoServer() {
 			return
 		}
 	}
-	server := sdk.NewServer(&sdk.Implementation{Name: "echo-srv", Version: "1"}, nil)
+	server := sdk.NewServer(&sdk.Implementation{Name: "echo-srv", Version: "1"},
+		&sdk.ServerOptions{Instructions: os.Getenv("MCP_TEST_INSTRUCTIONS")})
 	server.AddTool(
 		&sdk.Tool{
 			Name:        "echo",

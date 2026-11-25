@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Added
+- MCP server `instructions` (from `initialize`) now reach the model: one `# MCP server instructions` system-prompt section, a subsection per server in name order, each cut at 4,096 characters, identical texts merged, absent when no server sends any. It updates on connect, reconnect and reload, and is saved in session state so a resumed session keeps the same prompt before its servers reconnect.
+
 ## [1.65.0] - 2026-11-24
 
 ### Added

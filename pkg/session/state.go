@@ -39,8 +39,12 @@ type RuntimeState struct {
 	// while the server is not connected, so the request does not depend
 	// on connection timing (see AgentSession.mcpAdvertised).
 	McpTools map[string][]ai.Tool `json:"mcpTools,omitempty"`
-	Meta     map[string]any       `json:"meta,omitempty"`
-	Mode     string               `json:"mode,omitempty"`
+	// McpInstructions holds each MCP server's non-empty initialize
+	// instructions, saved like McpTools so a rehydrated session renders the
+	// same system prompt before its servers reconnect.
+	McpInstructions map[string]string `json:"mcpInstructions,omitempty"`
+	Meta            map[string]any    `json:"meta,omitempty"`
+	Mode            string            `json:"mode,omitempty"`
 	// Handle is an external name for the session (e.g. an ACP sessionId);
 	// every save points it at the current transcript, see store.BindHandle.
 	Handle string `json:"handle,omitempty"`

@@ -46,7 +46,8 @@ func TestSessionState_AnyFieldSurvivesReopen(t *testing.T) {
 	var want SessionState
 	tools := map[string][]ai.Tool{"srv": {{Name: "mcp__srv__t", Description: "d",
 		Parameters: map[string]any{"type": "object"}}}}
-	statetest.FillNonZero(t, &want, cwd, srv, tools)
+	// Instructions are kept only for configured servers, so name srv.
+	statetest.FillNonZero(t, &want, cwd, srv, tools, map[string]string{"srv": "use t"})
 
 	s := openForTest(t, cwd, agentDir, "", nil)
 	s.UpdateSessionState(func(st *SessionState) { *st = want })

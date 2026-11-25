@@ -45,10 +45,7 @@ func (s *AgentSession) reloadResources() string {
 	} else {
 		// Keep the old prompt when nothing changed so the provider's
 		// prompt cache stays valid.
-		if p := s.composeSystemPrompt(); p != s.baseSystemPrompt {
-			s.baseSystemPrompt = p
-			s.Agent.SetSystemPrompt(p)
-		}
+		s.rebuildSystemPrompt(false)
 	}
 	// Only new diagnostics: standing warnings would repeat on every reload.
 	newDiags, _ := diffSets(diagsBefore, s.skillDiagnostics())

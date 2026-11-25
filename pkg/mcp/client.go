@@ -64,7 +64,10 @@ type serverEntry struct {
 	err        error                   // last connection/disconnect error
 	connecting bool                    // true while initial connect is in progress
 	caps       *sdk.ServerCapabilities // cached after Connect; read by ToolListChangedHandler
-	subscribed sync.Map                // uri (string) → struct{}
+	// instructions is the server's InitializeResult.instructions from its
+	// latest connect ("" when it sent none); kept across a disconnect.
+	instructions string
+	subscribed   sync.Map // uri (string) → struct{}
 
 	// Auto-reconnect state. Channels are created once at entry construction
 	// and live for the entry's lifetime; the ready field is reassigned (a
@@ -618,6 +621,20 @@ func (m *Manager) ToolsByServer() map[string][]agent.AgentTool {
 	return out
 }
 
+// InstructionsByServer returns the instructions of every enabled server
+// that is connected, keyed by name; "" when the server sent none. A server
+// that is not connected is omitted.
+func (m *Manager) InstructionsByServer() map[string]string {
+	out := make(map[string]string)
+	m.forEachServer(func(name string, e *serverEntry) bool {
+		if !e.config.Disabled && e.session != nil {
+			out[name] = e.instructions
+		}
+		return true
+	})
+	return out
+}
+
 // hasSession reports whether the named server has an active session.
 // Intended for tests; production code should use withEntry.
 func (m *Manager) hasSession(name string) bool {
@@ -1136,6 +1153,10 @@ func (m *Manager) installSession(ctx context.Context, name string, sess *sdk.Cli
 		e.session = sess
 		e.tools = tools
 		e.caps = caps
+		e.instructions = ""
+		if res := sess.InitializeResult(); res != nil {
+			e.instructions = res.Instructions
+		}
 		e.err = nil
 		e.attempt = 0
 		// Close ready under the lock: Close also closes it under the lock, so
