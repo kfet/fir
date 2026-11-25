@@ -2,11 +2,16 @@
 
 ## [Unreleased]
 
+## [1.67.0] - 2026-11-25
+
 ### Added
 - **Google Gemini CLI login works remotely:** the sign-in page now uses Gemini CLI's `codeassist.google.com/authcode` redirect, which shows a code to copy and paste back into fir.
 
 ### Fixed
 - **OAuth paste of a bare code failed with "state mismatch"** while the loopback callback server was also listening; a bare code now exchanges with the manual redirect_uri.
+
+### Changed
+- **Model catalog regenerated**: pricing changed for openrouter: xiaomi/mimo-v2.6-flash-mopd.
 
 ## [1.66.1] - 2026-11-24
 
