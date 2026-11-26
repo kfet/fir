@@ -10,6 +10,7 @@ import (
 
 	"github.com/kfet/agent"
 	"github.com/kfet/fir/pkg/envvars"
+	"github.com/kfet/fir/pkg/mcp"
 )
 
 // Mode is the output mode for fir.
@@ -23,6 +24,10 @@ const (
 
 // Args holds parsed CLI arguments.
 type Args struct {
+	// mcpElicit, when set, answers MCP elicitation requests (the TUI sets
+	// it); not a flag.
+	mcpElicit *mcp.LateElicit
+
 	Provider           string
 	Model              string
 	ApiKey             string

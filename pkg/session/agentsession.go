@@ -982,6 +982,9 @@ func (s *AgentSession) composeSystemPrompt() string {
 	if mi := s.mcpInstructionsSection(); mi != "" {
 		prompt += "\n\n" + mi
 	}
+	if ms := s.mcpSkillsSection(); ms != "" {
+		prompt += "\n\n" + ms
+	}
 	if cp := s.ClientSystemPrompt(); cp != "" {
 		prompt += "\n\n" + cp
 	}

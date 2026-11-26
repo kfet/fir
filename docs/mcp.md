@@ -511,6 +511,82 @@ transport and moves it into a fir-private `_meta` key (stripping any
 server-supplied copy). `pkg/mcp/mcptest.NewFilesServer` is a fake files
 server for tests.
 
+## Skills extension
+
+When a server declares `io.modelcontextprotocol/skills` (SEP-2640) in its
+capabilities, fir pages through `skills/list` once per connection. Only the
+listing is fetched; no `SKILL.md` or supporting file is read until the model
+asks for it. A list failure is logged and never fails the connect.
+
+- **Naming.** Each skill appears in a separate `# MCP server skills` system
+  prompt section as `<server>:<name>` (`<server>:<skill path>` when two of a
+  server's skills share a name). They are never merged into the local skill
+  list, so a local skill always keeps its name and an MCP skill cannot shadow
+  it. The section is saved in session state like server instructions, so a
+  rehydrated session renders the same prompt before servers reconnect.
+- **Loading.** `mcp__<server>__read_skill {uri, path?}` is the only load
+  path. It reads `SKILL.md` (or `path`, relative to the skill root) with
+  `resources/read` on that server only, checks byte size and `sha256` digest
+  against the listed manifest, and checks the `SKILL.md` frontmatter against
+  the listed frontmatter. A file outside the manifest, a mismatch, or a
+  `"dynamic"` skill (no digests) is refused. On a mismatch fir refreshes the
+  entry once with `skills/get`. A URI that was never listed (from server
+  instructions, say) is looked up with `skills/get`. Results are tagged with
+  the originating server and marked as untrusted server content.
+- **Limits.** Entries over 512 files or 16 MiB, entries whose URI does not end
+  in `<name>/SKILL.md`, or with files outside the skill are ignored.
+- **Cache.** Verified bytes are kept in memory only, per connection; nothing
+  is written to disk, so cached content never reaches a skill discovery path.
+- **Not honoured.** Frontmatter fields such as `allowed-tools` are ignored for
+  MCP skills; `resources/directory/read` is not used (the manifest already
+  lists every file).
+- **No approval prompt.** Loading an MCP skill is not gated; its content is origin-tagged and frontmatter grants are ignored. The prompt section is bounded: 100 skills per server, 1024 characters per description.
+- **Opt out:** `"disableSkills": true` on the server entry.
+
+Code: `pkg/mcp/skills.go`, `pkg/mcp/extconn.go`.
+
+## Tasks extension
+
+fir declares `io.modelcontextprotocol/tasks` in its client capabilities (the
+go-sdk sends them in each request's `clientCapabilities` `_meta` on
+2026-07-28 sessions). A server may then answer `tools/call` with a task handle
+(`resultType: "task"`). fir holds the handle back from the SDK, polls
+`tasks/get` at the server's `pollIntervalMs` (clamped to 100 ms–30 s), and
+hands the final result (or the task's error) to the SDK as the response to the
+original call, so the model sees an ordinary tool result. An
+`input_required` task's elicitation requests go through the same front end
+as elicitation (declined when there is none); sampling requests through the
+sampling handler. When the call is cancelled or times out (the MCP tool
+timeout still applies), fir sends `tasks/cancel`.
+
+Not implemented: `notifications/tasks` subscriptions (fir polls), and
+resuming a task after fir restarts.
+
+- **Opt out:** `"disableTasks": true` on the server entry.
+
+Code: `pkg/mcp/tasks.go`.
+
+## Elicitation
+
+A server can ask the user for input (`elicitation/create`, or an elicitation
+inside a 2026-07-28 multi-round-trip result or task). fir advertises the
+elicitation capability only when a front end can answer:
+
+- **TUI** — form and URL modes. The request replaces the editor; form fields
+  are asked one at a time (Enter skips an optional field; Escape declines).
+  URL mode opens the URL on Enter.
+- **ACP** — forwarded to the client with the unstable `elicitation/create`
+  method, in the modes the client declared in its `elicitation` capability.
+  A client that declared none gets no elicitation.
+- **Headless** (`-p`, JSON mode) — elicitation is not advertised, and a
+  request a server sends anyway is declined.
+
+The capability is fixed when a server connects. Before this change fir always
+advertised elicitation and declined every request.
+
+Code: `pkg/mcp/elicitation.go`, `pkg/mcp/ext_manager.go`,
+`pkg/modes/interactive/elicit.go`, `pkg/modes/acp/elicitation.go`.
+
 ## Limitations
 
 - **Login is user-initiated, never automatic.** fir performs the full OAuth discovery and

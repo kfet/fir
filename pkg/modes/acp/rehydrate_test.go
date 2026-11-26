@@ -271,7 +271,8 @@ func TestReapRehydrate_AnyRuntimePropertySurvives(t *testing.T) {
 	var want session.RuntimeState
 	statetest.FillNonZero(t, &want, cwd, map[string]mcp.ServerConfig{"srv": echoServer()},
 		map[string][]ai.Tool{"srv": {{Name: "mcp__srv__stale", Parameters: map[string]any{"type": "object"}}}},
-		map[string]string{"srv": "stale instructions"})
+		map[string]string{"srv": "stale instructions"},
+		map[string][]mcp.MCPSkill{"srv": {{Name: "srv:s", Description: "d", URI: "skill://s/SKILL.md", Tool: "mcp__srv__read_skill"}}})
 	want.Handle = sid
 	entry.session.UpdateSessionState(func(st *session.SessionState) { st.Runtime = want })
 
@@ -287,7 +288,11 @@ func TestReapRehydrate_AnyRuntimePropertySurvives(t *testing.T) {
 	if got.McpInstructions != nil {
 		t.Fatalf("srv instructions after connect = %v, want none", got.McpInstructions)
 	}
-	got.McpTools, got.McpInstructions = want.McpTools, want.McpInstructions
+	// Nor skills: its saved skills are dropped too.
+	if got.McpSkills != nil {
+		t.Fatalf("srv skills after connect = %v, want none", got.McpSkills)
+	}
+	got.McpTools, got.McpInstructions, got.McpSkills = want.McpTools, want.McpInstructions, want.McpSkills
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("runtime after rehydrate:\n got %#v\nwant %#v", got, want)
 	}

@@ -59,6 +59,12 @@ type SetupOptions struct {
 
 	// MCPConfigs are the MCP server configurations to start. When empty, no MCP.
 	MCPConfigs map[string]mcp.ServerConfig
+	// MCPElicitation, when set, is the front end that answers MCP servers'
+	// elicitation requests (with the modes in MCPElicitModes). Only then
+	// does fir advertise elicitation to servers; without it they are
+	// declined. It must be known before MCP starts, hence here.
+	MCPElicitation mcp.ElicitFn
+	MCPElicitModes mcp.ElicitModes
 
 	// OnRetry is forwarded to the agent and invoked before a retryable
 	// pre-stream provider error (rate limit / overloaded / transient 5xx)
@@ -207,6 +213,9 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 		result.Session.mcpConfigured = true
 		result.Session.buildSystemPrompt()
 	}
+	if opts.MCPElicitation != nil {
+		result.Session.SetMCPElicitation(opts.MCPElicitation, opts.MCPElicitModes)
+	}
 	mcpMgr := StartMCPManager(ctx, result.Session, mergeMCP(opts.MCPConfigs, sessionServers))
 
 	return &SetupResult{
@@ -300,6 +309,7 @@ func StartMCPManager(ctx context.Context, sess *AgentSession, configs map[string
 		// Instructions first: a caller that waits for the new tools then
 		// also sees the new prompt.
 		sess.mcpSetInstructions(byServer, mgr.InstructionsByServer())
+		sess.mcpSetSkills(byServer, mgr.SkillsByServer())
 		mcpTools := sess.mcpAdvertised(byServer)
 
 		// Bound each model-dispatched MCP tool call with the default timeout,

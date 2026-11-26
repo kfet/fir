@@ -28,6 +28,8 @@ type acpConn interface {
 	ReadTextFile(ctx context.Context, params acpsdk.ReadTextFileRequest) (acpsdk.ReadTextFileResponse, error)
 	WriteTextFile(ctx context.Context, params acpsdk.WriteTextFileRequest) (acpsdk.WriteTextFileResponse, error)
 	RequestPermission(ctx context.Context, params acpsdk.RequestPermissionRequest) (acpsdk.RequestPermissionResponse, error)
+	// UnstableCreateElicitation asks the user for input (elicitation/create).
+	UnstableCreateElicitation(ctx context.Context, params acpsdk.UnstableCreateElicitationRequest) (acpsdk.UnstableCreateElicitationResponse, error)
 	// NotifyExtension sends an ACP extension-method notification ("_"-prefixed).
 	NotifyExtension(ctx context.Context, method string, params any) error
 }
@@ -420,6 +422,10 @@ func (r *rawConn) ReadTextFile(ctx context.Context, params acpsdk.ReadTextFileRe
 
 func (r *rawConn) RequestPermission(ctx context.Context, params acpsdk.RequestPermissionRequest) (acpsdk.RequestPermissionResponse, error) {
 	return acpsdk.SendRequest[acpsdk.RequestPermissionResponse](r.conn, ctx, acpsdk.ClientMethodSessionRequestPermission, params)
+}
+
+func (r *rawConn) UnstableCreateElicitation(ctx context.Context, params acpsdk.UnstableCreateElicitationRequest) (acpsdk.UnstableCreateElicitationResponse, error) {
+	return acpsdk.SendRequest[acpsdk.UnstableCreateElicitationResponse](r.conn, ctx, acpsdk.ClientMethodElicitationCreate, params)
 }
 
 func (r *rawConn) WriteTextFile(ctx context.Context, params acpsdk.WriteTextFileRequest) (acpsdk.WriteTextFileResponse, error) {

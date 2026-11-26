@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/kfet/agent"
+
+	"github.com/kfet/fir/pkg/mcp"
 )
 
 func TestMCPInstructions_MergeRenderAndPrompt(t *testing.T) {
@@ -60,5 +62,24 @@ func TestMCPInstructions_ConcurrentUpdates(t *testing.T) {
 	want := s.composeSystemPrompt()
 	if got := s.Agent.State().SystemPrompt; got != want || s.GetSystemPrompt() == "" {
 		t.Errorf("applied prompt differs from the composed one")
+	}
+}
+
+func TestMCPSkills_MergeAndPrompt(t *testing.T) {
+	s, _ := newTestAgentSession(t)
+	sk := mcp.MCPSkill{Name: "srv:git", Description: "Git rules", URI: "skill://git/SKILL.md", Tool: "mcp__srv__read_skill"}
+	s.mcpSetSkills(map[string][]agent.AgentTool{"srv": {}, "other": {}}, map[string][]mcp.MCPSkill{"srv": {sk}, "other": nil})
+	if !strings.Contains(s.Agent.State().SystemPrompt, "srv:git — Git rules") {
+		t.Fatalf("skill not in prompt:\n%s", s.mcpSkillsSection())
+	}
+	// Offline keeps the saved list.
+	s.mcpSetSkills(map[string][]agent.AgentTool{"srv": {}}, map[string][]mcp.MCPSkill{})
+	if !strings.Contains(s.mcpSkillsSection(), "srv:git") {
+		t.Errorf("saved list dropped while offline")
+	}
+	// Connected with no skills clears it.
+	s.mcpSetSkills(map[string][]agent.AgentTool{"srv": {}}, map[string][]mcp.MCPSkill{"srv": nil})
+	if s.mcpSkillsSection() != "" || strings.Contains(s.Agent.State().SystemPrompt, "MCP server skills") {
+		t.Errorf("section not removed")
 	}
 }

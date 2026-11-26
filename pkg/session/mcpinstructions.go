@@ -2,11 +2,14 @@ package session
 
 import (
 	"maps"
+	"slices"
 	"sort"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/kfet/agent"
+
+	"github.com/kfet/fir/pkg/mcp"
 )
 
 // mcpInstructionsMaxChars caps one server's instructions in the system
@@ -45,6 +48,47 @@ func (s *AgentSession) mcpSetInstructions(configured map[string][]agent.AgentToo
 		s.SaveState()
 		s.rebuildSystemPrompt(false)
 	}
+}
+
+// mcpSetSkills records the skills MCP servers serve and rebuilds the system
+// prompt when they change, with the same keep/drop rules as
+// mcpSetInstructions. live holds the lists of the connected servers.
+func (s *AgentSession) mcpSetSkills(configured map[string][]agent.AgentTool, live map[string][]mcp.MCPSkill) {
+	changed := false
+	s.updateStateNoSave(func(st *SessionState) {
+		saved := st.Runtime.McpSkills
+		next := make(map[string][]mcp.MCPSkill)
+		for name := range configured {
+			list, ok := live[name]
+			if !ok {
+				list = saved[name]
+			}
+			if len(list) > 0 {
+				next[name] = list
+			}
+		}
+		if maps.EqualFunc(saved, next, slices.Equal) {
+			return
+		}
+		if len(next) == 0 {
+			next = nil
+		}
+		st.Runtime.McpSkills = next
+		changed = true
+	})
+	if changed {
+		s.SaveState()
+		s.rebuildSystemPrompt(false)
+	}
+}
+
+// mcpSkillsSection renders the saved MCP skills as one system prompt
+// section ("" when there are none).
+func (s *AgentSession) mcpSkillsSection() string {
+	s.stateMu.Lock()
+	saved := maps.Clone(s.state.Runtime.McpSkills)
+	s.stateMu.Unlock()
+	return mcp.FormatMCPSkills(saved)
 }
 
 // mcpInstructionsSection renders the saved MCP server instructions as one

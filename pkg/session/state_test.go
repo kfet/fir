@@ -47,7 +47,8 @@ func TestSessionState_AnyFieldSurvivesReopen(t *testing.T) {
 	tools := map[string][]ai.Tool{"srv": {{Name: "mcp__srv__t", Description: "d",
 		Parameters: map[string]any{"type": "object"}}}}
 	// Instructions are kept only for configured servers, so name srv.
-	statetest.FillNonZero(t, &want, cwd, srv, tools, map[string]string{"srv": "use t"})
+	statetest.FillNonZero(t, &want, cwd, srv, tools, map[string]string{"srv": "use t"},
+		map[string][]mcp.MCPSkill{"srv": {{Name: "srv:s", Description: "d", URI: "skill://s/SKILL.md", Tool: "mcp__srv__read_skill"}}})
 
 	s := openForTest(t, cwd, agentDir, "", nil)
 	s.UpdateSessionState(func(st *SessionState) { *st = want })

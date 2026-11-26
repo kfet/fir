@@ -325,6 +325,7 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd, transcrip
 	// the session/prompt ctx during re-hydration, cancelled when the prompt
 	// returns — would kill every still-connecting MCP server with "context
 	// canceled". Keep values, drop cancellation.
+	elicitFn, elicitModes := mcpElicitation(pa.conn, sessionID, caps.Elicitation)
 	result, err := session.Setup(context.WithoutCancel(ctx), session.SetupOptions{
 		Cwd:                   cwd,
 		AgentDir:              agentDir,
@@ -335,6 +336,8 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd, transcrip
 		StateOverride:         override,
 		Tools:                 toolList,
 		MCPConfigs:            pa.sessionMCPConfigs(cwd),
+		MCPElicitation:        elicitFn,
+		MCPElicitModes:        elicitModes,
 		ResourceLoaderOptions: pa.resourceLoaderOptions(agentDir, cwd, settingsManager),
 		CompactionRunner: &compaction.DefaultRunner{
 			SettingsManager: settingsManager,

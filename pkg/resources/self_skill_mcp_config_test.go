@@ -70,6 +70,7 @@ var nonConfigKeys = map[string]bool{
 	"agent_introspect":             true, // tool name (exposes mcp.servers health)
 	"mcp_state":                    true, // extension event name (MCP health changes)
 	"upload_required":              true, // MCP files extension result type
+	"input_required":               true, // MCP tasks extension task status
 	"agentbox_oauth_drop_endpoint": true, // OAuth metadata field (drop-box)
 }
 

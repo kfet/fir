@@ -2,6 +2,15 @@
 
 Tracked follow-ups for fir. Items here are non-urgent but should not be lost.
 
+## MCP tasks: notifications and restart resume
+
+fir's tasks client (`pkg/mcp/tasks.go`) polls `tasks/get`. Not done:
+`notifications/tasks` via `subscriptions/listen` (the go-sdk v1.8.0 listen
+API does not expose task subscriptions), and persisting task ids so a task
+started before a fir restart can be resumed. Both need a way to hand a late
+result back to the model, which a tool call that has already returned does
+not have.
+
 ## Coverage gate: shrink the `.covignore` ledger
 
 fir adopted the sibling-repo `covgate` gate (`make coverage`, wired into

@@ -203,6 +203,10 @@ func setupSession(args *Args, deferExtensions bool) (*sessionSetup, error) {
 	if args.Thinking != "" {
 		opts.ThinkingLevel = string(args.Thinking)
 	}
+	if args.mcpElicit != nil {
+		opts.MCPElicitation = args.mcpElicit.Ask
+		opts.MCPElicitModes = mcp.ElicitModes{Form: true, URL: true}
+	}
 
 	extReady := make(chan struct{})
 	opts.ExtReady = extReady
@@ -1225,6 +1229,9 @@ func runAcpMode(args *Args) error {
 
 // runInteractiveMode runs the full interactive TUI mode.
 func runInteractiveMode(args *Args, noticeCh <-chan update.Notice) error {
+	// MCP servers connect during setup, before the TUI exists; they must
+	// already learn that fir can elicit. The TUI answers once it is built.
+	args.mcpElicit = &mcp.LateElicit{}
 	setup, err := setupSession(args, true)
 	if err != nil {
 		return err
@@ -1313,6 +1320,7 @@ func runInteractiveMode(args *Args, noticeCh <-chan update.Notice) error {
 		mode.ConsumeMCPServerEvents(setup.mcpManager.ServerEvents())
 	}
 	onNewMCPManager = func(m *mcp.Manager) { mode.ConsumeMCPServerEvents(m.ServerEvents()) }
+	args.mcpElicit.Set(mode.ElicitMCP)
 
 	// ui is the stable interface contract used for all lifecycle calls.
 	var ui tui.UI = mode

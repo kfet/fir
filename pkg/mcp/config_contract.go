@@ -57,6 +57,17 @@ type ServerConfig struct {
 	// that never pass through the model. Absent (the default) means off.
 	// See FilesConfig.
 	Files *FilesConfig `json:"files,omitempty"`
+	// DisableSkills stops fir from using the MCP skills extension
+	// (io.modelcontextprotocol/skills) with this server. By default, when a
+	// server declares the extension, fir lists its skills, shows them to the
+	// model as "<server>:<name>", and loads them on demand through the
+	// mcp__<server>__read_skill tool.
+	DisableSkills bool `json:"disableSkills,omitempty"`
+	// DisableTasks stops fir from declaring the MCP tasks extension
+	// (io.modelcontextprotocol/tasks) to this server. By default fir declares
+	// it, so a server may answer a long tools/call with a task, which fir
+	// polls to completion.
+	DisableTasks bool `json:"disableTasks,omitempty"`
 }
 
 // FilesConfig configures the experimental MCP files extension for one

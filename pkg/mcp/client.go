@@ -67,7 +67,10 @@ type serverEntry struct {
 	// instructions is the server's InitializeResult.instructions from its
 	// latest connect ("" when it sent none); kept across a disconnect.
 	instructions string
-	subscribed   sync.Map // uri (string) → struct{}
+	// skills is the server's MCP skill catalog for the current session, or
+	// nil when it serves none (see skills.go).
+	skills     *serverSkills
+	subscribed sync.Map // uri (string) → struct{}
 
 	// Auto-reconnect state. Channels are created once at entry construction
 	// and live for the entry's lifetime; the ready field is reassigned (a
@@ -195,6 +198,13 @@ type Manager struct {
 	// (FileApprovalFn). Unset means no prompt: files are refused unless the
 	// server's config sets files.autoApprove.
 	fileApproval atomic.Pointer[FileApprovalFn]
+
+	// elicit is the front end installed by SetElicitation.
+	elicit atomic.Pointer[elicitation]
+
+	// pendingSkills carries a freshly dialled session's skill catalog
+	// (*sdk.ClientSession → *serverSkills) to installSession.
+	pendingSkills sync.Map
 
 	// filesDir is the private directory downloads are saved in, created on
 	// first use.
@@ -857,21 +867,14 @@ func (m *Manager) clientOptions(serverName string) *sdk.ClientOptions {
 					updated = append(updated, m.adaptTool(serverName, tool, fx))
 				}
 				var caps *sdk.ServerCapabilities
+				var sk *serverSkills
 				m.withEntry(serverName, func(e *serverEntry) {
 					caps = e.caps
+					if e.session == session {
+						sk = e.skills
+					}
 				})
-				if caps != nil && caps.Resources != nil {
-					updated = append(updated,
-						listResourcesTool(session, serverName),
-						readResourceTool(session, serverName, m.subscribeOnce(session, serverName)),
-					)
-				}
-				if caps != nil && caps.Prompts != nil {
-					updated = append(updated,
-						listPromptsTool(session, serverName),
-						getPromptTool(session, serverName),
-					)
-				}
+				updated = append(updated, m.serverExtraTools(serverName, session, caps, sk)...)
 				m.withEntry(serverName, func(e *serverEntry) {
 					// Guard against stale updates: only overwrite tools if
 					// this session is still the active session for this
@@ -908,7 +911,6 @@ func (m *Manager) clientOptions(serverName string) *sdk.ClientOptions {
 			firlog.Debug("MCP prompt list changed", "server", serverName)
 		},
 		CreateMessageHandler: m.SamplingFn,
-		ElicitationHandler:   elicitHandler(m.ElicitationFn),
 		// Ping the server periodically to detect dead connections.
 		KeepAlive: 30 * time.Second,
 	}
@@ -1139,6 +1141,10 @@ func (m *Manager) tryReconnect(ctx context.Context, name string) bool {
 //   - Reload (server removed): the entry is gone entirely, so withEntry
 //     reports false.
 func (m *Manager) installSession(ctx context.Context, name string, sess *sdk.ClientSession, tools []agent.AgentTool, caps *sdk.ServerCapabilities) bool {
+	var sk *serverSkills
+	if v, ok := m.pendingSkills.LoadAndDelete(sess); ok {
+		sk = v.(*serverSkills)
+	}
 	var installed bool
 	found := m.withEntry(name, func(e *serverEntry) {
 		if ctx.Err() != nil {
@@ -1153,6 +1159,7 @@ func (m *Manager) installSession(ctx context.Context, name string, sess *sdk.Cli
 		e.session = sess
 		e.tools = tools
 		e.caps = caps
+		e.skills = sk
 		e.instructions = ""
 		if res := sess.InitializeResult(); res != nil {
 			e.instructions = res.Instructions
@@ -1285,8 +1292,18 @@ func (m *Manager) dialOnce(ctx context.Context, name string, cfg ServerConfig) (
 	opts := m.clientOptions(name)
 	if filesEnabled(cfg) {
 		transport = wrapTransportForFiles(transport)
-		opts.Capabilities = filesClientCapabilities()
 	}
+	// Without a front end the SDK still gets a handler, so a server that
+	// elicits anyway is declined rather than errored, but fir does not
+	// advertise elicitation (extConnection strips it).
+	elicitFn, elicitCaps := m.elicitationFor()
+	opts.ElicitationHandler = elicitHandler(elicitFn)
+	opts.Capabilities = clientCapabilities(cfg, elicitCaps)
+	et := &extTransport{inner: transport, hideElicit: elicitFn == nil}
+	if !cfg.DisableTasks {
+		et.tasks = &taskRunner{server: name, elicit: elicitFn, sample: m.SamplingFn}
+	}
+	transport = et
 	client := sdk.NewClient(&sdk.Implementation{Name: "fir", Version: "dev"}, opts)
 
 	rootURIs := cfg.Roots
@@ -1330,18 +1347,11 @@ func (m *Manager) dialOnce(ctx context.Context, name string, cfg ServerConfig) (
 	if initResult != nil {
 		caps = initResult.Capabilities
 	}
-	if caps != nil && caps.Resources != nil {
-		tools = append(tools,
-			listResourcesTool(session, name),
-			readResourceTool(session, name, m.subscribeOnce(session, name)),
-		)
+	sk := m.connectSkills(ctx, name, cfg, et, session, caps)
+	if sk != nil {
+		m.pendingSkills.Store(session, sk)
 	}
-	if caps != nil && caps.Prompts != nil {
-		tools = append(tools,
-			listPromptsTool(session, name),
-			getPromptTool(session, name),
-		)
-	}
+	tools = append(tools, m.serverExtraTools(name, session, caps, sk)...)
 	return session, tools, caps, nil
 }
 

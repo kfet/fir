@@ -23,7 +23,10 @@ type mcpHealthState struct {
 	mgr atomic.Pointer[mcp.Manager]
 	// fileApproval is applied to every Manager attached to the session.
 	fileApproval atomic.Pointer[mcp.FileApprovalFn]
-	waitOnce     sync.Once
+	// elicit is the front end for MCP elicitation, applied to every Manager
+	// attached to the session before it starts.
+	elicit   atomic.Pointer[mcpElicit]
+	waitOnce sync.Once
 
 	mu       sync.Mutex
 	subs     map[int]func([]mcp.ServerHealth)
@@ -41,6 +44,9 @@ func (s *AgentSession) attachMCP(mgr *mcp.Manager) {
 	}
 	if fn := s.mcp.fileApproval.Load(); fn != nil {
 		mgr.SetFileApprovalFn(*fn)
+	}
+	if e := s.mcp.elicit.Load(); e != nil {
+		mgr.SetElicitation(e.fn, e.modes)
 	}
 	mgr.SetOnHealthChanged(s.publishMCPHealth)
 	mgr.SetSources(mcp.ConfigSources(s.cwd))
@@ -142,5 +148,27 @@ func (s *AgentSession) SetMCPFileApproval(fn mcp.FileApprovalFn) {
 	}
 	if mgr := s.mcp.mgr.Load(); mgr != nil {
 		mgr.SetFileApprovalFn(fn)
+	}
+}
+
+// mcpElicit is a front end installed with SetMCPElicitation.
+type mcpElicit struct {
+	fn    mcp.ElicitFn
+	modes mcp.ElicitModes
+}
+
+// SetMCPElicitation installs the front end that answers MCP servers'
+// elicitation requests, on every MCP manager attached later. Servers learn
+// fir can elicit only at connect, so call it before MCP starts (see
+// SetupOptions.MCPElicitation); servers already connected keep what they
+// were told. nil removes it.
+func (s *AgentSession) SetMCPElicitation(fn mcp.ElicitFn, modes mcp.ElicitModes) {
+	if fn == nil {
+		s.mcp.elicit.Store(nil)
+	} else {
+		s.mcp.elicit.Store(&mcpElicit{fn: fn, modes: modes})
+	}
+	if mgr := s.mcp.mgr.Load(); mgr != nil {
+		mgr.SetElicitation(fn, modes)
 	}
 }

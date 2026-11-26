@@ -39,15 +39,6 @@ func (m *Manager) filesDirPath() (string, error) {
 
 func filesEnabled(cfg ServerConfig) bool { return cfg.Files != nil && cfg.Files.Enabled }
 
-// filesClientCapabilities is fir's default client capabilities (what the SDK
-// uses when none are given) plus the files extension. The SDK sends them in
-// the clientCapabilities _meta of every request on 2026-07-28 sessions.
-func filesClientCapabilities() *sdk.ClientCapabilities {
-	caps := &sdk.ClientCapabilities{RootsV2: &sdk.RootCapabilities{ListChanged: true}}
-	caps.AddExtension(FilesExtensionID, filesClientCaps())
-	return caps
-}
-
 // filesEnvFor returns the files context for a server session, or nil when
 // the extension is off for it: not enabled in config, not advertised by the
 // server, or a protocol revision before 2026-07-28.

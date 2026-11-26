@@ -43,8 +43,12 @@ type RuntimeState struct {
 	// instructions, saved like McpTools so a rehydrated session renders the
 	// same system prompt before its servers reconnect.
 	McpInstructions map[string]string `json:"mcpInstructions,omitempty"`
-	Meta            map[string]any    `json:"meta,omitempty"`
-	Mode            string            `json:"mode,omitempty"`
+	// McpSkills holds the skills each MCP server serves through the MCP
+	// skills extension, as last listed. A server that is not connected keeps
+	// its saved list, so the system prompt does not depend on connect timing.
+	McpSkills map[string][]mcp.MCPSkill `json:"mcpSkills,omitempty"`
+	Meta      map[string]any            `json:"meta,omitempty"`
+	Mode      string                    `json:"mode,omitempty"`
 	// Handle is an external name for the session (e.g. an ACP sessionId);
 	// every save points it at the current transcript, see store.BindHandle.
 	Handle string `json:"handle,omitempty"`

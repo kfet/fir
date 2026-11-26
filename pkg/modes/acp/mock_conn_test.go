@@ -25,6 +25,8 @@ type mockConn struct {
 	// selects permissionOption, or is cancelled when it is empty.
 	permissions      []acpsdk.RequestPermissionRequest
 	permissionOption acpsdk.PermissionOptionId
+	elicitations     []acpsdk.UnstableCreateElicitationRequest
+	elicitResponse   *acpsdk.UnstableCreateElicitationResponse
 }
 
 // mockNotice is one recorded extension notification.
@@ -99,6 +101,16 @@ func (m *mockConn) WaitForTerminalExit(_ context.Context, _ acpsdk.WaitForTermin
 
 func (m *mockConn) ReadTextFile(_ context.Context, params acpsdk.ReadTextFileRequest) (acpsdk.ReadTextFileResponse, error) {
 	return acpsdk.ReadTextFileResponse{Content: ""}, nil
+}
+
+func (m *mockConn) UnstableCreateElicitation(_ context.Context, params acpsdk.UnstableCreateElicitationRequest) (acpsdk.UnstableCreateElicitationResponse, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.elicitations = append(m.elicitations, params)
+	if m.elicitResponse != nil {
+		return *m.elicitResponse, nil
+	}
+	return acpsdk.UnstableCreateElicitationResponse{Decline: &acpsdk.UnstableCreateElicitationDecline{Action: "decline"}}, nil
 }
 
 func (m *mockConn) RequestPermission(_ context.Context, params acpsdk.RequestPermissionRequest) (acpsdk.RequestPermissionResponse, error) {
