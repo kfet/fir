@@ -1231,10 +1231,8 @@ _RESUME_PROMPT = (
 )
 
 _WAIT_PROMPT = (
-    _RESTART_TAG + " The previous agent was waiting for the user. Do not "
-    "start the briefing's next steps. If the briefing names an open question "
-    "that no later message answers, restate it in one sentence; otherwise "
-    "say you are ready. Then stop."
+    _RESTART_TAG + " The user has not replied yet. Do nothing until they "
+    "do, and do not repeat the previous agent's question."
 )
 
 

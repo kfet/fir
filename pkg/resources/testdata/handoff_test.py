@@ -258,9 +258,9 @@ class TestSelfHandoffHandler(unittest.TestCase):
             ctx = _StubContext()
             self.handoff.self_handoff({"content": _good_content(), "next_step": step}, ctx)
             prompt, _ = ctx.restart_calls[0]
-            self.assertIn("waiting for the user", prompt, step)
-            self.assertIn("Do not start", prompt)
-            self.assertIn("say you are ready", prompt)
+            self.assertIn("has not replied yet", prompt, step)
+            self.assertIn("Do nothing until they do", prompt)
+            self.assertIn("do not repeat the previous agent's question", prompt)
             self.assertNotIn("Resume now", prompt)
             self.assertIn("not a user message", prompt.lower())
 

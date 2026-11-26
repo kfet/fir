@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- `self_handoff` with `next_step: wait` no longer makes the new agent repeat the previous agent's question when the user's words already answer it.
+
 ## [1.69.0] - 2026-11-25
 
 ### Added
