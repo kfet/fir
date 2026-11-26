@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.70.0] - 2026-11-26
+
 ### Added
 - MCP skills extension (`io.modelcontextprotocol/skills`): skills of servers that declare it are listed as `<server>:<name>` in their own system prompt section and loaded on demand with `mcp__<server>__read_skill`, verified against the listed size, sha256 digest and frontmatter. Local skills are never shadowed. Opt out per server with `"disableSkills": true`.
 - MCP tasks extension (`io.modelcontextprotocol/tasks`): fir declares it, polls task handles returned by `tools/call` to completion, and answers `input_required` through elicitation. Opt out per server with `"disableTasks": true`.
@@ -9,6 +11,7 @@
 
 ### Changed
 - fir advertises the MCP elicitation capability only when a front end can answer (TUI, or an ACP client that declares elicitation). Before, every session advertised it and declined every request; headless sessions now no longer advertise it and still decline.
+- Model catalog: added Hugging Face Qwen2.5-VL-72B-Instruct, reka-edge-2603, MiMo-V2.6-Flash-RL/Pro-RL (+3 on aggregators); 17 models with changed pricing/limits.
 
 ## [1.69.1] - 2026-11-25
 

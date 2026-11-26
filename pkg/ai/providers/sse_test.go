@@ -228,10 +228,16 @@ func TestSSEClient_Stream_HTTPError(t *testing.T) {
 }
 
 func TestSSEClient_Stream_ContextCancellation(t *testing.T) {
+	// The handler may start after the client already gave up, when no
+	// connection is left to close; release it explicitly too.
+	release := make(chan struct{})
 	srv := tryNewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(200)
-		<-r.Context().Done()
+		select {
+		case <-r.Context().Done():
+		case <-release:
+		}
 	}))
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -248,8 +254,7 @@ func TestSSEClient_Stream_ContextCancellation(t *testing.T) {
 		t.Errorf("unexpected error: %v", err)
 	}
 
-	// CloseClientConnections unblocks the handler's <-r.Context().Done()
-	// so Close doesn't hang waiting for active connections.
+	close(release)
 	srv.CloseClientConnections()
 	srv.Close()
 }
