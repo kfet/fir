@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [1.69.1] - 2026-11-25
+
+### Changed
+- Model catalog: added `opencode/seaglass-alpha-free` (+4 on aggregators); removed 1 aggregator model; 18 models with changed pricing/limits.
+
 ### Fixed
 - `self_handoff` with `next_step: wait` no longer makes the new agent repeat the previous agent's question when the user's words already answer it.
 
