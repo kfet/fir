@@ -261,6 +261,10 @@ func (m *InteractiveMode) onMessageStart(ae *agent.AgentEvent) {
 		if sections.IsUpdate(txt) {
 			return
 		}
+		// A steered quick reply is already on screen.
+		if session.IsInterjectSteer(txt) {
+			return
+		}
 		// Injected [SYS_EXT] context is never the preemptively shown prompt;
 		// letting it take the prompt's slot would render the prompt twice.
 		if !strings.HasPrefix(txt, "[SYS_EXT]") {

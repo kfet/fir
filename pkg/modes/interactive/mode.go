@@ -874,6 +874,15 @@ func (m *InteractiveMode) setupEditorHandlers() {
 		m.editor.AddToHistory(text)
 		m.editor.SetText("")
 
+		// A message typed while a turn runs gets a quick reply from a
+		// branch of the session, which judges whether to steer the turn.
+		if m.session != nil && m.session.IsStreaming() && !strings.HasPrefix(text, "/") {
+			m.addUserMessageToChat(text)
+			m.ui.RequestRender(false)
+			go m.quickReply(text)
+			return
+		}
+
 		// Show the user message in the chat immediately so there is no
 		// perceived latency between pressing Enter and seeing the message.
 		m.AddUserMessage(text)

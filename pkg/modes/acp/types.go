@@ -10,6 +10,8 @@ import (
 	"time"
 
 	acpsdk "github.com/coder/acp-go-sdk"
+
+	"github.com/kfet/fir/pkg/session"
 )
 
 // ============================================================================
@@ -253,7 +255,7 @@ const (
 )
 
 // SideQueryCustomType is the customType of entries written by record mode.
-const SideQueryCustomType = "side_query"
+const SideQueryCustomType = session.SideQueryCustomType
 
 // SteerSessionRequest is the request for _fir/session/steer.
 type SteerSessionRequest struct {
@@ -267,11 +269,7 @@ type SteerSessionRequest struct {
 }
 
 // SideQueryData is the data of a side_query custom entry.
-type SideQueryData struct {
-	Question      string `json:"question"`
-	Answer        string `json:"answer"`
-	ForkSessionId string `json:"forkSessionId,omitempty"`
-}
+type SideQueryData = session.SideQueryData
 
 // SteerSessionResponse is the success response for _fir/session/steer.
 // EntryId is set in record mode: the id of the appended custom entry.

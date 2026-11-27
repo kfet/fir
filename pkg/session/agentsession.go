@@ -246,6 +246,7 @@ type AgentSessionOptions struct {
 // AgentSession is the core abstraction for agent lifecycle and session management.
 // It wraps the Agent with session persistence, compaction, tool management, and event routing.
 type AgentSession struct {
+	interject       interjectState // quick-reply side Q&A; see interject.go
 	Agent           *agent.Agent
 	SessionStore    *store.SessionStore
 	SettingsManager *config.SettingsManager
@@ -617,6 +618,7 @@ func (s *AgentSession) handleAgentEvent(event agent.AgentEvent) {
 
 	// Auto-compaction check on agent_end
 	if event.Type == agent.EventAgentEnd {
+		s.resetInterject()
 		// Every queued PrependContext has been delivered by now.
 		s.prependMu.Lock()
 		clear(s.prependInFlight)

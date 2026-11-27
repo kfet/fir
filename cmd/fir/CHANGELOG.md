@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- TUI: a message typed during a running turn gets a quick reply from a session branch that judges whether to just answer, steer the turn, or stop it instead of queuing it (Alt+Enter still queues a follow-up).
+
 ## [1.70.0] - 2026-11-26
 
 ### Added
