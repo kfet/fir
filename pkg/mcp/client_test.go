@@ -290,9 +290,9 @@ func TestManager_RootsAdvertised(t *testing.T) {
 	assert.Equal(t, wantURI, roots[0])
 }
 
-// TestManager_RootsDefaultToCWD verifies that when no roots are configured,
-// the process working directory is used as the default root.
-func TestManager_RootsDefaultToCWD(t *testing.T) {
+// TestManager_StatelessNoDefaultRoot verifies that with no roots configured,
+// a stateless (2026-07-28) server gets no cwd root.
+func TestManager_StatelessNoDefaultRoot(t *testing.T) {
 	server := sdk.NewServer(&sdk.Implementation{Name: "roots-default", Version: "0"}, nil)
 	server.AddTool(
 		&sdk.Tool{Name: "noop", InputSchema: json.RawMessage(`{"type":"object","properties":{}}`)},
@@ -307,9 +307,7 @@ func TestManager_RootsDefaultToCWD(t *testing.T) {
 	startAndWait(t, mgr, ctx)
 	defer mgr.Close()
 
-	roots := callRootsEcho(t, ctx, mgr)
-	require.Len(t, roots, 1, "expected exactly one default root")
-	assert.True(t, strings.HasPrefix(roots[0], "file:///"), "root URI must be a file:// URI")
+	assert.Empty(t, callRootsEcho(t, ctx, mgr))
 }
 
 // TestCommandTransport_EnvInheritsParent verifies that commandTransport merges

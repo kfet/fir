@@ -1249,6 +1249,13 @@ func (m *Manager) dialAndInitialize(ctx context.Context, name string, cfg Server
 	return nil, nil, nil, err
 }
 
+// isStateless reports whether the session negotiated the stateless protocol
+// (2026-07-28, SEP-2575) or later.
+func isStateless(session *sdk.ClientSession) bool {
+	r := session.InitializeResult()
+	return r != nil && r.ProtocolVersion >= "2026-07-28"
+}
+
 // serverSupportsLogging reports whether the server declared the logging
 // capability in its initialize result.
 func serverSupportsLogging(session *sdk.ClientSession) bool {
@@ -1306,12 +1313,11 @@ func (m *Manager) dialOnce(ctx context.Context, name string, cfg ServerConfig) (
 	transport = et
 	client := sdk.NewClient(&sdk.Implementation{Name: "fir", Version: Version}, opts)
 
+	// Roots tell a server which directories it may work in. With no roots
+	// configured, fir offers the cwd, but only to legacy servers that may
+	// rely on it. Roots are deprecated (SEP-2577), so stateless servers get
+	// only roots the config sets; the cwd would just leak a local path.
 	rootURIs := cfg.Roots
-	if len(rootURIs) == 0 {
-		if cwd, err := os.Getwd(); err == nil {
-			rootURIs = []string{(&url.URL{Scheme: "file", Path: cwd}).String()}
-		}
-	}
 	roots := make([]*sdk.Root, 0, len(rootURIs))
 	for _, uri := range rootURIs {
 		roots = append(roots, &sdk.Root{URI: uri})
@@ -1323,6 +1329,14 @@ func (m *Manager) dialOnce(ctx context.Context, name string, cfg ServerConfig) (
 	session, err := client.Connect(ctx, transport, nil)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("connect: %w", err)
+	}
+	// Add the cwd root after connect, once the protocol is known, so a
+	// stateless server never sees it or a roots/list_changed for it. A legacy
+	// server gets list_changed and lists again.
+	if len(cfg.Roots) == 0 && !isStateless(session) {
+		if cwd, err := os.Getwd(); err == nil {
+			client.AddRoots(&sdk.Root{URI: (&url.URL{Scheme: "file", Path: cwd}).String()})
+		}
 	}
 
 	// logging/setLevel is not sent: SEP-2577 deprecates logging, and the

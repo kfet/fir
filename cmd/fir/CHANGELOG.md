@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- MCP: fir no longer sends its working directory as a default root to servers on the stateless protocol (2026-07-28). Roots are deprecated (SEP-2577), and the cwd sent a local path to remote servers. Servers on older protocols still get the cwd root, and roots set in the config are sent to all servers.
+
 ## [1.71.0] - 2026-11-27
 
 ### Removed
