@@ -2,8 +2,11 @@
 
 ## [Unreleased]
 
+## [1.70.1] - 2026-11-26
+
 ### Changed
 
+- Model catalog: 15 models with changed pricing/limits (huggingface: DeepSeek-V4-Flash, DeepSeek-V4-Pro, gemma-4-31B-it, MiniMax-M3, GLM-5.2; openrouter: deepseek-v4.1-flash, deepseek-v4-pro, gemma-4-26b-a4b-it, llama-3.3-70b-instruct, hy3, +5 more).
 - TUI: a message typed during a running turn gets a quick reply from a session branch that judges whether to just answer, steer the turn, or stop it instead of queuing it (Alt+Enter still queues a follow-up).
 
 ## [1.70.0] - 2026-11-26
