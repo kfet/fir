@@ -2,9 +2,15 @@
 
 ## [Unreleased]
 
+## [1.70.2] - 2026-11-27
+
 ### Fixed
 
 - MCP: fir sends `logging/setLevel` only to servers that declare the `logging` capability. Before, a server without it (e.g. Atlassian's v2 endpoint) could answer with a bare HTTP 400, which closed the connection, so none of its tools loaded. If `setLevel` fails and the connection then breaks, fir redials once without it.
+
+### Changed
+
+- Model catalog: added `huggingface/XiaomiMiMo/MiMo-V2.6-Flash-MOPD`, `huggingface/inclusionAI/LingSante-3.1-air-VL` (+1 on aggregators); removed 1 aggregator model; 20 models with changed pricing/limits.
 
 ## [1.70.1] - 2026-11-26
 
