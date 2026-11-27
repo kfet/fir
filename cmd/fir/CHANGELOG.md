@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.70.3] - 2026-11-27
+
 ### Fixed
 
 - MCP: on the stateless protocol (2026-07-28, SEP-2575), fir no longer sends `logging/setLevel`. It puts the log level in each request's `_meta` instead, and only for servers that declare `logging`. Before, fir sent `setLevel` to stateless servers too.
@@ -10,6 +12,7 @@
 ### Changed
 
 - MCP: fir logs a debug line when a server uses a feature that MCP deprecates: logging and sampling (SEP-2577), or the HTTP+SSE transport.
+- Model catalog: 5 models with changed pricing/limits.
 
 ## [1.70.2] - 2026-11-27
 
