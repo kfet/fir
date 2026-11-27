@@ -660,6 +660,7 @@ func (m *Manager) hasSession(name string) bool {
 func (m *Manager) createTransport(name string, cfg ServerConfig) (sdk.Transport, error) {
 	switch cfg.Transport {
 	case "sse":
+		firlog.Debug("mcp: HTTP+SSE transport is deprecated since MCP 2025-03-26; use \"streamable\"", "server", name)
 		if cfg.URL == "" {
 			return nil, fmt.Errorf("url is required for sse transport")
 		}
@@ -910,7 +911,7 @@ func (m *Manager) clientOptions(serverName string) *sdk.ClientOptions {
 		PromptListChangedHandler: func(_ context.Context, _ *sdk.PromptListChangedRequest) {
 			firlog.Debug("MCP prompt list changed", "server", serverName)
 		},
-		CreateMessageHandler: m.SamplingFn,
+		CreateMessageHandler: deprecatedSampling(serverName, m.SamplingFn),
 		// Ping the server periodically to detect dead connections.
 		KeepAlive: 30 * time.Second,
 	}
@@ -1263,6 +1264,15 @@ func (m *Manager) dialAndInitialize(ctx context.Context, name string, cfg Server
 	return nil, nil, nil, err
 }
 
+// statelessProtocol is the first MCP version without sessions (SEP-2575).
+const statelessProtocol = "2026-07-28"
+
+// isStateless reports whether the session negotiated the stateless protocol.
+func isStateless(session *sdk.ClientSession) bool {
+	r := session.InitializeResult()
+	return r != nil && r.ProtocolVersion >= statelessProtocol
+}
+
 // serverSupportsLogging reports whether the server declared the logging
 // capability in its initialize result.
 func serverSupportsLogging(session *sdk.ClientSession) bool {
@@ -1322,7 +1332,7 @@ func (m *Manager) dialOnce(ctx context.Context, name string, cfg ServerConfig, s
 		et.tasks = &taskRunner{server: name, elicit: elicitFn, sample: m.SamplingFn}
 	}
 	transport = et
-	client := sdk.NewClient(&sdk.Implementation{Name: "fir", Version: "dev"}, opts)
+	client := sdk.NewClient(&sdk.Implementation{Name: "fir", Version: Version}, opts)
 
 	rootURIs := cfg.Roots
 	if len(rootURIs) == 0 {
@@ -1348,7 +1358,17 @@ func (m *Manager) dialOnce(ctx context.Context, name string, cfg ServerConfig, s
 	// answer with a bare HTTP error, which the SDK treats as fatal to the
 	// connection.
 	var logLevelErr error
-	if setLogLevel && serverSupportsLogging(session) {
+	stateless := isStateless(session)
+	if serverSupportsLogging(session) {
+		firlog.Debug("mcp: server declares deprecated logging capability (SEP-2577)", "server", name)
+	}
+	if stateless && serverSupportsLogging(session) {
+		// Stateless protocol: no session to set a level on. The level
+		// rides on each request's _meta instead.
+		lvl := m.loggingLevel()
+		et.logLevel.Store(&lvl)
+	}
+	if setLogLevel && !stateless && serverSupportsLogging(session) {
 		if logLevelErr = session.SetLoggingLevel(ctx, &sdk.SetLoggingLevelParams{
 			Level: m.loggingLevel(),
 		}); logLevelErr != nil {
@@ -1934,4 +1954,19 @@ func (m *Manager) HasServerToolParam(serverName, toolName, paramName string) boo
 		return false
 	}
 	return false
+}
+
+// deprecatedSampling wraps fn to log that the server used sampling, which
+// SEP-2577 deprecates. A nil fn stays nil so fir does not advertise sampling.
+func deprecatedSampling(server string, fn func(context.Context, *sdk.CreateMessageRequest) (*sdk.CreateMessageResult, error)) func(context.Context, *sdk.CreateMessageRequest) (*sdk.CreateMessageResult, error) {
+	if fn == nil {
+		return nil
+	}
+	var once sync.Once
+	return func(ctx context.Context, req *sdk.CreateMessageRequest) (*sdk.CreateMessageResult, error) {
+		once.Do(func() {
+			firlog.Debug("mcp: server uses deprecated sampling (SEP-2577)", "server", server)
+		})
+		return fn(ctx, req)
+	}
 }

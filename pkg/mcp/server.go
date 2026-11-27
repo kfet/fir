@@ -21,7 +21,7 @@ import (
 //	t := sdk.NewStdioTransport()
 //	srv.Run(ctx, t)
 func NewToolServer(tools []agent.AgentTool) *sdk.Server {
-	impl := &sdk.Implementation{Name: "fir", Version: "dev"}
+	impl := &sdk.Implementation{Name: "fir", Version: Version}
 	server := sdk.NewServer(impl, nil)
 	for i := range tools {
 		registerTool(server, &tools[i])

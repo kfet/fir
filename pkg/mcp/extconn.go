@@ -39,6 +39,9 @@ type extTransport struct {
 	// no front end can answer, so the SDK's handler only ever declines.
 	hideElicit bool
 	conn       atomic.Pointer[extConnection]
+	// logLevel, when set, is added as per-request _meta on stateless
+	// (2026-07-28+) requests, which replaces logging/setLevel.
+	logLevel atomic.Pointer[sdk.LoggingLevel]
 }
 
 func (t *extTransport) Connect(ctx context.Context) (sdk.Connection, error) {
@@ -48,6 +51,7 @@ func (t *extTransport) Connect(ctx context.Context) (sdk.Connection, error) {
 	}
 	c := newExtConnection(inner, t.tasks)
 	c.hideElicit = t.hideElicit
+	c.logLevel = &t.logLevel
 	t.conn.Store(c)
 	return c, nil
 }
@@ -64,6 +68,7 @@ type extConnection struct {
 	sdk.Connection
 	tasks      *taskRunner
 	hideElicit bool
+	logLevel   *atomic.Pointer[sdk.LoggingLevel]
 
 	in     chan readResult // messages for the SDK, in order
 	inject chan jsonrpc.Message
@@ -189,6 +194,13 @@ func (c *extConnection) Write(ctx context.Context, msg jsonrpc.Message) error {
 		if c.hideElicit && len(req.Params) > 0 {
 			if p, changed := stripElicitationCap(req.Params); changed {
 				req.Params = p
+			}
+		}
+		if c.logLevel != nil && req.ID.IsValid() {
+			if lvl := c.logLevel.Load(); lvl != nil {
+				if p, changed := addLogLevelMeta(req.Params, *lvl); changed {
+					req.Params = p
+				}
 			}
 		}
 		switch {
@@ -341,6 +353,37 @@ func dropKey(raw json.RawMessage, key string) (json.RawMessage, bool) {
 	out, err := json.Marshal(obj)
 	if err != nil {
 		return raw, false
+	}
+	return out, true
+}
+
+// addLogLevelMeta adds the per-request log level to params of a stateless
+// request: one whose _meta carries a protocol version. Requests without one
+// belong to a legacy session, where logging/setLevel sets the level instead.
+func addLogLevelMeta(params json.RawMessage, lvl sdk.LoggingLevel) (json.RawMessage, bool) {
+	var p map[string]json.RawMessage
+	if len(params) == 0 || json.Unmarshal(params, &p) != nil {
+		return params, false
+	}
+	var meta map[string]json.RawMessage
+	if raw, ok := p["_meta"]; !ok || json.Unmarshal(raw, &meta) != nil {
+		return params, false
+	}
+	if _, ok := meta[sdk.MetaKeyProtocolVersion]; !ok {
+		return params, false
+	}
+	if _, ok := meta[sdk.MetaKeyLogLevel]; ok {
+		return params, false
+	}
+	meta[sdk.MetaKeyLogLevel], _ = json.Marshal(lvl)
+	rawMeta, err := json.Marshal(meta)
+	if err != nil {
+		return params, false
+	}
+	p["_meta"] = rawMeta
+	out, err := json.Marshal(p)
+	if err != nil {
+		return params, false
 	}
 	return out, true
 }

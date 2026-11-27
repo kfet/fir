@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/kfet/agent/tools"
+	"github.com/kfet/fir/pkg/mcp"
 	printmode "github.com/kfet/fir/pkg/modes/print"
 )
 
@@ -157,6 +158,7 @@ type errExitCode int
 func (e errExitCode) Error() string { return fmt.Sprintf("exit status %d", int(e)) }
 
 func main() {
+	mcp.Version = version
 	if err := applyAgentDirFlag(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
