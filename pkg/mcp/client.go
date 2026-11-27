@@ -771,14 +771,6 @@ func (m *Manager) Start(ctx context.Context) {
 	})
 }
 
-// loggingLevel returns the MCP logging level to request from servers.
-func (m *Manager) loggingLevel() sdk.LoggingLevel {
-	if m.verbose {
-		return "debug"
-	}
-	return "warning"
-}
-
 // subscribeOnce returns a subscribeFunc that subscribes to a resource URI at
 // most once per server. It uses the serverEntry's subscribed map.
 func (m *Manager) subscribeOnce(session *sdk.ClientSession, serverName string) subscribeFunc {
@@ -1235,14 +1227,7 @@ func reconnectBackoff(attempt int) time.Duration {
 // fails with an *AuthRequiredError naming `fir mcp login <server>`. No browser
 // is opened here — see SetAuth.
 func (m *Manager) dialAndInitialize(ctx context.Context, name string, cfg ServerConfig) (*sdk.ClientSession, []agent.AgentTool, *sdk.ServerCapabilities, error) {
-	session, tools, caps, err := m.dialOnce(ctx, name, cfg, true)
-	if errors.Is(err, errLogLevelBrokeConn) {
-		// logging/setLevel failed and the connection was then unusable;
-		// the failed optional call is the likely cause. Redial once without
-		// it so one bad optional method does not cost every tool.
-		firlog.Warn("mcp: dial failed after logging/setLevel failed; retrying without setLevel", "server", name, "err", err)
-		session, tools, caps, err = m.dialOnce(ctx, name, cfg, false)
-	}
+	session, tools, caps, err := m.dialOnce(ctx, name, cfg)
 	if err == nil {
 		// A background 401 (e.g. on the standalone SSE stream) may have
 		// recorded an auth requirement that this successful dial disproves.
@@ -1262,15 +1247,6 @@ func (m *Manager) dialAndInitialize(ctx context.Context, name string, cfg Server
 		return nil, nil, nil, authErr
 	}
 	return nil, nil, nil, err
-}
-
-// statelessProtocol is the first MCP version without sessions (SEP-2575).
-const statelessProtocol = "2026-07-28"
-
-// isStateless reports whether the session negotiated the stateless protocol.
-func isStateless(session *sdk.ClientSession) bool {
-	r := session.InitializeResult()
-	return r != nil && r.ProtocolVersion >= statelessProtocol
 }
 
 // serverSupportsLogging reports whether the server declared the logging
@@ -1297,13 +1273,9 @@ func (m *Manager) pendingAuthError(name string, dialErr error) *AuthRequiredErro
 	return nil
 }
 
-// errLogLevelBrokeConn marks a dial that failed after logging/setLevel failed:
-// the setLevel error is the likely cause, so the caller may redial without it.
-var errLogLevelBrokeConn = errors.New("connection lost after logging/setLevel failed")
-
 // dialOnce performs a single Connect → list-tools → assemble-tools sequence.
 // See dialAndInitialize for the OAuth retry that wraps it.
-func (m *Manager) dialOnce(ctx context.Context, name string, cfg ServerConfig, setLogLevel bool) (*sdk.ClientSession, []agent.AgentTool, *sdk.ServerCapabilities, error) {
+func (m *Manager) dialOnce(ctx context.Context, name string, cfg ServerConfig) (*sdk.ClientSession, []agent.AgentTool, *sdk.ServerCapabilities, error) {
 	transport, err := m.dialFn(name, cfg)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("create transport: %w", err)
@@ -1353,27 +1325,11 @@ func (m *Manager) dialOnce(ctx context.Context, name string, cfg ServerConfig, s
 		return nil, nil, nil, fmt.Errorf("connect: %w", err)
 	}
 
-	// Best-effort logging level. The spec allows logging/setLevel only when
-	// the server declares the logging capability; servers that do not may
-	// answer with a bare HTTP error, which the SDK treats as fatal to the
-	// connection.
-	var logLevelErr error
-	stateless := isStateless(session)
+	// logging/setLevel is not sent: SEP-2577 deprecates logging, and the
+	// stateless protocol has no session to set a level on. Messages a
+	// server sends anyway still reach LoggingMessageHandler.
 	if serverSupportsLogging(session) {
 		firlog.Debug("mcp: server declares deprecated logging capability (SEP-2577)", "server", name)
-	}
-	if stateless && serverSupportsLogging(session) {
-		// Stateless protocol: no session to set a level on. The level
-		// rides on each request's _meta instead.
-		lvl := m.loggingLevel()
-		et.logLevel.Store(&lvl)
-	}
-	if setLogLevel && !stateless && serverSupportsLogging(session) {
-		if logLevelErr = session.SetLoggingLevel(ctx, &sdk.SetLoggingLevelParams{
-			Level: m.loggingLevel(),
-		}); logLevelErr != nil {
-			firlog.Debug("MCP SetLoggingLevel failed", "server", name, "err", logLevelErr)
-		}
 	}
 
 	var tools []agent.AgentTool
@@ -1381,9 +1337,6 @@ func (m *Manager) dialOnce(ctx context.Context, name string, cfg ServerConfig, s
 	for tool, terr := range session.Tools(ctx, nil) {
 		if terr != nil {
 			_ = session.Close()
-			if logLevelErr != nil {
-				return nil, nil, nil, fmt.Errorf("list tools: %w (%w: %v)", terr, errLogLevelBrokeConn, logLevelErr)
-			}
 			return nil, nil, nil, fmt.Errorf("list tools: %w", terr)
 		}
 		tools = append(tools, m.adaptTool(name, tool, fx))

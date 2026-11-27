@@ -507,16 +507,6 @@ func TestManager_LoggingHandler(t *testing.T) {
 	}
 }
 
-// TestManager_LoggingLevelVerbose verifies that loggingLevel() returns "debug"
-// when verbose=true and "warning" otherwise.
-func TestManager_LoggingLevelVerbose(t *testing.T) {
-	mgr := NewManager(nil, true)
-	assert.Equal(t, sdk.LoggingLevel("debug"), mgr.loggingLevel())
-
-	mgr2 := NewManager(nil, false)
-	assert.Equal(t, sdk.LoggingLevel("warning"), mgr2.loggingLevel())
-}
-
 // TestCreateTransport_Stdio verifies that the default transport (no Transport
 // field set) produces a *sdk.CommandTransport with the correct command.
 func TestCreateTransport_Stdio(t *testing.T) {

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Removed
+
+- MCP: fir no longer sets a server log level, neither with `logging/setLevel` nor with the per-request `_meta` log level, and it no longer redials without `setLevel`. SEP-2577 deprecates MCP logging. fir still records log messages that a server sends.
+
 ## [1.70.3] - 2026-11-27
 
 ### Fixed
