@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # ---
 # name: ctx
-# description: Context provenance — log which prompt chunks the model cites, card + /ctx report, periodic trim review
+# description: Context provenance — log which prompt chunks the model cites, card + /ctx report, findings hints
 # builtin: true
 # ---
 """ctx — context provenance.
@@ -21,16 +21,23 @@ This extension adds:
   idle, duplicates).
 * ``/ctx`` — report across sessions: tokens, cite rate, duplicates, per
   model, sorted by cost.
-* a review prompt once a model has ``reeval_turns`` turns of new data:
-  asks for trim/dedupe proposals as a diff with evidence. Never applies
-  anything. Chunks matching ``pinned`` patterns are listed as
-  non-trimmable. Per-model scores are kept in ``ctx-state.json``.
+* findings — trim/dedupe candidates, gated by trust: duplicates (same
+  text under several owners) and cost outliers (large chunk on most
+  turns) always; "never cited" only once >=5% of turns carry cites.
+  Tool results and user messages are stats only, never candidates.
+* a one-line ``[ctx]`` hint (max one per agent turn, once per finding per
+  session) when the agent reads/edits a file that owns a finding:
+  AGENTS.md, a SKILL.md, or an extension source (by frontmatter name).
+* ``ctx_report(owner?, action?)`` — detail, dismiss or snooze.
+* a one-line ``[interrupt:ctx]`` nudge at agent_end, once per new or
+  changed finding. Never prepends, never starts a turn.
 
 Config (``ctx.json`` in the fir config dir, all optional)::
 
-    {"reeval_turns": 300, "pinned": ["system prompt:*", "*auth*"]}
+    {"nudge": true, "pinned": ["system prompt:*", "*auth*"]}
 
-``FIR_CTX_REEVAL_TURNS`` overrides ``reeval_turns`` (0 disables).
+``FIR_CTX_NUDGE=0`` disables the nudge. Nudge/dismiss/snooze state lives
+in the global ``ctx-state.json``.
 """
 
 from __future__ import annotations
@@ -41,11 +48,11 @@ import glob
 import json
 import os
 import tempfile
+import time
 from typing import Any
 
 import fir_ext
 
-DEFAULT_REEVAL_TURNS = 300
 DEFAULT_PINNED = [
     "system prompt:*",
     "*auth*",
@@ -272,30 +279,199 @@ def sessions_root(session_file: str) -> str:
     return os.path.dirname(os.path.dirname(session_file)) if session_file else ""
 
 
-def load_logs(root: str) -> list[Log]:
-    logs = []
-    for p in glob.glob(os.path.join(root, "*", "ctx-*.jsonl")):
-        log = Log(p)
-        log.refresh()
-        logs.append(log)
-    return logs
+# ---------------------------------------------------------------------------
+# Findings
+#
+# A finding is a trim/dedupe candidate owned by one chunk group (label).
+# Trust gates which kinds exist:
+#   dup  — same text under several owners; always valid.
+#   cost — a large chunk present on most turns; valid.
+#   rare — present often, never cited; only once cite coverage is meaningful,
+#          because models rarely call ctx_used.
+# Tool results and user messages stay in the stats but are never candidates.
+
+NON_TRIM = {"tool result", "user msg"}
+COST_MIN_TOK = 3000  # chunk size (tokens per appearance)
+COST_MIN_PRESENT = 0.5  # fraction of turns
+RARE_MIN_COVERAGE = 0.05  # fraction of turns with any cite
+RARE_MIN_TOK = 1000
+RARE_MIN_PRESENT = 20
+FINDINGS_TTL = 600.0  # seconds between cross-session recomputes
+EXT_SOURCES = {"tool schema", "SYS_EXT section", "SYS_EXT", "lesson"}
+READ_TOOLS = {"read", "edit", "write", "multiedit"}
+
+
+def totals(agg: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """Merge per-model aggregates into one."""
+    out: dict[str, Any] = {"turns": 0, "cited_turns": 0, "groups": {}, "dups": {}}
+    for a in agg.values():
+        out["turns"] += a["turns"]
+        out["cited_turns"] += a["cited_turns"]
+        for name, g in a["groups"].items():
+            t = out["groups"].setdefault(name, dict(g, tokens=0, present=0, cited=0))
+            for k in ("tokens", "present", "cited"):
+                t[k] += g[k]
+        for addr, d in a["dups"].items():
+            t = out["dups"].setdefault(addr, {"labels": d["labels"], "tokens": 0})
+            t["tokens"] += d["tokens"]
+    return out
+
+
+def findings(agg: dict[str, dict[str, Any]], pinned: list[str]) -> dict[str, dict[str, Any]]:
+    """id -> finding {id, kind, label, source, owner, sig, tokens, text}."""
+    tot = totals(agg)
+    turns = max(tot["turns"], 1)
+    groups = tot["groups"]
+    trim = {n: g for n, g in groups.items() if g.get("source") not in NON_TRIM}
+    out: dict[str, dict[str, Any]] = {}
+
+    def add(kind: str, name: str, sig: str, tokens: int, text: str) -> None:
+        g = trim[name]
+        fid = f"{kind}:{name}"
+        out[fid] = {
+            "id": fid,
+            "kind": kind,
+            "label": name,
+            "source": g.get("source", ""),
+            "owner": g.get("owner", ""),
+            "sig": sig,
+            "tokens": int(tokens),
+            "text": text,
+        }
+
+    per: dict[str, dict[str, Any]] = {}
+    for d in tot["dups"].values():
+        labels = [n for n in d["labels"] if n in trim]
+        if len(labels) < 2:
+            continue
+        for n in labels:
+            e = per.setdefault(n, {"chunks": 0, "tokens": 0, "with": set()})
+            e["chunks"] += 1
+            e["tokens"] += d["tokens"]
+            e["with"].update(x for x in labels if x != n)
+    for n, e in per.items():
+        partners = sorted(e["with"])
+        add(
+            "dup",
+            n,
+            f"{e['chunks']}|{','.join(partners)}",
+            e["tokens"],
+            f"{e['chunks']} chunk{'s' if e['chunks'] > 1 else ''} duplicated with "
+            f"{', '.join(partners[:3])}, ~{kfmt(e['tokens'])} tok",
+        )
+
+    coverage = tot["cited_turns"] / turns
+    for n, g in trim.items():
+        if is_pinned(g, pinned) or not g["present"]:
+            continue
+        size = g["tokens"] / g["present"]
+        frac = g["present"] / turns
+        if size >= COST_MIN_TOK and frac >= COST_MIN_PRESENT:
+            add(
+                "cost",
+                n,
+                str(int(size).bit_length()),
+                g["tokens"],
+                f"{kfmt(size)} tok on {int(100 * frac)}% of turns, ~{kfmt(g['tokens'])} tok",
+            )
+        if (
+            coverage >= RARE_MIN_COVERAGE
+            and size >= RARE_MIN_TOK
+            and g["present"] >= RARE_MIN_PRESENT
+            and g["cited"] == 0
+        ):
+            add(
+                "rare",
+                n,
+                "0",
+                g["tokens"],
+                f"never cited in {g['present']} turns, ~{kfmt(g['tokens'])} tok",
+            )
+    return out
+
+
+def by_owner(fs: dict[str, dict[str, Any]], owner: str) -> list[dict[str, Any]]:
+    """Findings whose label, owner or owner basename matches ``owner``."""
+    o = owner.strip().lower()
+    out = []
+    for f in fs.values():
+        own = str(f["owner"]).lower()
+        if o in (f["label"].lower(), own, os.path.basename(own.rstrip("/"))):
+            out.append(f)
+    return sorted(out, key=lambda f: -f["tokens"])
+
+
+# ---------------------------------------------------------------------------
+# Owner -> file mapping
+
+
+def ext_name_of(path: str) -> str:
+    """Frontmatter ``name`` of an extension script, or "" when not one."""
+    if os.path.splitext(path)[1] not in (".py", ".sh", ".js", ".ts", ".mjs"):
+        return ""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            head = f.read(3000).splitlines()
+    except OSError:
+        return ""
+    inside = False
+    for ln in head[:40]:
+        t = ln.strip().lstrip("#/").strip()
+        if t == "---":
+            if inside:
+                return ""
+            inside = True
+        elif inside and t.startswith("name:"):
+            return t[5:].strip().strip("'\"")
+    return ""
+
+
+def _same_file(a: str, b: str) -> bool:
+    try:
+        return os.path.realpath(a) == os.path.realpath(b)
+    except (OSError, ValueError):
+        return False
+
+
+def owns(path: str, f: dict[str, Any], ext: str | None = None) -> bool:
+    """Does the file at ``path`` own finding ``f``'s chunk?"""
+    src, owner = f.get("source", ""), str(f.get("owner", ""))
+    if src in ("AGENTS.md", "skill read"):
+        return bool(owner) and os.path.isabs(owner) and _same_file(path, owner)
+    if src in EXT_SOURCES:
+        name = ext_name_of(path) if ext is None else ext
+        return bool(name) and name == owner
+    return False
+
+
+def findings_for_path(path: str, fs: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    ext = ext_name_of(path)
+    return sorted((f for f in fs.values() if owns(path, f, ext)), key=lambda f: -f["tokens"])
+
+
+def hint_line(path: str, owned: list[dict[str, Any]]) -> str:
+    f = owned[0]
+    owner = os.path.basename(str(f["owner"])) or f["label"]
+    what = f["text"]
+    if len(owned) > 1:
+        tok = sum(x["tokens"] for x in owned)
+        what = f"{len(owned)} findings ~{kfmt(tok)} tok, top: {what}"
+    return f'[ctx] {os.path.basename(path)}: {what} — ctx_report(owner="{owner}") for detail'
 
 
 # ---------------------------------------------------------------------------
 # Config / state
 
 
-def settings() -> tuple[int, list[str]]:
+def settings() -> tuple[bool, list[str]]:
     cfg = fir_ext.load_config() or {}
-    turns = int(cfg.get("reeval_turns", DEFAULT_REEVAL_TURNS) or 0)
-    env = os.environ.get("FIR_CTX_REEVAL_TURNS", "")
-    if env.strip():
-        with contextlib.suppress(ValueError):
-            turns = int(env)
+    nudge = bool(cfg.get("nudge", True))
+    if os.environ.get("FIR_CTX_NUDGE", "").strip() == "0":
+        nudge = False
     pinned = cfg.get("pinned")
     if not isinstance(pinned, list):
         pinned = DEFAULT_PINNED
-    return turns, [str(p) for p in pinned]
+    return nudge, [str(p) for p in pinned]
 
 
 def state_path() -> str | None:
@@ -325,26 +501,19 @@ def save_state(state: dict[str, Any]) -> None:
     os.replace(tmp, p)
 
 
-REVIEW_PROMPT = """\
-[ctx review] {model}: {turns} new turns of prompt-provenance data. Propose \
-trims/dedupes of rarely-cited, costly chunks as a unified diff against the \
-owning files (AGENTS.md, skills, sections, tool descriptions), each with its \
-evidence (tokens/turn, cite%, duplicates). Proposals only — do not apply. \
-PINNED chunks are not trimmable. Cites are a log, not ground truth.
-{report}"""
-
-
 # ---------------------------------------------------------------------------
 # Session wiring
 
 _log: Log | None = None
-_counted = 0  # turns of _log already added to per-model counters
+_logs: dict[str, Log] = {}  # cross-session cache, refreshed incrementally
+_findings: dict[str, dict[str, Any]] = {}
+_findings_at = 0.0
+_hinted_turn = False  # one ctx line per agent turn
+_hinted: set[str] = set()  # finding ids already hinted this session
 
 
-def session_log(ctx: fir_ext.Context, resumed: bool = False) -> Log | None:
-    """This session's log. ``resumed``: turns already on disk were counted
-    by the session that wrote them (set at session start)."""
-    global _log, _counted
+def session_log(ctx: fir_ext.Context) -> Log | None:
+    global _log
     sf = ctx.get_session_file()
     sid = ctx.get_session_id()
     if not sf or not sid:
@@ -352,11 +521,31 @@ def session_log(ctx: fir_ext.Context, resumed: bool = False) -> Log | None:
     path = os.path.join(os.path.dirname(sf), f"ctx-{sid}.jsonl")
     if _log is None or _log.path != path:
         _log = Log(path)
-        _log.refresh()
-        _counted = len(_log.turns) if resumed else 0
-    else:
-        _log.refresh()
+    _log.refresh()
     return _log
+
+
+def all_logs(root: str) -> list[Log]:
+    for p in glob.glob(os.path.join(root, "*", "ctx-*.jsonl")):
+        if p not in _logs:
+            _logs[p] = Log(p)
+        _logs[p].refresh()
+    return list(_logs.values())
+
+
+def current_findings(ctx: fir_ext.Context, force: bool = False) -> dict[str, dict[str, Any]]:
+    global _findings, _findings_at
+    now = time.time()
+    if force or not _findings_at or now - _findings_at >= FINDINGS_TTL:
+        _, pinned = settings()
+        root = sessions_root(ctx.get_session_file())
+        _findings = findings(aggregate(all_logs(root)), pinned) if root else {}
+        _findings_at = now
+    return _findings
+
+
+def detail(fs: list[dict[str, Any]]) -> str:
+    return "\n".join(f"- [{f['id']}] {f['source']}:{f['owner']} — {f['text']}" for f in fs)
 
 
 @fir_ext.tool(
@@ -400,10 +589,83 @@ def ctx_used(params: dict[str, Any], ctx: fir_ext.Context) -> dict[str, Any]:
     return {"ok": True, "unknown": unknown} if unknown else {"ok": True}
 
 
+@fir_ext.tool(
+    name="ctx_report",
+    description=(
+        "Prompt-cost findings (duplicated or costly chunks) and their owning "
+        'files. Call when the user says "ctx review" or a [ctx] line points '
+        "here. Propose trims as a diff to the owner; never apply unasked. "
+        "action=dismiss drops findings (ids, or all); action=snooze mutes the "
+        "nudge for days."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "owner": {
+                "type": "string",
+                "description": "e.g. lessons, AGENTS.md, a skill path; omit for all",
+            },
+            "action": {"type": "string", "enum": ["show", "dismiss", "snooze"]},
+            "ids": {"type": "array", "items": {"type": "string"}},
+            "days": {"type": "number"},
+        },
+    },
+)
+def ctx_report(params: dict[str, Any], ctx: fir_ext.Context) -> dict[str, Any]:
+    fs = current_findings(ctx, force=True)
+    action = str(params.get("action") or "show")
+    state = load_state()
+    if action == "snooze":
+        days = float(params.get("days") or 7)
+        state["snooze_until"] = time.time() + days * 86400
+        save_state(state)
+        return {"ok": True, "snoozed_days": days}
+    if action == "dismiss":
+        ids = params.get("ids") or list(fs)
+        dis = state.setdefault("dismissed", {})
+        for i in ids:
+            if i in fs:
+                dis[i] = fs[i]["sig"]
+        save_state(state)
+        return {"ok": True, "dismissed": [i for i in ids if i in fs]}
+    owner = str(params.get("owner") or "").strip()
+    sel = by_owner(fs, owner) if owner else sorted(fs.values(), key=lambda f: -f["tokens"])
+    if not sel:
+        return {"message": f"ctx: no findings{' for ' + owner if owner else ''}"}
+    return {"message": detail(sel)}
+
+
+@fir_ext.on("hook/tool_call")
+def on_tool_call(params: Any, ctx: fir_ext.Context) -> None:
+    """Contextual hint: one line when the agent touches a file that owns a finding."""
+    global _hinted_turn
+    with contextlib.suppress(Exception):  # never block a tool
+        if _hinted_turn or str(params.get("tool_name", "")).lower() not in READ_TOOLS:
+            return
+        path = str((params.get("params") or {}).get("path") or "")
+        if not path:
+            return
+        if not os.path.isabs(path):
+            path = os.path.join(os.getcwd(), path)
+        owned = [f for f in findings_for_path(path, _findings) if f["id"] not in _hinted]
+        if not owned:
+            return
+        _hinted_turn = True
+        _hinted.update(f["id"] for f in owned)
+        ctx.send_message("ctx_hint", hint_line(path, owned), display=True, deliver_as="steer")
+
+
 @fir_ext.on("session_start")
 def on_session_start(params: Any, ctx: fir_ext.Context) -> None:
     with contextlib.suppress(Exception):
-        session_log(ctx, resumed=True)
+        session_log(ctx)
+        current_findings(ctx)
+
+
+@fir_ext.on("agent_start")
+def on_agent_start(params: Any, ctx: fir_ext.Context) -> None:
+    global _hinted_turn
+    _hinted_turn = False
 
 
 @fir_ext.on("turn_end")
@@ -411,67 +673,65 @@ def on_turn_end(params: Any, ctx: fir_ext.Context) -> None:
     log = session_log(ctx)
     if log is None:
         return
-    slug, detail = session_card(log)
+    slug, det = session_card(log)
     if slug:
         with contextlib.suppress(Exception):
-            ctx.put_observable("ctx", slug, detail)
+            ctx.put_observable("ctx", slug, det)
 
 
 @fir_ext.on("agent_end")
 def on_agent_end(params: Any, ctx: fir_ext.Context) -> None:
+    global _hinted_turn
+    _hinted_turn = False
     with contextlib.suppress(Exception):
-        maybe_review(ctx)
+        maybe_nudge(ctx)
 
 
-def maybe_review(ctx: fir_ext.Context) -> None:
-    global _counted
-    log = session_log(ctx)
-    threshold, pinned = settings()
-    if log is None or threshold <= 0:
+def maybe_nudge(ctx: fir_ext.Context) -> None:
+    """One interrupt line when a finding is new or changed. Never prepends."""
+    nudge, _ = settings()
+    if not nudge:
         return
-    new = log.turns[_counted:]
-    _counted = len(log.turns)
+    fs = current_findings(ctx)
+    state = load_state()
+    if time.time() < float(state.get("snooze_until") or 0):
+        return
+    seen = state.setdefault("nudged", {})
+    dis = state.get("dismissed", {})
+    new = [f for f in fs.values() if seen.get(f["id"]) != f["sig"] and dis.get(f["id"]) != f["sig"]]
     if not new:
         return
-    state = load_state()
-    models = state.setdefault("models", {})
-    due = []
-    for t in new:
-        m = models.setdefault(t.get("model", "") or "?", {"turns": 0, "reviewed_at": 0})
-        m["turns"] += 1
-    for name, m in models.items():
-        if m["turns"] - m.get("reviewed_at", 0) >= threshold:
-            due.append(name)
-    for name in due:
-        m = models[name]
-        fresh = m["turns"] - m.get("reviewed_at", 0)
-        m["reviewed_at"] = m["turns"]
-        agg = aggregate(load_logs(sessions_root(ctx.get_session_file())), model=name)
-        if not agg:
-            continue
-        m["scores"] = {
-            k: {
-                "tok_turn": g["tokens"] // max(agg[name]["turns"], 1),
-                "present": g["present"],
-                "cited": g["cited"],
-            }
-            for k, g in agg[name]["groups"].items()
-        }
-        ctx.prepend(
-            REVIEW_PROMPT.format(model=name, turns=fresh, report=render_report(agg, pinned))
-        )
+    for f in new:
+        seen[f["id"]] = f["sig"]
     save_state(state)
+    new.sort(key=lambda f: -f["tokens"])
+    top = new[0]
+    n = len(new)
+    body = (
+        f"[interrupt:ctx] {n} new\n- ctx: {n} finding{'s' if n > 1 else ''} ready "
+        f"({top['kind']} {top['label']} ~{kfmt(top['tokens'])} tok) — "
+        'say "ctx review" to act, or ctx_report action=dismiss/snooze.'
+    )
+    ctx.send_message("ctx_nudge", body, display=True)
 
 
 @fir_ext.command(
     name="ctx",
-    description="Prompt-provenance report across sessions (tokens, cite rate, duplicates, per model)",
+    description="Prompt-provenance report (per model), or /ctx findings | <owner> | <model>",
 )
 def cmd_ctx(args: list[str], ctx: fir_ext.Context) -> dict[str, Any]:
     _, pinned = settings()
-    model = args[0] if args else None
-    agg = aggregate(load_logs(sessions_root(ctx.get_session_file())), model=model)
-    return {"message": render_report(agg, pinned)}
+    agg = aggregate(all_logs(sessions_root(ctx.get_session_file())))
+    if not args:
+        return {"message": render_report(agg, pinned)}
+    arg = args[0]
+    if arg in agg:
+        return {"message": render_report({arg: agg[arg]}, pinned)}
+    fs = findings(agg, pinned)
+    sel = (
+        sorted(fs.values(), key=lambda f: -f["tokens"]) if arg == "findings" else by_owner(fs, arg)
+    )
+    return {"message": detail(sel) if sel else f"ctx: no findings for {arg}"}
 
 
 fir_ext.run(name="ctx")

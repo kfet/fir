@@ -31,13 +31,13 @@ import (
 //	handoff:        3 tools (self_handoff, bookmark, pin)
 //	forge:          1 tool  (forge_tool)
 //	remote:         6 tools (rexec, rjob, rput, rget, rtmux, rhosts)
-//	ctx:            1 tool  (ctx_used)
+//	ctx:            2 tools (ctx_used, ctx_report)
 //
 // (openrouter-auth registers an auth provider but no tools.)
 //
 // The exact composition is tested elsewhere; this constant pins the total
 // for shape-checking tests in this file.
-const builtinToolCount = 34
+const builtinToolCount = 35
 
 // Write a test extension script that responds to the init handshake
 // and then stays alive reading from stdin.

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- ctx: the 300-turn review prompt that was prepended into whatever session crossed it is gone. Findings (duplicates, cost outliers; "never cited" only once ≥5% of turns carry cites) now surface as one `[ctx]` hint line when the agent touches the owning file, one `[interrupt:ctx]` nudge per new finding (dismiss/snooze), and the new `ctx_report` tool / `/ctx findings|<owner>`.
+
 ## [1.71.1] - 2026-11-27
 
 ### Fixed
