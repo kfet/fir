@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- MCP: fir sends `logging/setLevel` only to servers that declare the `logging` capability. Before, a server without it (e.g. Atlassian's v2 endpoint) could answer with a bare HTTP 400, which closed the connection, so none of its tools loaded. If `setLevel` fails and the connection then breaks, fir redials once without it.
+
 ## [1.70.1] - 2026-11-26
 
 ### Changed

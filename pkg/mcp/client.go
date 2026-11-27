@@ -1234,7 +1234,14 @@ func reconnectBackoff(attempt int) time.Duration {
 // fails with an *AuthRequiredError naming `fir mcp login <server>`. No browser
 // is opened here — see SetAuth.
 func (m *Manager) dialAndInitialize(ctx context.Context, name string, cfg ServerConfig) (*sdk.ClientSession, []agent.AgentTool, *sdk.ServerCapabilities, error) {
-	session, tools, caps, err := m.dialOnce(ctx, name, cfg)
+	session, tools, caps, err := m.dialOnce(ctx, name, cfg, true)
+	if errors.Is(err, errLogLevelBrokeConn) {
+		// logging/setLevel failed and the connection was then unusable;
+		// the failed optional call is the likely cause. Redial once without
+		// it so one bad optional method does not cost every tool.
+		firlog.Warn("mcp: dial failed after logging/setLevel failed; retrying without setLevel", "server", name, "err", err)
+		session, tools, caps, err = m.dialOnce(ctx, name, cfg, false)
+	}
 	if err == nil {
 		// A background 401 (e.g. on the standalone SSE stream) may have
 		// recorded an auth requirement that this successful dial disproves.
@@ -1256,6 +1263,13 @@ func (m *Manager) dialAndInitialize(ctx context.Context, name string, cfg Server
 	return nil, nil, nil, err
 }
 
+// serverSupportsLogging reports whether the server declared the logging
+// capability in its initialize result.
+func serverSupportsLogging(session *sdk.ClientSession) bool {
+	r := session.InitializeResult()
+	return r != nil && r.Capabilities != nil && r.Capabilities.Logging != nil
+}
+
 // pendingAuthError returns the *AuthRequiredError recorded for a server, if
 // any. It prefers the recorded value over unwrapping dialErr because the SDK
 // funnels transport errors through several layers and we do not want to depend
@@ -1273,9 +1287,13 @@ func (m *Manager) pendingAuthError(name string, dialErr error) *AuthRequiredErro
 	return nil
 }
 
+// errLogLevelBrokeConn marks a dial that failed after logging/setLevel failed:
+// the setLevel error is the likely cause, so the caller may redial without it.
+var errLogLevelBrokeConn = errors.New("connection lost after logging/setLevel failed")
+
 // dialOnce performs a single Connect → list-tools → assemble-tools sequence.
 // See dialAndInitialize for the OAuth retry that wraps it.
-func (m *Manager) dialOnce(ctx context.Context, name string, cfg ServerConfig) (*sdk.ClientSession, []agent.AgentTool, *sdk.ServerCapabilities, error) {
+func (m *Manager) dialOnce(ctx context.Context, name string, cfg ServerConfig, setLogLevel bool) (*sdk.ClientSession, []agent.AgentTool, *sdk.ServerCapabilities, error) {
 	transport, err := m.dialFn(name, cfg)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("create transport: %w", err)
@@ -1325,11 +1343,17 @@ func (m *Manager) dialOnce(ctx context.Context, name string, cfg ServerConfig) (
 		return nil, nil, nil, fmt.Errorf("connect: %w", err)
 	}
 
-	// Best-effort logging level.
-	if lerr := session.SetLoggingLevel(ctx, &sdk.SetLoggingLevelParams{
-		Level: m.loggingLevel(),
-	}); lerr != nil {
-		firlog.Debug("MCP SetLoggingLevel not supported", "server", name, "err", lerr)
+	// Best-effort logging level. The spec allows logging/setLevel only when
+	// the server declares the logging capability; servers that do not may
+	// answer with a bare HTTP error, which the SDK treats as fatal to the
+	// connection.
+	var logLevelErr error
+	if setLogLevel && serverSupportsLogging(session) {
+		if logLevelErr = session.SetLoggingLevel(ctx, &sdk.SetLoggingLevelParams{
+			Level: m.loggingLevel(),
+		}); logLevelErr != nil {
+			firlog.Debug("MCP SetLoggingLevel failed", "server", name, "err", logLevelErr)
+		}
 	}
 
 	var tools []agent.AgentTool
@@ -1337,6 +1361,9 @@ func (m *Manager) dialOnce(ctx context.Context, name string, cfg ServerConfig) (
 	for tool, terr := range session.Tools(ctx, nil) {
 		if terr != nil {
 			_ = session.Close()
+			if logLevelErr != nil {
+				return nil, nil, nil, fmt.Errorf("list tools: %w (%w: %v)", terr, errLogLevelBrokeConn, logLevelErr)
+			}
 			return nil, nil, nil, fmt.Errorf("list tools: %w", terr)
 		}
 		tools = append(tools, m.adaptTool(name, tool, fx))
